@@ -86,10 +86,7 @@ static bool _decode_array_element_type_info(const Variant& p_encoded, ContainerT
 
 static bool _build_typed_array_validator(const Variant& p_encoded, ContainerTypeValidate& r_array_type) {
 	r_array_type = ContainerTypeValidate();
-	r_array_type.type = Variant::ARRAY;
-	r_array_type.where = "TypedArray";
-	r_array_type.nested_types.resize(1);
-	return _decode_array_element_type_info(p_encoded, r_array_type.nested_types.write[0]);
+	return _decode_array_element_type_info(p_encoded, r_array_type);
 }
 
 static ContainerTypeValidate _get_array_type_validator_from_datatype(const GDScriptDataType& p_type) {
@@ -171,11 +168,7 @@ Variant GDScriptFunction::_get_default_variant_for_data_type(const GDScriptDataT
 			// Typed array.
 			if (p_data_type.has_container_element_type(0)) {
 				const GDScriptDataType &element_type = p_data_type.get_container_element_type(0);
-				ContainerTypeValidate array_type;
-				array_type.type = Variant::ARRAY;
-				array_type.where = "TypedArray";
-				array_type.nested_types.push_back(_get_array_type_validator_from_datatype(element_type));
-				array.set_typed_nested(array_type);
+				array.set_typed_nested(_get_array_type_validator_from_datatype(element_type));
 			}
 
 			return array;
@@ -1123,7 +1116,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 					OPCODE_BREAK;
 				}
 #endif
-				ip += 5;
+				ip += 4;
 			}
 			DISPATCH_OPCODE;
 
@@ -1913,7 +1906,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 				*dst = array;
 
-				ip += 5;
+				ip += 4;
 			}
 			DISPATCH_OPCODE;
 

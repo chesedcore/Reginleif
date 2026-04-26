@@ -706,11 +706,7 @@ void GDScript::_static_default_init() {
 		if (type.builtin_type == Variant::ARRAY && type.has_container_element_type(0)) {
 			const GDScriptDataType element_type = type.get_container_element_type(0);
 			Array default_value;
-			ContainerTypeValidate array_type;
-			array_type.type = Variant::ARRAY;
-			array_type.where = "TypedArray";
-			array_type.nested_types.push_back(_get_array_type_validator_from_datatype(element_type));
-			default_value.set_typed_nested(array_type);
+			default_value.set_typed_nested(_get_array_type_validator_from_datatype(element_type));
 			static_variables.write[E.value.index] = default_value;
 		} else if (type.builtin_type == Variant::DICTIONARY && type.has_container_element_types()) {
 			const GDScriptDataType key_type = type.get_container_element_type_or_variant(0);
