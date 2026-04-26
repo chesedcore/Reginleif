@@ -175,7 +175,7 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 
 				text += "]";
 
-				incr += 6;
+				incr += 7;
 			} break;
 			case OPCODE_TYPE_TEST_DICTIONARY: {
 				text += "type test ";
@@ -449,7 +449,7 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 				text += " = ";
 				text += DADDR(2);
 
-				incr += 6;
+				incr += 7;
 			} break;
 			case OPCODE_ASSIGN_TYPED_DICTIONARY: {
 				text += "assign typed dictionary ";
@@ -602,28 +602,7 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 
 				text += "]";
 
-				incr += 6 + argc;
-			} break;
-			case OPCODE_STAMP_ARRAY_ELEMENT_TYPED: {
-				Ref<Script> script_type = get_constant(_code_ptr[ip + 2] & ADDR_MASK);
-				Variant::Type builtin_type = (Variant::Type)_code_ptr[ip + 3];
-				StringName native_type = get_global_name(_code_ptr[ip + 4]);
-
-				String type_name;
-				if (script_type.is_valid() && script_type->is_valid()) {
-					type_name = "script(" + GDScript::debug_get_script_name(script_type) + ")";
-				} else if (native_type != StringName()) {
-					type_name = native_type;
-				} else {
-					type_name = Variant::get_type_name(builtin_type);
-				}
-
-				text += "stamp_array_element_typed (";
-				text += type_name;
-				text += ") ";
-				text += DADDR(1);
-
-				incr += 5;
+				incr += 7 + argc;
 			} break;
 			case OPCODE_CONSTRUCT_DICTIONARY: {
 				int instr_var_args = _code_ptr[++ip];
@@ -1111,7 +1090,7 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 				text += "return typed array ";
 				text += DADDR(1);
 
-				incr += 5;
+				incr += 6;
 			} break;
 			case OPCODE_RETURN_TYPED_DICTIONARY: {
 				text += "return typed dictionary ";
