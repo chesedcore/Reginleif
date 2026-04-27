@@ -216,7 +216,7 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 
 				text += "]";
 
-				incr += 9;
+				incr += 11;
 			} break;
 			case OPCODE_TYPE_TEST_NATIVE: {
 				text += "type test ";
@@ -457,7 +457,7 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 				text += " = ";
 				text += DADDR(2);
 
-				incr += 9;
+				incr += 11;
 			} break;
 			case OPCODE_ASSIGN_TYPED_NATIVE: {
 				text += "assign typed native (";
@@ -629,8 +629,8 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 				int argc = _code_ptr[ip + 1 + instr_var_args];
 
 				Ref<Script> key_script_type = get_constant(_code_ptr[ip + argc * 2 + 2] & ADDR_MASK);
-				Variant::Type key_builtin_type = (Variant::Type)_code_ptr[ip + argc * 2 + 5];
-				StringName key_native_type = get_global_name(_code_ptr[ip + argc * 2 + 6]);
+				Variant::Type key_builtin_type = (Variant::Type)_code_ptr[ip + argc * 2 + 7];
+				StringName key_native_type = get_global_name(_code_ptr[ip + argc * 2 + 8]);
 
 				String key_type_name;
 				if (key_script_type.is_valid() && key_script_type->is_valid()) {
@@ -642,8 +642,8 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 				}
 
 				Ref<Script> value_script_type = get_constant(_code_ptr[ip + argc * 2 + 3] & ADDR_MASK);
-				Variant::Type value_builtin_type = (Variant::Type)_code_ptr[ip + argc * 2 + 7];
-				StringName value_native_type = get_global_name(_code_ptr[ip + argc * 2 + 8]);
+				Variant::Type value_builtin_type = (Variant::Type)_code_ptr[ip + argc * 2 + 9];
+				StringName value_native_type = get_global_name(_code_ptr[ip + argc * 2 + 10]);
 
 				String value_type_name;
 				if (value_script_type.is_valid() && value_script_type->is_valid()) {
@@ -674,7 +674,7 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 
 				text += "}";
 
-				incr += 9 + argc * 2;
+				incr += 11 + argc * 2;
 			} break;
 			case OPCODE_CALL:
 			case OPCODE_CALL_RETURN:
@@ -1096,7 +1096,7 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 				text += "return typed dictionary ";
 				text += DADDR(1);
 
-				incr += 8;
+				incr += 10;
 			} break;
 			case OPCODE_RETURN_TYPED_NATIVE: {
 				text += "return typed native (";
