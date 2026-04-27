@@ -956,17 +956,69 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			DISPATCH_OPCODE;
 
 			OPCODE(OPCODE_TYPE_TEST_ARRAY) {
-				CHECK_SPACE(7);
+				CHECK_SPACE(5);
 
 				GET_VARIANT_PTR(dst, 0);
 				GET_VARIANT_PTR(value, 1);
 
-				GET_VARIANT_PTR(script_type, 2);
-				Variant::Type builtin_type = (Variant::Type)_code_ptr[ip + 4];
-				int native_type_idx = _code_ptr[ip + 5];
-				GD_ERR_BREAK(native_type_idx < 0 || native_type_idx >= _global_names_count);
-				const StringName native_type = _global_names_ptr[native_type_idx];
-				GET_VARIANT_PTR(encoded_type_info, 5);
+				Variant nil_script_type;
+				Variant* script_type = &nil_script_type;
+				int builtin_type_word = -1;
+				int native_type_idx = -1;
+				int metadata_word_offset = -1;
+				int script_type_word = _code_ptr[ip + 3];
+
+				///new layout: dst, value, script_type_address, builtin_type, native_type, [metadata]
+				///this is the one used for routing deep nested typed arrays
+				if (_is_constant_address_word(script_type_word, _constant_count) && ip + 5 < _code_size) {
+					int candidate_builtin = _code_ptr[ip + 4];
+					int candidate_native = _code_ptr[ip + 5];
+					if (candidate_builtin >= 0 && candidate_builtin < Variant::VARIANT_MAX && candidate_native >= 0 && candidate_native <= _global_names_count) {
+						script_type = &_constants_ptr[script_type_word & ADDR_MASK];
+						builtin_type_word = candidate_builtin;
+						native_type_idx = candidate_native;
+						metadata_word_offset = 6;
+					}
+				}
+				///legacy layout: dst, value, script_type_constant_index, builtin_type, native_type, [metadata]
+				///this should've been the only legacy layout, but for some reason... there's another?
+				if (metadata_word_offset < 0 && script_type_word >= 0 && script_type_word < _constant_count && ip + 5 < _code_size) {
+					int candidate_builtin = _code_ptr[ip + 4];
+					int candidate_native = _code_ptr[ip + 5];
+					if (candidate_builtin >= 0 && candidate_builtin < Variant::VARIANT_MAX && candidate_native >= 0 && candidate_native <= _global_names_count) {
+						script_type = &_constants_ptr[script_type_word];
+						builtin_type_word = candidate_builtin;
+						native_type_idx = candidate_native;
+						metadata_word_offset = 6;
+					}
+				}
+				///legacy layout 2 electric boogaloo: dst, value, builtin_type, native_type, [metadata]
+				///we need to deprecate all these old layouts soon once we start optimising for performnace.
+				///realistically the performance hit is insanely negligible, but these branches suck regardless.
+				if (metadata_word_offset < 0 && ip + 4 < _code_size) {
+					int candidate_builtin = script_type_word;
+					int candidate_native = _code_ptr[ip + 4];
+					if (candidate_builtin >= 0 && candidate_builtin < Variant::VARIANT_MAX && candidate_native >= 0 && candidate_native <= _global_names_count) {
+						builtin_type_word = candidate_builtin;
+						native_type_idx = candidate_native;
+						metadata_word_offset = 5;
+					}
+				}
+				if (unlikely(metadata_word_offset < 0)) {
+					err_text = vformat("TYPE_TEST_ARRAY operand decode failed (ip=%d, w3=%d, w4=%d, w5=%d, const_count=%d, global_names=%d, window=[%s]).",
+							ip, script_type_word, ip + 4 < _code_size ? _code_ptr[ip + 4] : -1, ip + 5 < _code_size ? _code_ptr[ip + 5] : -1,
+							_constant_count, _global_names_count, _debug_get_opcode_window(_code_ptr, _code_size, ip));
+					OPCODE_BREAK;
+				}
+				Variant::Type builtin_type = (Variant::Type)builtin_type_word;
+				const StringName native_type = native_type_idx == _global_names_count ? StringName() : _global_names_ptr[native_type_idx];
+				Variant* encoded_type_info = nullptr;
+				bool has_nested_metadata = false;
+				if (ip + metadata_word_offset < _code_size && _is_constant_address_word(_code_ptr[ip + metadata_word_offset], _constant_count)) {
+					encoded_type_info = &_constants_ptr[_code_ptr[ip + metadata_word_offset] & ADDR_MASK];
+					ContainerTypeValidate test_type;
+					has_nested_metadata = _build_typed_container_validator(*encoded_type_info, test_type);
+				}
 
 				bool result = false;
 				if (value->get_type() == Variant::ARRAY) {
@@ -976,7 +1028,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 					///
 					if (result) {
 						ContainerTypeValidate expected_type;
-						if (_build_typed_container_validator(*encoded_type_info, expected_type)) {
+						if (has_nested_metadata && _build_typed_container_validator(*encoded_type_info, expected_type)) {
 							Array expected_array;
 							expected_array.set_typed_nested(expected_type);
 							result = array->is_same_typed(expected_array);
@@ -985,7 +1037,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				}
 
 				*dst = result;
-				ip += 7;
+				ip += has_nested_metadata ? (metadata_word_offset + 1) : metadata_word_offset;
 			}
 			DISPATCH_OPCODE;
 

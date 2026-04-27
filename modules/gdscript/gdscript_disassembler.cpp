@@ -159,9 +159,29 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 				text += DADDR(2);
 				text += " is Array[";
 
-				Ref<Script> script_type = get_constant(_code_ptr[ip + 3] & ADDR_MASK);
-				Variant::Type builtin_type = (Variant::Type)_code_ptr[ip + 4];
-				StringName native_type = get_global_name(_code_ptr[ip + 5]);
+				int script_type_word = _code_ptr[ip + 3];
+				int builtin_type_word = 0;
+				int native_type_word = 0;
+				int metadata_word_offset = 0;
+				Ref<Script> script_type;
+				if (((script_type_word & ADDR_TYPE_MASK) >> ADDR_BITS) == ADDR_TYPE_CONSTANT) {
+					script_type = get_constant(script_type_word & ADDR_MASK);
+					builtin_type_word = _code_ptr[ip + 4];
+					native_type_word = _code_ptr[ip + 5];
+					metadata_word_offset = 6;
+				} else if (script_type_word >= 0 && script_type_word < Variant::VARIANT_MAX &&
+						ip + 4 < _code_size && _code_ptr[ip + 4] >= 0 && _code_ptr[ip + 4] <= _global_names_count) {
+					builtin_type_word = script_type_word;
+					native_type_word = _code_ptr[ip + 4];
+					metadata_word_offset = 5;
+				} else {
+					script_type = get_constant(script_type_word & ADDR_MASK);
+					builtin_type_word = _code_ptr[ip + 4];
+					native_type_word = _code_ptr[ip + 5];
+					metadata_word_offset = 6;
+				}
+				Variant::Type builtin_type = (Variant::Type)builtin_type_word;
+				StringName native_type = native_type_word == _global_names_count ? StringName() : get_global_name(native_type_word);
 
 				if (script_type.is_valid() && script_type->is_valid()) {
 					text += "script(";
@@ -175,7 +195,8 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 
 				text += "]";
 
-				incr += 7;
+				bool has_nested_metadata = ip + metadata_word_offset < _code_size && ((_code_ptr[ip + metadata_word_offset] & ADDR_TYPE_MASK) >> ADDR_BITS) == ADDR_TYPE_CONSTANT;
+				incr += has_nested_metadata ? metadata_word_offset + 1 : metadata_word_offset;
 			} break;
 			case OPCODE_TYPE_TEST_DICTIONARY: {
 				text += "type test ";
