@@ -60,7 +60,7 @@ static String _get_element_type(Variant::Type builtin_type, const StringName &na
 	}
 }
 
-static bool _decode_array_element_type_info(const Variant& p_encoded, ContainerTypeValidate& r_type) {
+static bool _decode_container_element_type_info(const Variant& p_encoded, ContainerTypeValidate& r_type) {
 	if (p_encoded.get_type() != Variant::ARRAY) {
 		return false;
 	}
@@ -77,19 +77,19 @@ static bool _decode_array_element_type_info(const Variant& p_encoded, ContainerT
 	Array nested = encoded[3];
 	r_type.nested_types.resize(nested.size());
 	for (int i = 0; i < nested.size(); i++) {
-		if (!_decode_array_element_type_info(nested[i], r_type.nested_types.write[i])) {
+		if (!_decode_container_element_type_info(nested[i], r_type.nested_types.write[i])) {
 			return false;
 		}
 	}
 	return true;
 }
 
-static bool _build_typed_array_validator(const Variant& p_encoded, ContainerTypeValidate& r_array_type) {
-	r_array_type = ContainerTypeValidate();
-	return _decode_array_element_type_info(p_encoded, r_array_type);
+static bool _build_typed_container_validator(const Variant& p_encoded, ContainerTypeValidate& r_type) {
+	r_type = ContainerTypeValidate();
+	return _decode_container_element_type_info(p_encoded, r_type);
 }
 
-static ContainerTypeValidate _get_array_type_validator_from_datatype(const GDScriptDataType& p_type) {
+static ContainerTypeValidate _get_container_type_validator_from_datatype(const GDScriptDataType& p_type) {
 	ContainerTypeValidate type;
 	type.type = p_type.builtin_type;
 	type.class_name = p_type.native_type;
@@ -97,7 +97,7 @@ static ContainerTypeValidate _get_array_type_validator_from_datatype(const GDScr
 	type.where = "TypedArray";
 	type.nested_types.resize(p_type.container_element_types.size());
 	for (int i = 0; i < p_type.container_element_types.size(); i++) {
-		type.nested_types.write[i] = _get_array_type_validator_from_datatype(p_type.container_element_types[i]);
+		type.nested_types.write[i] = _get_container_type_validator_from_datatype(p_type.container_element_types[i]);
 	}
 	return type;
 }
@@ -168,7 +168,7 @@ Variant GDScriptFunction::_get_default_variant_for_data_type(const GDScriptDataT
 			// Typed array.
 			if (p_data_type.has_container_element_type(0)) {
 				const GDScriptDataType &element_type = p_data_type.get_container_element_type(0);
-				array.set_typed_nested(_get_array_type_validator_from_datatype(element_type));
+				array.set_typed_nested(_get_container_type_validator_from_datatype(element_type));
 			}
 
 			return array;
@@ -178,7 +178,7 @@ Variant GDScriptFunction::_get_default_variant_for_data_type(const GDScriptDataT
 			if (p_data_type.has_container_element_types()) {
 				const GDScriptDataType &key_type = p_data_type.get_container_element_type_or_variant(0);
 				const GDScriptDataType &value_type = p_data_type.get_container_element_type_or_variant(1);
-				dict.set_typed(key_type.builtin_type, key_type.native_type, key_type.script_type, value_type.builtin_type, value_type.native_type, value_type.script_type);
+				dict.set_typed_nested(_get_container_type_validator_from_datatype(key_type), _get_container_type_validator_from_datatype(value_type));
 			}
 
 			return dict;
@@ -941,7 +941,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 					///
 					if (result) {
 						ContainerTypeValidate expected_type;
-						if (_build_typed_array_validator(*encoded_type_info, expected_type)) {
+						if (_build_typed_container_validator(*encoded_type_info, expected_type)) {
 							Array expected_array;
 							expected_array.set_typed_nested(expected_type);
 							result = array->is_same_typed(expected_array);
@@ -955,7 +955,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			DISPATCH_OPCODE;
 
 			OPCODE(OPCODE_TYPE_TEST_DICTIONARY) {
-				CHECK_SPACE(9);
+				CHECK_SPACE(11);
 
 				GET_VARIANT_PTR(dst, 0);
 				GET_VARIANT_PTR(value, 1);
@@ -971,16 +971,27 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				int value_native_type_idx = _code_ptr[ip + 8];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
 				const StringName value_native_type = _global_names_ptr[value_native_type_idx];
+				GET_VARIANT_PTR(key_encoded_type_info, 9);
+				GET_VARIANT_PTR(value_encoded_type_info, 10);
 
 				bool result = false;
 				if (value->get_type() == Variant::DICTIONARY) {
 					Dictionary *dictionary = VariantInternal::get_dictionary(value);
 					result = dictionary->get_typed_key_builtin() == ((uint32_t)key_builtin_type) && dictionary->get_typed_key_class_name() == key_native_type && dictionary->get_typed_key_script() == *key_script_type &&
 							dictionary->get_typed_value_builtin() == ((uint32_t)value_builtin_type) && dictionary->get_typed_value_class_name() == value_native_type && dictionary->get_typed_value_script() == *value_script_type;
+					if (result) {
+						ContainerTypeValidate key_expected_type;
+						ContainerTypeValidate value_expected_type;
+						if (_build_typed_container_validator(*key_encoded_type_info, key_expected_type) && _build_typed_container_validator(*value_encoded_type_info, value_expected_type)) {
+							Dictionary expected_dictionary;
+							expected_dictionary.set_typed_nested(key_expected_type, value_expected_type);
+							result = dictionary->is_same_typed(expected_dictionary);
+						}
+					}
 				}
 
 				*dst = result;
-				ip += 9;
+				ip += 11;
 			}
 			DISPATCH_OPCODE;
 
@@ -1532,7 +1543,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				bool is_type_match = array->get_typed_builtin() == ((uint32_t)builtin_type) && array->get_typed_class_name() == native_type && array->get_typed_script() == *script_type;
 				if (is_type_match) {
 					ContainerTypeValidate expected_type;
-					if (_build_typed_array_validator(*encoded_type_info, expected_type)) {
+					if (_build_typed_container_validator(*encoded_type_info, expected_type)) {
 						Array expected_array;
 						expected_array.set_typed_nested(expected_type);
 						is_type_match = array->is_same_typed(expected_array);
@@ -1554,7 +1565,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			DISPATCH_OPCODE;
 
 			OPCODE(OPCODE_ASSIGN_TYPED_DICTIONARY) {
-				CHECK_SPACE(9);
+				CHECK_SPACE(11);
 				GET_VARIANT_PTR(dst, 0);
 				GET_VARIANT_PTR(src, 1);
 
@@ -1569,6 +1580,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				int value_native_type_idx = _code_ptr[ip + 8];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
 				const StringName value_native_type = _global_names_ptr[value_native_type_idx];
+				GET_VARIANT_PTR(key_encoded_type_info, 9);
+				GET_VARIANT_PTR(value_encoded_type_info, 10);
 
 				if (src->get_type() != Variant::DICTIONARY) {
 #ifdef DEBUG_ENABLED
@@ -1580,9 +1593,20 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				}
 
 				Dictionary *dictionary = VariantInternal::get_dictionary(src);
+				///insane fucking equality that i should probably abstract away
+				bool is_type_match = dictionary->get_typed_key_builtin() == ((uint32_t)key_builtin_type) && dictionary->get_typed_key_class_name() == key_native_type && dictionary->get_typed_key_script() == *key_script_type &&
+						dictionary->get_typed_value_builtin() == ((uint32_t)value_builtin_type) && dictionary->get_typed_value_class_name() == value_native_type && dictionary->get_typed_value_script() == *value_script_type;
+				if (is_type_match) {
+					ContainerTypeValidate key_expected_type;
+					ContainerTypeValidate value_expected_type;
+					if (_build_typed_container_validator(*key_encoded_type_info, key_expected_type) && _build_typed_container_validator(*value_encoded_type_info, value_expected_type)) {
+						Dictionary expected_dictionary;
+						expected_dictionary.set_typed_nested(key_expected_type, value_expected_type);
+						is_type_match = dictionary->is_same_typed(expected_dictionary);
+					}
+				}
 
-				if (dictionary->get_typed_key_builtin() != ((uint32_t)key_builtin_type) || dictionary->get_typed_key_class_name() != key_native_type || dictionary->get_typed_key_script() != *key_script_type ||
-						dictionary->get_typed_value_builtin() != ((uint32_t)value_builtin_type) || dictionary->get_typed_value_class_name() != value_native_type || dictionary->get_typed_value_script() != *value_script_type) {
+				if (!is_type_match) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to assign a dictionary of type "%s" to a variable of type "Dictionary[%s, %s]".)",
 							_get_var_type(src), _get_element_type(key_builtin_type, key_native_type, *key_script_type),
@@ -1593,7 +1617,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 				*dst = *src;
 
-				ip += 9;
+				ip += 11;
 			}
 			DISPATCH_OPCODE;
 
@@ -1889,7 +1913,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 				///
 				ContainerTypeValidate array_type;
-				if (_build_typed_array_validator(*encoded_type_info, array_type)) {
+				if (_build_typed_container_validator(*encoded_type_info, array_type)) {
 					array.set_typed_nested(array_type);
 				} else {
 					array.set_typed(builtin_type, native_type, *script_type);
@@ -1937,7 +1961,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 			OPCODE(OPCODE_CONSTRUCT_TYPED_DICTIONARY) {
 				LOAD_INSTRUCTION_ARGS
-				CHECK_SPACE(6 + instr_arg_count);
+				CHECK_SPACE(8 + instr_arg_count);
 				ip += instr_arg_count;
 
 				int argc = _code_ptr[ip + 1];
@@ -1953,9 +1977,17 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				int value_native_type_idx = _code_ptr[ip + 5];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
 				const StringName value_native_type = _global_names_ptr[value_native_type_idx];
+				GET_INSTRUCTION_ARG(key_encoded_type_info, argc * 2 + 3);
+				GET_INSTRUCTION_ARG(value_encoded_type_info, argc * 2 + 4);
 
 				Dictionary dict;
-				dict.set_typed(key_builtin_type, key_native_type, *key_script_type, value_builtin_type, value_native_type, *value_script_type);
+				ContainerTypeValidate key_type;
+				ContainerTypeValidate value_type;
+				if (_build_typed_container_validator(*key_encoded_type_info, key_type) && _build_typed_container_validator(*value_encoded_type_info, value_type)) {
+					dict.set_typed_nested(key_type, value_type);
+				} else {
+					dict.set_typed(key_builtin_type, key_native_type, *key_script_type, value_builtin_type, value_native_type, *value_script_type);
+				}
 				dict.reserve(argc);
 				for (int i = 0; i < argc; i++) {
 					GET_INSTRUCTION_ARG(k, i * 2 + 0);
@@ -1970,7 +2002,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 				*dst = dict;
 
-				ip += 6;
+				ip += 8;
 			}
 			DISPATCH_OPCODE;
 
@@ -2941,7 +2973,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				bool is_type_match = array->get_typed_builtin() == ((uint32_t)builtin_type) && array->get_typed_class_name() == native_type && array->get_typed_script() == *script_type;
 				if (is_type_match) {
 					ContainerTypeValidate expected_type;
-					if (_build_typed_array_validator(*encoded_type_info, expected_type)) {
+					if (_build_typed_container_validator(*encoded_type_info, expected_type)) {
 						Array expected_array;
 						expected_array.set_typed_nested(expected_type);
 						is_type_match = array->is_same_typed(expected_array);
@@ -2965,7 +2997,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			}
 
 			OPCODE(OPCODE_RETURN_TYPED_DICTIONARY) {
-				CHECK_SPACE(8);
+				CHECK_SPACE(10);
 				GET_VARIANT_PTR(r, 0);
 
 				GET_VARIANT_PTR(key_script_type, 1);
@@ -2979,6 +3011,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				int value_native_type_idx = _code_ptr[ip + 7];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
 				const StringName value_native_type = _global_names_ptr[value_native_type_idx];
+				GET_VARIANT_PTR(key_encoded_type_info, 8);
+				GET_VARIANT_PTR(value_encoded_type_info, 9);
 
 				if (r->get_type() != Variant::DICTIONARY) {
 #ifdef DEBUG_ENABLED
@@ -2990,9 +3024,20 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				}
 
 				Dictionary *dictionary = VariantInternal::get_dictionary(r);
+				///yeah these equalities fucking SUCK
+				bool is_type_match = dictionary->get_typed_key_builtin() == ((uint32_t)key_builtin_type) && dictionary->get_typed_key_class_name() == key_native_type && dictionary->get_typed_key_script() == *key_script_type &&
+						dictionary->get_typed_value_builtin() == ((uint32_t)value_builtin_type) && dictionary->get_typed_value_class_name() == value_native_type && dictionary->get_typed_value_script() == *value_script_type;
+				if (is_type_match) {
+					ContainerTypeValidate key_expected_type;
+					ContainerTypeValidate value_expected_type;
+					if (_build_typed_container_validator(*key_encoded_type_info, key_expected_type) && _build_typed_container_validator(*value_encoded_type_info, value_expected_type)) {
+						Dictionary expected_dictionary;
+						expected_dictionary.set_typed_nested(key_expected_type, value_expected_type);
+						is_type_match = dictionary->is_same_typed(expected_dictionary);
+					}
+				}
 
-				if (dictionary->get_typed_key_builtin() != ((uint32_t)key_builtin_type) || dictionary->get_typed_key_class_name() != key_native_type || dictionary->get_typed_key_script() != *key_script_type ||
-						dictionary->get_typed_value_builtin() != ((uint32_t)value_builtin_type) || dictionary->get_typed_value_class_name() != value_native_type || dictionary->get_typed_value_script() != *value_script_type) {
+				if (!is_type_match) {
 #ifdef DEBUG_ENABLED
 					err_text = vformat(R"(Trying to return a value of type "%s" from a function whose return type is "Dictionary[%s, %s]".)",
 							_get_var_type(r), _get_element_type(key_builtin_type, key_native_type, *key_script_type),
