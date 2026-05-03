@@ -2459,8 +2459,11 @@ void GDScriptAnalyzer::resolve_function_body(GDScriptParser::FunctionNode *p_fun
 			push_error(R"([Reginleif] A function must either have a ":" or "{" followed by a body, or be marked as "@abstract".)", p_function);
 		} else {
 			/// still need to check the return type even if the brace body is empty lol
+			const bool is_constructor_like = !p_is_lambda && p_function->identifier && p_function->identifier->name == GDScriptLanguage::get_singleton()->strings._init;
+			
 			GDScriptParser::DataType return_type = p_function->get_datatype();
-			if (return_type.is_hard_type() && !(return_type.kind == GDScriptParser::DataType::BUILTIN && return_type.builtin_type == Variant::NIL)) {
+			
+			if (!is_constructor_like && return_type.is_hard_type() && !(return_type.kind == GDScriptParser::DataType::BUILTIN && return_type.builtin_type == Variant::NIL)) {
 				push_error(R"(Not all code paths return a value.)", p_function);
 			}
 		}
