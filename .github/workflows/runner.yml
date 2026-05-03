@@ -1,6 +1,6 @@
 name: 🔗 GHA
 
-on: [pull_request, merge_group, workflow_dispatch]
+on: [workflow_dispatch]
 
 concurrency:
   group: ${{ github.workflow }}|${{ github.ref_name }}
