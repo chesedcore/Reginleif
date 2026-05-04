@@ -666,7 +666,7 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 		const StringName this_name = param -> name;
 
 		if (seen_generic_params.has(this_name)) {
-			push_error(vformat(R"([Reginleif] Caught duplicate generic parameter '%s'. Consider naming it something else.)", this_name), param);
+			push_error(vformat(R"([Reginleif] Caught duplicate generic parameter '%s'. Note: Consider naming it something else.)", this_name), param);
 			continue;
 		}
 
@@ -715,8 +715,7 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 		if (param->generic_upper_bound != nullptr) {
 			GDScriptParser::DataType bound_type = type_from_metatype(resolve_datatype(param->generic_upper_bound));
 			if (bound_type.kind == GDScriptParser::DataType::GENERIC_TYPE && bound_type.generic_param == this_name) {
-				///I just have to, man. you don't do this by mistake.
-				push_error(vformat(R"([Reginleif] ...are you binding %s... against... %s?! Reconsider that upper bound.)", this_name, this_name), param->generic_upper_bound);
+				push_error(vformat(R"([Reginleif] Please don't bind the generic %s against itself.)", this_name, this_name), param->generic_upper_bound);
 			}
 		}
 	}
