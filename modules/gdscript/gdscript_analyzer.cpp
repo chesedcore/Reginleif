@@ -2560,17 +2560,17 @@ void GDScriptAnalyzer::resolve_assignable(GDScriptParser::AssignableNode *p_assi
 		type = specified_type;
 	}
 
-	/// [Monarch] validate generic-typed assignables against their upper bound.
-	if (has_specified_type && specified_type.kind == GDScriptParser::DataType::GENERIC_TYPE && p_assignable->initializer != nullptr) {
-		GDScriptParser::IdentifierNode* decl = find_generic_param_decl(specified_type.generic_param);
-		if (decl != nullptr) {
-			check_generic_assignable(decl, specified_type.generic_param, p_assignable->initializer, p_kind);
-		}
-	}
-
 	if (p_assignable->initializer != nullptr) {
 		reduce_expression(p_assignable->initializer);
 
+		/// [Monarch] validate generic-typed assignables against their upper bound.
+		if (has_specified_type && specified_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+			GDScriptParser::IdentifierNode* decl = find_generic_param_decl(specified_type.generic_param);
+			if (decl != nullptr) {
+				check_generic_assignable(decl, specified_type.generic_param, p_assignable->initializer, p_kind);
+			}
+		}
+		
 		if (p_assignable->initializer->type == GDScriptParser::Node::ARRAY) {
 			GDScriptParser::ArrayNode *array = static_cast<GDScriptParser::ArrayNode *>(p_assignable->initializer);
 			if (has_specified_type && specified_type.has_container_element_type(0)) {
@@ -2794,7 +2794,8 @@ void GDScriptAnalyzer::check_generic_assignable(GDScriptParser::IdentifierNode* 
 
 	if (upper_bound.kind == GDScriptParser::DataType::GENERIC_TYPE) {
 		StringName terminal_param;
-		if (!resolve_generic_bound_chain(upper_bound.generic_param, upper_bound, terminal_param)) {
+		GDScriptParser::DataType resolved_bound = upper_bound;
+		if (!resolve_generic_bound_chain(upper_bound.generic_param, resolved_bound, terminal_param)) {
 			if (default_is_null) {
 				push_error(vformat(
 						R"([Reginleif] Default "null" for %s "%s" is not allowed. Bound chain for "%s" ends at unconstrained "%s", so nullability cannot be guaranteed. Note: If null is intended, add an object-type upper bound as such: [%s: Object].)",
@@ -2813,6 +2814,7 @@ void GDScriptAnalyzer::check_generic_assignable(GDScriptParser::IdentifierNode* 
 			}
 			return;
 		}
+		upper_bound = resolved_bound;
 	}
 
 	if (default_is_null) {
@@ -3623,6 +3625,14 @@ void GDScriptAnalyzer::reduce_assignment(GDScriptParser::AssignmentNode *p_assig
 
 	if (p_assignment->operation == GDScriptParser::AssignmentNode::OP_NONE && assignee_type.is_hard_type() && p_assignment->assigned_value->is_constant) {
 		update_const_expression_builtin_type(p_assignment->assigned_value, assignee_type, "assign");
+	}
+
+	/// [Monarch] validate assignments to generic-typed variables against their upper bound.
+	if (assignee_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+		GDScriptParser::IdentifierNode* decl = find_generic_param_decl(assignee_type.generic_param);
+		if (decl != nullptr) {
+			check_generic_assignable(decl, assignee_type.generic_param, p_assignment->assigned_value, "variable");
+		}
 	}
 
 	GDScriptParser::DataType assigned_value_type = p_assignment->assigned_value->get_datatype();
