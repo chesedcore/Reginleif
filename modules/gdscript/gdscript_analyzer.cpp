@@ -1310,6 +1310,7 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 				StringName param_name = generic_param->name;
 				if (generic_param->generic_upper_bound != nullptr) {
 					GDScriptParser::DataType upper_bound_type = type_from_metatype(resolve_datatype(generic_param->generic_upper_bound));
+					upper_bound_type = resolve_generic_type(upper_bound_type, result.generic_type_bindings);
 					if (!upper_bound_type.is_variant() && !is_type_compatible(upper_bound_type, arg_type, true, contained_type)) {
 						push_error(vformat(
 								   R"([Reginleif] Type argument '%s' for generic parameter '%s' does not satisfy upper bound '%s'.)",
@@ -2765,7 +2766,7 @@ void GDScriptAnalyzer::check_generic_assignable(GDScriptParser::IdentifierNode* 
 			/// their generic upper-bound syntax (like `T: U`) must not be treated as a runtime default value!!!
 			return;
 		}
-		
+
 		push_error(vformat(
 				R"([Reginleif] Default value for %s "%s" cannot be another generic parameter, as generic parameters have no value at definition time. Note: Use a proper value for expressions.)",
 				p_kind, p_generic_param),
@@ -3224,6 +3225,12 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 				update_const_expression_builtin_type(p_return->return_value, expected_type, "return");
 			}
 			result = p_return->return_value->get_datatype();
+		}
+	}
+
+	if (has_expected_type && expected_type.kind == GDScriptParser::DataType::GENERIC_TYPE && p_return->return_value != nullptr) {
+		if (GDScriptParser::IdentifierNode* decl = find_generic_param_decl(expected_type.generic_param)) {
+			check_generic_assignable(decl, expected_type.generic_param, p_return->return_value, "return value");
 		}
 	}
 
