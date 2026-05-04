@@ -666,7 +666,7 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 		const StringName this_name = param -> name;
 
 		if (seen_generic_params.has(this_name)) {
-			push_error(vformat(R"([Reginleif] Caught duplicate generic parameter '%s'. Consider naming it something else.)", this_name), param);
+			push_error(vformat(R"([Reginleif] Caught duplicate generic parameter '%s'. Note: Consider naming it something else.)", this_name), param);
 			continue;
 		}
 
@@ -715,8 +715,7 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 		if (param->generic_upper_bound != nullptr) {
 			GDScriptParser::DataType bound_type = type_from_metatype(resolve_datatype(param->generic_upper_bound));
 			if (bound_type.kind == GDScriptParser::DataType::GENERIC_TYPE && bound_type.generic_param == this_name) {
-				///I just have to, man. you don't do this by mistake.
-				push_error(vformat(R"([Reginleif] ...are you binding %s... against... %s?! Reconsider that upper bound.)", this_name, this_name), param->generic_upper_bound);
+				push_error(vformat(R"([Reginleif] Please don't bind the generic %s against itself.)", this_name, this_name), param->generic_upper_bound);
 			}
 		}
 	}
@@ -1311,6 +1310,7 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 				StringName param_name = generic_param->name;
 				if (generic_param->generic_upper_bound != nullptr) {
 					GDScriptParser::DataType upper_bound_type = type_from_metatype(resolve_datatype(generic_param->generic_upper_bound));
+					upper_bound_type = resolve_generic_type(upper_bound_type, result.generic_type_bindings);
 					if (!upper_bound_type.is_variant() && !is_type_compatible(upper_bound_type, arg_type, true, contained_type)) {
 						push_error(vformat(
 								   R"([Reginleif] Type argument '%s' for generic parameter '%s' does not satisfy upper bound '%s'.)",
@@ -2213,7 +2213,7 @@ void GDScriptAnalyzer::resolve_function_signature(GDScriptParser::FunctionNode *
 			GDScriptParser::DataType bound_type = type_from_metatype(resolve_datatype(param->generic_upper_bound));
 			if (bound_type.kind == GDScriptParser::DataType::GENERIC_TYPE && bound_type.generic_param == this_name) {
 				///same treatment here.
-				push_error(vformat(R"([Reginleif] ...are you binding %s... against... %s?! Reconsider that upper bound.)", this_name, this_name), param->generic_upper_bound);
+				push_error(vformat(R"([Reginleif] Please don't bind the generic %s against itself.)", this_name), param->generic_upper_bound);
 			}
 		}
 	}
@@ -2564,6 +2564,14 @@ void GDScriptAnalyzer::resolve_assignable(GDScriptParser::AssignableNode *p_assi
 	if (p_assignable->initializer != nullptr) {
 		reduce_expression(p_assignable->initializer);
 
+		/// [Monarch] validate generic-typed assignables against their upper bound.
+		if (has_specified_type && specified_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+			GDScriptParser::IdentifierNode* decl = find_generic_param_decl(specified_type.generic_param);
+			if (decl != nullptr) {
+				check_generic_assignable(decl, specified_type.generic_param, p_assignable->initializer, p_kind);
+			}
+		}
+		
 		if (p_assignable->initializer->type == GDScriptParser::Node::ARRAY) {
 			GDScriptParser::ArrayNode *array = static_cast<GDScriptParser::ArrayNode *>(p_assignable->initializer);
 			if (has_specified_type && specified_type.has_container_element_type(0)) {
@@ -2712,6 +2720,189 @@ void GDScriptAnalyzer::resolve_constant(GDScriptParser::ConstantNode *p_constant
 void GDScriptAnalyzer::resolve_parameter(GDScriptParser::ParameterNode *p_parameter) {
 	static constexpr const char *kind = "parameter";
 	resolve_assignable(p_parameter, kind);
+	check_generic_parameter_default(p_parameter); ///
+}
+
+
+GDScriptParser::IdentifierNode* GDScriptAnalyzer::find_generic_param_decl(const StringName& p_generic_param) {
+	
+	if (parser->current_function != nullptr) { ///scan function level generics
+		for (GDScriptParser::IdentifierNode* gp : parser->current_function->generic_parameters) {
+			if (gp != nullptr && gp->name == p_generic_param) {
+				return gp; 
+			}
+		}
+	}
+	if (parser->current_class != nullptr) {  ///scan class level generics
+		for (GDScriptParser::IdentifierNode* gp : parser->current_class->generic_parameters) {
+			if (gp != nullptr && gp->name == p_generic_param) {
+				return gp;
+			}
+		}
+	}
+	return nullptr;
+}
+
+///[Monarch] checks that a default value is actually legal for a generic parameter.
+///resolve_assignable can't do this itself because check_type_compatibility
+///correctly lets concrete->open-generic through (it's fine at call sites),
+///but defaults are provably wrong if they don't satisfy the upper bound
+
+void GDScriptAnalyzer::check_generic_assignable(GDScriptParser::IdentifierNode* p_generic_decl, const StringName& p_generic_param, GDScriptParser::ExpressionNode* p_initializer, const char* p_kind) {
+
+	const GDScriptParser::DataType& default_type = p_initializer->get_datatype();
+
+	if (!default_type.is_set() || default_type.has_no_type()) {
+		return;
+	}
+
+	const bool default_is_null = default_type.kind == GDScriptParser::DataType::BUILTIN && default_type.builtin_type == Variant::NIL;
+	const bool default_is_generic = default_type.kind == GDScriptParser::DataType::GENERIC_TYPE;
+	const bool default_is_concrete = default_type.is_hard_type() && !default_type.is_variant();
+
+	if (default_is_generic) {
+		if (String(p_kind) == "variable") {
+			/// generic declarations can be represented as variable-like assignables during analysis!!!
+			/// their generic upper-bound syntax (like `T: U`) must not be treated as a runtime default value!!!
+			return;
+		}
+
+		push_error(vformat(
+				R"([Reginleif] Default value for %s "%s" cannot be another generic parameter, as generic parameters have no value at definition time. Note: Use a proper value for expressions.)",
+				p_kind, p_generic_param),
+				p_initializer);
+		return;
+	}
+
+	if (p_generic_decl->generic_upper_bound == nullptr) {
+		if (default_is_null) {
+			push_error(vformat(
+					R"([Reginleif] Default "null" for unconstrained generic %s "%s" is not allowed, because you cannot guarantee %s is nullable. Note: If %s should always be an object-type (and thus nullable), add an upper bound: [%s: Object])",
+					p_kind, p_generic_param, p_generic_param, p_generic_param, p_generic_param),
+					p_initializer);
+		} else if (default_is_concrete) {
+			push_error(vformat(
+					R"([Reginleif] Default value of type "%s" for unconstrained generic %s "%s" cannot be verified to necessarily be of that type. Note: Consider adding an upper bound on %s as such: [%s: %s])",
+					default_type.to_string(), p_kind, p_generic_param, p_generic_param, p_generic_param, default_type.to_string()),
+					p_initializer);
+		} else {
+			push_error(vformat(
+					R"([Reginleif] Default expression for unconstrained generic %s "%s" has no determinable type and cannot be verified. Note: consider giving that expression a type.)",
+					p_kind, p_generic_param),
+					p_initializer);
+		}
+		return;
+	}
+
+	GDScriptParser::DataType upper_bound = type_from_metatype(resolve_datatype(p_generic_decl->generic_upper_bound));
+	if (upper_bound.is_variant()) {
+		return;
+	}
+
+	if (upper_bound.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+		StringName terminal_param;
+		GDScriptParser::DataType resolved_bound = upper_bound;
+		if (!resolve_generic_bound_chain(upper_bound.generic_param, resolved_bound, terminal_param)) {
+			if (default_is_null) {
+				push_error(vformat(
+						R"([Reginleif] Default "null" for %s "%s" is not allowed. Bound chain for "%s" ends at unconstrained "%s", so nullability cannot be guaranteed. Note: If null is intended, add an object-type upper bound as such: [%s: Object].)",
+						p_kind, p_generic_param, p_generic_param, terminal_param, terminal_param),
+						p_initializer);
+			} else if (!default_is_concrete) {
+				push_error(vformat(
+						R"([Reginleif] Default value for %s "%s" has no determinable type and cannot be verified. Upper bound chain for "%s" ends at unconstrained "%s". Note: Consider giving the default expression an explicit type, or add an upper bound with its correct type.)",
+						p_kind, p_generic_param, p_generic_param, terminal_param),
+						p_initializer);
+			} else {
+				push_error(vformat(
+						R"([Reginleif] Default value of type "%s" for %s "%s" cannot be verified. Upper bound chain for "%s" ends at unconstrained "%s". Note: Consider adding a concrete upper bound as such: [%s: %s].)",
+						default_type.to_string(), p_kind, p_generic_param, p_generic_param, terminal_param, terminal_param, default_type.to_string()),
+						p_initializer);
+			}
+			return;
+		}
+		upper_bound = resolved_bound;
+	}
+
+	if (default_is_null) {
+		const bool upper_is_object = upper_bound.kind == GDScriptParser::DataType::NATIVE ||
+				upper_bound.kind == GDScriptParser::DataType::CLASS ||
+				upper_bound.kind == GDScriptParser::DataType::SCRIPT ||
+				(upper_bound.kind == GDScriptParser::DataType::BUILTIN && upper_bound.builtin_type == Variant::OBJECT);
+		if (!upper_is_object) {
+			push_error(vformat(
+					R"([Reginleif] Default "null" for %s "%s" is invalid, as %s is not a nullable type. Note: Consider removing the null default.)",
+					p_kind, p_generic_param, upper_bound.to_string()),
+					p_initializer);
+		}
+		return;
+	}
+
+	if (!default_is_concrete) {
+		push_error(vformat(
+				R"([Reginleif] Default value for %s "%s" has no determinable type and cannot be verified against upper bound "%s". Note: consider giving the default expression an explicit type.)",
+				p_kind, p_generic_param, upper_bound.to_string()),
+				p_initializer);
+		return;
+	}
+
+	if (!is_type_compatible(upper_bound, default_type, true, p_initializer)) {
+		push_error(vformat(
+				R"([Reginleif] Default value of type "%s" for %s "%s" is not compatible with generic upper bound "%s". Note: consider changing the upper bound of %s to its type as such: [%s: %s])",
+				default_type.to_string(), p_kind, p_generic_param, upper_bound.to_string(), p_generic_param, p_generic_param, default_type.to_string()),
+				p_initializer);
+	}
+}
+
+void GDScriptAnalyzer::check_generic_parameter_default(GDScriptParser::ParameterNode* p_param) {
+	if (p_param->initializer == nullptr) {
+		return;
+	}
+	const GDScriptParser::DataType& param_type = p_param->get_datatype();
+	if (param_type.kind != GDScriptParser::DataType::GENERIC_TYPE) {
+		return;
+	}
+	GDScriptParser::IdentifierNode* decl = find_generic_param_decl(param_type.generic_param);
+	if (decl == nullptr) {
+		return;
+	}
+	check_generic_assignable(decl, param_type.generic_param, p_param->initializer, "parameter");
+}
+
+///[Monarch] chases a generic upper bound chain until it hits a concrete type or runs out.
+///returns false if the chain ends unconstrained (meaning we know nothing about the type).
+bool GDScriptAnalyzer::resolve_generic_bound_chain(const StringName& p_generic_param, GDScriptParser::DataType& r_resolved_bound, StringName& r_terminal_param) {
+
+    GDScriptParser::IdentifierNode* decl = nullptr;
+    if (parser->current_function != nullptr) {
+        for (GDScriptParser::IdentifierNode* gp : parser->current_function->generic_parameters) {
+            if (gp != nullptr && gp->name == p_generic_param) {
+                decl = gp;
+                break;
+            }
+        }
+    }
+    if (decl == nullptr && parser->current_class != nullptr) {
+        for (GDScriptParser::IdentifierNode* gp : parser->current_class->generic_parameters) {
+            if (gp != nullptr && gp->name == p_generic_param) {
+                decl = gp;
+                break;
+            }
+        }
+    }
+
+    if (decl == nullptr || decl->generic_upper_bound == nullptr) {
+		r_terminal_param = p_generic_param;
+        return false; ///unconstrained, chain ends here... yay?
+    }
+
+    r_resolved_bound = type_from_metatype(resolve_datatype(decl->generic_upper_bound));
+
+    if (r_resolved_bound.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+        return resolve_generic_bound_chain(r_resolved_bound.generic_param, r_resolved_bound, r_terminal_param);
+    }
+
+    return true; ///chased something concrete and constrained! yay!
 }
 
 void GDScriptAnalyzer::resolve_if(GDScriptParser::IfNode *p_if) {
@@ -3034,6 +3225,12 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 				update_const_expression_builtin_type(p_return->return_value, expected_type, "return");
 			}
 			result = p_return->return_value->get_datatype();
+		}
+	}
+
+	if (has_expected_type && expected_type.kind == GDScriptParser::DataType::GENERIC_TYPE && p_return->return_value != nullptr) {
+		if (GDScriptParser::IdentifierNode* decl = find_generic_param_decl(expected_type.generic_param)) {
+			check_generic_assignable(decl, expected_type.generic_param, p_return->return_value, "return value");
 		}
 	}
 
@@ -3441,6 +3638,14 @@ void GDScriptAnalyzer::reduce_assignment(GDScriptParser::AssignmentNode *p_assig
 
 	if (p_assignment->operation == GDScriptParser::AssignmentNode::OP_NONE && assignee_type.is_hard_type() && p_assignment->assigned_value->is_constant) {
 		update_const_expression_builtin_type(p_assignment->assigned_value, assignee_type, "assign");
+	}
+
+	/// [Monarch] validate assignments to generic-typed variables against their upper bound.
+	if (assignee_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+		GDScriptParser::IdentifierNode* decl = find_generic_param_decl(assignee_type.generic_param);
+		if (decl != nullptr) {
+			check_generic_assignable(decl, assignee_type.generic_param, p_assignment->assigned_value, "variable");
+		}
 	}
 
 	GDScriptParser::DataType assigned_value_type = p_assignment->assigned_value->get_datatype();
