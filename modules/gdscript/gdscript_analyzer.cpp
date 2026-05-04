@@ -2760,6 +2760,12 @@ void GDScriptAnalyzer::check_generic_assignable(GDScriptParser::IdentifierNode* 
 	const bool default_is_concrete = default_type.is_hard_type() && !default_type.is_variant();
 
 	if (default_is_generic) {
+		if (String(p_kind) == "variable") {
+			/// generic declarations can be represented as variable-like assignables during analysis!!!
+			/// their generic upper-bound syntax (like `T: U`) must not be treated as a runtime default value!!!
+			return;
+		}
+		
 		push_error(vformat(
 				R"([Reginleif] Default value for %s "%s" cannot be another generic parameter, as generic parameters have no value at definition time. Note: Use a proper value for expressions.)",
 				p_kind, p_generic_param),
