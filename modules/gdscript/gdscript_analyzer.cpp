@@ -2806,9 +2806,30 @@ void GDScriptAnalyzer::check_generic_parameter_default(GDScriptParser::Parameter
 		return; ///Variant bound means anything goes. that's a weird bound. consider warning?
 	}
 
-	///upper bound is itself a generic, can't statically verify anything, and must be resolved at the call site instead
+	///upper bound is itself a generic, so chase the chain recursively until we hit a concrete bound or run out
 	if (upper_bound.kind == GDScriptParser::DataType::GENERIC_TYPE) {
-		return;
+		StringName terminal_param;
+		if (!resolve_generic_bound_chain(upper_bound.generic_param, upper_bound, terminal_param)) {
+			///chain ended unconstrained, same rules as no bound at all
+			if (default_is_null) {
+				push_error(vformat(
+						R"([Reginleif] Default "null" for parameter "%s" is not allowed. Bound chain for "%s" ends at unconstrained "%s", so nullability cannot be guaranteed. Note: If null is intended, add an object-type upper bound as such: [%s: Object].)",
+						p_param->identifier->name, param_type.generic_param, terminal_param, terminal_param),
+						p_param->initializer);
+			} else if (!default_is_concrete) {
+				push_error(vformat(
+						R"([Reginleif] Default value for parameter "%s" has no determinable type and cannot be verified. Upper bound chain for "%s" ends at unconstrained "%s". Note: Consider giving the default expression an explicit type, or add an upper bound with its correct type.)",
+						p_param->identifier->name, param_type.generic_param, terminal_param, terminal_param),
+						p_param->initializer);
+			} else {
+				push_error(vformat(
+						R"([Reginleif] Default value of type "%s" for parameter "%s" cannot be verified. Upper bound chain for "%s" ends at unconstrained "%s". Note: Consider adding a concrete upper bound as such: [%s: %s].)",
+						default_type.to_string(), p_param->identifier->name, param_type.generic_param, terminal_param, terminal_param, default_type.to_string()),
+						p_param->initializer);
+			}
+			return;
+		}
+		///upper_bound is now the terminal concrete bound, fall through to normal checks
 	}
 
 	///null against a non-nullable
@@ -2842,6 +2863,42 @@ void GDScriptAnalyzer::check_generic_parameter_default(GDScriptParser::Parameter
 				default_type.to_string(), p_param->identifier->name, upper_bound.to_string(), param_type.generic_param, param_type.generic_param, default_type.to_string()),
 				p_param->initializer);
 	}
+}
+
+///[Monarch] chases a generic upper bound chain until it hits a concrete type or runs out.
+///returns false if the chain ends unconstrained (meaning we know nothing about the type).
+bool GDScriptAnalyzer::resolve_generic_bound_chain(const StringName& p_generic_param, GDScriptParser::DataType& r_resolved_bound, StringName& r_terminal_param) {
+
+    GDScriptParser::IdentifierNode* decl = nullptr;
+    if (parser->current_function != nullptr) {
+        for (GDScriptParser::IdentifierNode* gp : parser->current_function->generic_parameters) {
+            if (gp != nullptr && gp->name == p_generic_param) {
+                decl = gp;
+                break;
+            }
+        }
+    }
+    if (decl == nullptr && parser->current_class != nullptr) {
+        for (GDScriptParser::IdentifierNode* gp : parser->current_class->generic_parameters) {
+            if (gp != nullptr && gp->name == p_generic_param) {
+                decl = gp;
+                break;
+            }
+        }
+    }
+
+    if (decl == nullptr || decl->generic_upper_bound == nullptr) {
+		r_terminal_param = p_generic_param;
+        return false; ///unconstrained, chain ends here... yay?
+    }
+
+    r_resolved_bound = type_from_metatype(resolve_datatype(decl->generic_upper_bound));
+
+    if (r_resolved_bound.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+        return resolve_generic_bound_chain(r_resolved_bound.generic_param, r_resolved_bound, r_terminal_param);
+    }
+
+    return true; ///chased something concrete and constrained! yay!
 }
 
 void GDScriptAnalyzer::resolve_if(GDScriptParser::IfNode *p_if) {
