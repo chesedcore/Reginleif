@@ -5684,9 +5684,14 @@ String GDScriptParser::DataType::to_property_info_hint_string() const {
 			return String(native_type).replace("::", ".");
 		case VARIANT:
 			return "Variant";
+		case GENERIC_TYPE: {
+			if (const DataType* binding = generic_type_bindings.getptr(generic_param)) {
+				return binding->to_property_info_hint_string();
+			}
+			return generic_param;
+		}
 		case RESOLVING:
 		case UNRESOLVED:
-		case GENERIC_TYPE:
 			break;
 	}
 	ERR_FAIL_V_MSG("Variant", "GDScript bug: Unexpected type kind.");
