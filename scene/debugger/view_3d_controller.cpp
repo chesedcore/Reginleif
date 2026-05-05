@@ -35,9 +35,8 @@
 #include "core/config/engine.h"
 #include "core/input/input.h"
 #include "core/input/shortcut.h"
-#include "core/object/class_db.h" // IWYU pragma: keep. `ADD_SIGNAL` macro.
 #include "scene/main/scene_tree.h"
-#include "scene/main/window.h" // IWYU pragma: keep. Needed to get the mouse position from the root window.
+#include "scene/main/window.h"
 
 using namespace View3DControllerConsts;
 
