@@ -32,6 +32,7 @@
 
 #include "core/input/input_enums.h"
 #include "core/object/method_bind_common.h" // IWYU pragma: keep. For `VARIANT_BITFIELD_CAST(MethodFlags)`.
+#include "core/object/property_info.h"
 #include "core/os/keyboard.h"
 #include "core/variant/type_info.h"
 #include "core/variant/variant.h"
@@ -707,7 +708,7 @@ void register_global_constants() {
 
 	BIND_CORE_BITFIELD_FLAG(PROPERTY_USAGE_STORE_IF_NULL);
 	BIND_CORE_BITFIELD_FLAG(PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED);
-	BIND_CORE_BITFIELD_FLAG(PROPERTY_USAGE_SCRIPT_DEFAULT_VALUE);
+	BIND_CORE_BITFIELD_FLAG(PROPERTY_USAGE_GENERIC);
 	BIND_CORE_BITFIELD_FLAG(PROPERTY_USAGE_CLASS_IS_ENUM);
 	BIND_CORE_BITFIELD_FLAG(PROPERTY_USAGE_NIL_IS_VARIANT);
 	BIND_CORE_BITFIELD_FLAG(PROPERTY_USAGE_ARRAY);
