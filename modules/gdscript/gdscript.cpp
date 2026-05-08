@@ -269,15 +269,6 @@ StringName GDScript::get_global_name() const {
 	return global_name;
 }
 
-///
-void GDScript::set_generic_type_args(const String& p_args) {
-	generic_type_args = p_args;
-}
-
-String GDScript::get_generic_type_args() const {
-	return generic_type_args;
-}
-
 StringName GDScript::get_instance_base_type() const {
 	if (native.is_valid()) {
 		return native->get_name();
@@ -1084,9 +1075,6 @@ void GDScript::_get_property_list(List<PropertyInfo> *p_properties) const {
 }
 
 void GDScript::_bind_methods() {
-	///TODO: migrate these fuckers to gdtype when the time comes around
-	ClassDB::bind_method(D_METHOD("set_generic_type_args", "args"), &GDScript::set_generic_type_args);
-	ClassDB::bind_method(D_METHOD("get_generic_type_args"), &GDScript::get_generic_type_args);
 	ClassDB::bind_vararg_method(METHOD_FLAGS_DEFAULT, "new", &GDScript::_new, MethodInfo("new"));
 }
 
