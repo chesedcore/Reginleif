@@ -4904,6 +4904,70 @@ static StringName _find_narrowest_native_or_global_class(const GDScriptParser::D
 	}
 }
 
+///ferry the hint in a specialised metadata format on the script
+///TODO: add actual fields to the script file to prevent String payload bullshit
+///this was just a "HACK:" i made up to get stuff done fast
+static String _encode_generic_export_hint(PropertyHint p_base_hint, const String& p_base_hint_string, const GDScriptParser::DataType& p_type) {
+	String encoded = vformat("base_hint=%d|base_hint_string=%s|type=%s", int(p_base_hint), p_base_hint_string.replace("|", "||"), p_type.to_string().replace("|", "||"));
+	print_line(vformat("[Reginleif][GenericExport][Encode] hint=%s", encoded));
+	return encoded;
+}
+
+
+static bool _datatype_contains_generic_parameter(const GDScriptParser::DataType& p_type) {
+	if (p_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+		return true;
+	}
+	for (int i = 0; i < p_type.container_element_types.size(); i++) {
+		if (_datatype_contains_generic_parameter(p_type.container_element_types[i])) {
+			return true;
+		}
+	}
+	for (const KeyValue<StringName, GDScriptParser::DataType>& E : p_type.generic_type_bindings) {
+		if (_datatype_contains_generic_parameter(E.value)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
+static bool _resolve_generic_export_upper_bound(const GDScriptParser::DataType& p_type, const GDScriptParser::ClassNode* p_class, GDScriptParser::DataType& r_resolved) {
+	
+	if (p_type.kind != GDScriptParser::DataType::GENERIC_TYPE) {
+		r_resolved = p_type;
+		return true;
+	}
+
+	print_line(vformat("[Reginleif][GenericExport][Resolve] trying generic=%s", p_type.generic_param));
+
+	if (p_class == nullptr) {
+		print_line("[Reginleif][GenericExport][Resolve][ERROR] class context is null");
+		return false;
+	}
+
+	for (int i = 0; i < p_class->generic_parameters.size(); i++) {
+		const GDScriptParser::IdentifierNode* param = p_class->generic_parameters[i];
+		if (param->name != p_type.generic_param) {
+			continue;
+		}
+		if (param->generic_upper_bound == nullptr) {
+			print_line(vformat("[Reginleif][GenericExport][Resolve][ERROR] generic %s has no upper bound", p_type.generic_param));
+			return false;
+		}
+		const GDScriptParser::DataType bound = param->generic_upper_bound->get_datatype();
+		if (!bound.is_set()) {
+			print_line(vformat("[Reginleif][GenericExport][Resolve][ERROR] upper bound for %s is not resolved", p_type.generic_param));
+			return false;
+		}
+		r_resolved = bound;
+		print_line(vformat("[Reginleif][GenericExport][Resolve] generic %s resolved to %s", p_type.generic_param, r_resolved.to_string()));
+		return true;
+	}
+	print_line(vformat("[Reginleif][GenericExport][Resolve][ERROR] generic %s not found in class params", p_type.generic_param));
+	return false;
+}
+
 template <PropertyHint t_hint, Variant::Type t_type>
 bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class) {
 	ERR_FAIL_COND_V_MSG(p_target->type != Node::VARIABLE, false, vformat(R"("%s" annotation can only be applied to variables.)", p_annotation->name));
@@ -4989,6 +5053,16 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 	// This is called after the analyzer is done finding the type, so this should be set here.
 	DataType export_type = variable->get_datatype();
 
+	if (export_type.kind == DataType::GENERIC_TYPE) {
+		DataType resolved_generic_bound;
+		if (_resolve_generic_export_upper_bound(export_type, p_class, resolved_generic_bound)) {
+			export_type = resolved_generic_bound;
+		} else {
+			push_error(R"(Export type can only be built-in, a resource, a node, or an enum.)", p_annotation);
+			return false;
+		}
+	}
+
 	// Use initializer type if specified type is `Variant`.
 	if (export_type.is_variant() && variable->initializer != nullptr && variable->initializer->datatype.is_set()) {
 		export_type = variable->initializer->get_datatype();
@@ -5002,17 +5076,61 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 	if (export_type.builtin_type == Variant::ARRAY && export_type.has_container_element_type(0)) {
 		is_array = true;
 		export_type = export_type.get_container_element_type(0);
+
+		///
+		if (export_type.kind == DataType::GENERIC_TYPE) {
+			DataType resolved_generic_bound;
+			if (_resolve_generic_export_upper_bound(export_type, p_class, resolved_generic_bound)) {
+				export_type = resolved_generic_bound;
+			}
+		}
+
+
 	} else if (export_type.is_typed_container_type()) {
 		is_array = true;
 		export_type = export_type.get_typed_container_type();
 		export_type.type_source = variable->datatype.type_source;
+
+		///
+		if (export_type.kind == DataType::GENERIC_TYPE) {
+			DataType resolved_generic_bound;
+			if (_resolve_generic_export_upper_bound(export_type, p_class, resolved_generic_bound)) {
+				export_type = resolved_generic_bound;
+			} else {
+				push_error(R"(Generics can only be exported if their upper bound is a built-in, a resource, a node, or an enum.)", p_annotation);
+				return false;
+			}
+		}
 	}
+
 
 	bool is_dict = false;
 	if (export_type.builtin_type == Variant::DICTIONARY && export_type.has_container_element_types()) {
 		is_dict = true;
 		DataType inner_type = export_type.get_container_element_type_or_variant(1);
+
+		if (inner_type.kind == DataType::GENERIC_TYPE) {
+			DataType resolved_generic_bound;
+			if (_resolve_generic_export_upper_bound(inner_type, p_class, resolved_generic_bound)) {
+				inner_type = resolved_generic_bound;
+			} else {
+				push_error(R"(Generics can only be exported if their upper bound is a built-in, a resource, a node, or an enum.)", p_annotation);
+				return false;
+			}
+		}
+
+
 		export_type = export_type.get_container_element_type_or_variant(0);
+		if (export_type.kind == DataType::GENERIC_TYPE) {
+			DataType resolved_generic_bound;
+			if (_resolve_generic_export_upper_bound(export_type, p_class, resolved_generic_bound)) {
+				export_type = resolved_generic_bound;
+			} else {
+				push_error(R"(Generics can only be exported if their upper bound is a built-in, a resource, a node, or an enum.)", p_annotation);
+				return false;
+			}
+		}
+
 		export_type.set_container_element_type(0, inner_type); // Store earlier extracted value within key to separately parse after.
 	}
 
@@ -5057,14 +5175,15 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 			case GDScriptParser::DataType::SCRIPT:
 			case GDScriptParser::DataType::CLASS: {
 				const StringName class_name = _find_narrowest_native_or_global_class(export_type);
+				const String generic_aware_class_name = export_type.to_property_info_hint_string(); ///
 				if (ClassDB::is_parent_class(export_type.native_type, SNAME("Resource"))) {
 					variable->export_info.type = Variant::OBJECT;
 					variable->export_info.hint = PROPERTY_HINT_RESOURCE_TYPE;
-					variable->export_info.hint_string = class_name;
+					variable->export_info.hint_string = generic_aware_class_name.is_empty() ? String(class_name) : generic_aware_class_name;
 				} else if (ClassDB::is_parent_class(export_type.native_type, SNAME("Node"))) {
 					variable->export_info.type = Variant::OBJECT;
 					variable->export_info.hint = PROPERTY_HINT_NODE_TYPE;
-					variable->export_info.hint_string = class_name;
+					variable->export_info.hint_string = generic_aware_class_name.is_empty() ? String(class_name) : generic_aware_class_name;
 				} else {
 					push_error(R"(Export type can only be built-in, a resource, a node, or an enum.)", p_annotation);
 					return false;
@@ -5120,6 +5239,14 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 
 			// Now parse value.
 			export_type = export_type.get_container_element_type(0);
+		
+		///
+		if (export_type.kind == DataType::GENERIC_TYPE) {
+			DataType resolved_generic_bound;
+			if (_resolve_generic_export_upper_bound(export_type, p_class, resolved_generic_bound)) {
+				export_type = resolved_generic_bound;
+			}
+		}
 
 			if (export_type.is_variant() || export_type.has_no_type()) {
 				export_type.kind = GDScriptParser::DataType::BUILTIN;
@@ -5134,14 +5261,15 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 				case GDScriptParser::DataType::SCRIPT:
 				case GDScriptParser::DataType::CLASS: {
 					const StringName class_name = _find_narrowest_native_or_global_class(export_type);
+					const String generic_aware_class_name = export_type.to_property_info_hint_string();
 					if (ClassDB::is_parent_class(export_type.native_type, SNAME("Resource"))) {
 						variable->export_info.type = Variant::OBJECT;
 						variable->export_info.hint = PROPERTY_HINT_RESOURCE_TYPE;
-						variable->export_info.hint_string = class_name;
+						variable->export_info.hint_string = generic_aware_class_name.is_empty() ? String(class_name) : generic_aware_class_name;
 					} else if (ClassDB::is_parent_class(export_type.native_type, SNAME("Node"))) {
 						variable->export_info.type = Variant::OBJECT;
 						variable->export_info.hint = PROPERTY_HINT_NODE_TYPE;
-						variable->export_info.hint_string = class_name;
+						variable->export_info.hint_string = generic_aware_class_name.is_empty() ? String(class_name) : generic_aware_class_name;
 					} else {
 						push_error(R"(Export type can only be built-in, a resource, a node, or an enum.)", p_annotation);
 						return false;
@@ -5234,6 +5362,16 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 		variable->export_info.hint_string = hint_prefix + ":" + variable->export_info.hint_string;
 		variable->export_info.usage = PROPERTY_USAGE_DEFAULT;
 		variable->export_info.class_name = StringName();
+	}
+
+	///if the datatype has a generic parameter, annotate the metadata and the usage before sending downstream
+	if (_datatype_contains_generic_parameter(variable->get_datatype())) {
+		const PropertyHint original_hint = variable->export_info.hint;
+		const String original_hint_string = variable->export_info.hint_string;
+		variable->export_info.hint = PROPERTY_HINT_GENERIC;
+		variable->export_info.hint_string = _encode_generic_export_hint(original_hint, original_hint_string, variable->get_datatype());
+		variable->export_info.usage |= PROPERTY_USAGE_GENERIC;
+		print_line(vformat("[Reginleif][GenericExport][Annotate] name=%s type=%s usage=%d", variable->identifier->name, variable->get_datatype().to_string(), int(variable->export_info.usage)));
 	}
 
 	return true;
@@ -5675,8 +5813,24 @@ String GDScriptParser::DataType::to_property_info_hint_string() const {
 				return native_type;
 			}
 		case CLASS:
+			///
 			if (class_type != nullptr && class_type->get_global_name() != StringName()) {
-				return class_type->get_global_name();
+				String result = class_type->get_global_name();
+				if (!generic_type_bindings.is_empty() && class_type->has_generic_parameters()) {
+					result += "[";
+					bool first = true;
+					for (const GDScriptParser::IdentifierNode* param : class_type->generic_parameters) {
+						if (!first) {
+							result += ", ";
+						}
+						first = false;
+						const DataType *bound = generic_type_bindings.getptr(param->name);
+						result += String(param->name) + "=" + (bound != nullptr ? bound->to_property_info_hint_string() : String(param->name));
+					}
+					result += "]";
+				}
+				return result;
+
 			} else {
 				return native_type;
 			}
