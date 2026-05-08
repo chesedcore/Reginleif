@@ -749,6 +749,8 @@ class EditorPropertyResource : public EditorProperty {
 	bool opened_editor = false;
 	bool use_filter = false;
 	bool user_opened_editor = false;
+	String generic_binding_payload;
+	String generic_child_binding_payload;
 
 	void _resource_selected(const Ref<Resource> &p_resource, bool p_inspect);
 	void _resource_changed(const Ref<Resource> &p_resource);

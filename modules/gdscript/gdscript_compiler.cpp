@@ -2883,6 +2883,7 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 				PropertyInfo export_info = variable->export_info;
 
 				if (variable->exported) {
+					// print_line(vformat("[Reginleif][GenericExport][Compiler] exported member=%s export_usage=%d export_hint=%d export_hint_string=%s datatype=%s", name, int(export_info.usage), int(export_info.hint), export_info.hint_string, variable_type.to_string()));
 					if (!minfo.data_type.has_type()) {
 						prop_info.type = export_info.type;
 						prop_info.class_name = export_info.class_name;
@@ -2890,6 +2891,23 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 					prop_info.hint = export_info.hint;
 					prop_info.hint_string = export_info.hint_string;
 					prop_info.usage = export_info.usage;
+
+					///
+					if ((export_info.usage & PROPERTY_USAGE_GENERIC) != 0) {
+						const PropertyInfo resolved_type_info = variable_type.to_property_info(name);
+						// print_line(vformat("[Reginleif][GenericExport][Compiler] member=%s datatype=%s resolved_type=%d resolved_hint=%d resolved_hint_string=%s", name, variable_type.to_string(), int(resolved_type_info.type), int(resolved_type_info.hint), resolved_type_info.hint_string));
+						if (resolved_type_info.type != Variant::NIL) {
+							prop_info.type = resolved_type_info.type;
+							prop_info.class_name = resolved_type_info.class_name;
+						}
+						if (resolved_type_info.hint != PROPERTY_HINT_NONE || !resolved_type_info.hint_string.is_empty()) {
+							prop_info.hint = resolved_type_info.hint;
+							prop_info.hint_string = resolved_type_info.hint_string;
+						}
+						prop_info.usage |= resolved_type_info.usage;
+					}
+				
+
 				} else {
 					// Enum hint doesn't really belong to the data type information, so we don't want to add it to
 					// `GDScriptParser::DataType::to_property_info()`. However, we still want to add this metadata

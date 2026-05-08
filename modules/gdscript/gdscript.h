@@ -194,6 +194,9 @@ private:
 
 	String _get_debug_path() const;
 
+	///
+	String generic_type_args;
+
 #ifdef TOOLS_ENABLED
 	HashSet<PlaceHolderScriptInstance *> placeholders;
 	//void _update_placeholder(PlaceHolderScriptInstance *p_placeholder);
@@ -233,6 +236,9 @@ public:
 	}
 
 	_FORCE_INLINE_ StringName get_local_name() const { return local_name; }
+	///
+	void set_generic_type_args(const String& p_args);
+	String get_generic_type_args() const;
 
 	void clear();
 
