@@ -3724,10 +3724,14 @@ void EditorPropertyResource::setup(Object *p_object, const String &p_path, const
 
 		print_line(vformat("[Reginleif][GenericExport][Metadata] setup path=%s base_type=%s owner_payload=%s child_payload=%s", p_path, p_base_type, generic_binding_payload, generic_child_binding_payload));
 			if (p_object != nullptr && p_base_type.find_char('[') != -1) {
-			Dictionary owner_meta;
-			owner_meta["args"] = generic_binding_payload;
-			p_object->set_meta(SNAME("__gd_generic_bindings"), owner_meta);
-			print_line(vformat("[Reginleif][GenericExport][Metadata] attached owner object meta payload=%s", generic_binding_payload));
+			if (!p_object->has_meta(SNAME("__gd_generic_bindings"))) {
+				Dictionary owner_meta;
+				owner_meta["args"] = generic_binding_payload;
+				p_object->set_meta(SNAME("__gd_generic_bindings"), owner_meta);
+				print_line(vformat("[Reginleif][GenericExport][Metadata] attached owner object meta payload=%s", generic_binding_payload));
+			} else {
+				print_line(vformat("[Reginleif][GenericExport][Metadata] preserving existing owner object meta payload=%s", p_object->get_meta(SNAME("__gd_generic_bindings"))));
+			}
 			Variant script_variant = p_object->get("script");
 			if (script_variant.get_type() == Variant::OBJECT) {
 				Ref<Script> owner_script = script_variant;
