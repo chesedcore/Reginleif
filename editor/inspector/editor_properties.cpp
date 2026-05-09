@@ -3480,11 +3480,8 @@ void EditorPropertyResource::_resource_changed(const Ref<Resource> &p_resource) 
 			return;
 		}
 	}
-	///TODO: FOR THIS ENTIRE FILE, eventually remove the debug spam
-	///i got too into the tracing lol
 
 	if (!_is_resource_assignment_valid(p_resource)) {
-		print_line(vformat("[Reginleif][GenericExport][Guard] Rejected invalid resource assignment. property=%s expected_payload=%s", get_edited_property(), generic_child_binding_payload));
 		emit_changed(get_edited_property(), Ref<Resource>());
 		update_property();
 		return;
@@ -3698,7 +3695,6 @@ void EditorPropertyResource::setup(Object *p_object, const String &p_path, const
 	const int bracket_pos = picker_base_type.find_char('[');
 	if (bracket_pos != -1) {
 		picker_base_type = picker_base_type.substr(0, bracket_pos);
-		print_line(vformat("[Reginleif][GenericExport][Metadata] normalized picker base_type from %s to %s", p_base_type, picker_base_type));
 	}
 	resource_picker->set_base_type(picker_base_type);
 	const int open = p_base_type.find_char('[');
@@ -3711,7 +3707,6 @@ void EditorPropertyResource::setup(Object *p_object, const String &p_path, const
 
 		Vector<String> top_level_args = _extract_top_level_generic_args(p_base_type);
 		if (top_level_args.size() > 1) {
-			print_line(vformat("[Reginleif][GenericExport][Metadata][WARN] Multi-arg generic not yet fully supported in editor propagation. base_type=%s args=%s", p_base_type, String(", ").join(top_level_args)));
 			generic_binding_payload = String(", ").join(top_level_args);
 			generic_child_binding_payload = generic_binding_payload;
 		} else {
@@ -3722,23 +3717,19 @@ void EditorPropertyResource::setup(Object *p_object, const String &p_path, const
 			generic_child_binding_payload = generic_binding_payload;
 		}
 
-		print_line(vformat("[Reginleif][GenericExport][Metadata] setup path=%s base_type=%s owner_payload=%s child_payload=%s", p_path, p_base_type, generic_binding_payload, generic_child_binding_payload));
 			if (p_object != nullptr && p_base_type.find_char('[') != -1) {
 			if (!p_object->has_meta(SNAME("__gd_generic_bindings"))) {
 				Dictionary owner_meta;
 				owner_meta["args"] = generic_binding_payload;
 				p_object->set_meta(SNAME("__gd_generic_bindings"), owner_meta);
-				print_line(vformat("[Reginleif][GenericExport][Metadata] attached owner object meta payload=%s", generic_binding_payload));
-			} else {
-				print_line(vformat("[Reginleif][GenericExport][Metadata] preserving existing owner object meta payload=%s", p_object->get_meta(SNAME("__gd_generic_bindings"))));
 			}
+
 			Variant script_variant = p_object->get("script");
 			if (script_variant.get_type() == Variant::OBJECT) {
 				Ref<Script> owner_script = script_variant;
 				if (owner_script.is_valid()) {
 					if (owner_script->has_method(SNAME("set_generic_type_args"))) {
 						owner_script->call(SNAME("set_generic_type_args"), generic_binding_payload);
-						print_line(vformat("[Reginleif][GenericExport][Metadata] attached owner GDScript generic args payload=%s", generic_binding_payload));
 					}
 				}
 			}
@@ -3746,17 +3737,13 @@ void EditorPropertyResource::setup(Object *p_object, const String &p_path, const
 
 		if (p_object != nullptr) {
 			const Variant existing_value = p_object->get(p_path);
-			print_line(vformat("[Reginleif][GenericExport][Metadata] setup existing_value_type=%d value=%s", int(existing_value.get_type()), existing_value));
 			if (existing_value.get_type() == Variant::OBJECT) {
 				Ref<Resource> existing_res = existing_value;
 				if (existing_res.is_valid()) {
 					Dictionary generic_meta;
 					generic_meta["args"] = generic_child_binding_payload;
 					existing_res->set_meta(SNAME("__gd_generic_bindings"), generic_meta);
-					print_line(vformat("[Reginleif][GenericExport][Metadata] pre-attached resource=%s payload=%s", existing_res->to_string(), generic_child_binding_payload));
 				}
-			} else {
-				print_line("[Reginleif][GenericExport][Metadata] setup no existing OBJECT value for metadata pre-attach.");
 			}
 		}
 	}
@@ -3782,14 +3769,10 @@ void EditorPropertyResource::update_property() {
 	Ref<Resource> res = get_edited_property_display_value();
 
 	///
-	if (!generic_binding_payload.is_empty()) {
-		print_line(vformat("[Reginleif][GenericExport][Metadata] update_property resource_valid=%d owner_payload=%s child_payload=%s edited_property=%s", int(res.is_valid()), generic_binding_payload, generic_child_binding_payload, get_edited_property()));
-	}
 	if (!generic_child_binding_payload.is_empty() && res.is_valid()) {
 		Dictionary generic_meta;
 		generic_meta["args"] = generic_child_binding_payload;
 		res->set_meta(SNAME("__gd_generic_bindings"), generic_meta);
-		print_line(vformat("[Reginleif][GenericExport][Metadata] attached resource=%s payload=%s", res->to_string(), generic_child_binding_payload));
 	}
 
 	if (use_sub_inspector) {
@@ -4146,34 +4129,21 @@ static bool _decode_generic_export_hint(const String& p_encoded, PropertyHint& r
 		parsed[part.substr(0, eq)] = part.substr(eq + 1, part.length());
 	}
 	if (!parsed.has("base_hint") || !parsed.has("base_hint_string")) {
-		print_line(vformat("[Reginleif][GenericExport][Decode][ERROR] Failed to parse encoded hint: %s", p_encoded));
 		return false;
 	}
 	r_base_hint = static_cast<PropertyHint>(int(String(parsed["base_hint"]).to_int()));
 	r_base_hint_string = String(parsed["base_hint_string"]).replace("||", "|");
-	print_line(vformat("[Reginleif][GenericExport][Decode] encoded=%s => hint=%d hint_string=%s", p_encoded, int(r_base_hint), r_base_hint_string));
 	return true;
 }
 
 static bool _try_resolve_generic_type_from_script(Object* p_object, const String& p_generic_name, String& r_resolved_type) {
 
-    print_line_rich(vformat("[color=green][Reginleif][Resolve][DEBUG] p_object=%s has_meta=%d",
-        p_object ? p_object->to_string() : "NULL",
-        (int)(p_object && p_object->has_meta(SNAME("__gd_generic_bindings")))));
-    
-    if (p_object && p_object->has_meta(SNAME("__gd_generic_bindings"))) {
-        print_line(vformat("[Reginleif][Resolve][DEBUG] meta=%s", 
-            p_object->get_meta(SNAME("__gd_generic_bindings")).operator String()));
-    }
-
 	if (p_object == nullptr) {
-		print_line("[Reginleif][GenericExport][Editor][Resolve][ERROR] p_object is null.");
 		return false;
 	}
-	print_line(vformat("[Reginleif][GenericExport][Editor][Resolve] object=%s generic=%s", p_object->to_string(), p_generic_name));
+
 	if (p_object->has_meta(SNAME("__gd_generic_bindings"))) {
 		Variant meta = p_object->get_meta(SNAME("__gd_generic_bindings"));
-		print_line(vformat("[Reginleif][GenericExport][Editor][Resolve] found __gd_generic_bindings meta type=%d payload=%s", int(meta.get_type()), meta));
 		if (meta.get_type() == Variant::DICTIONARY) {
 				Dictionary d = meta;
 				
@@ -4190,7 +4160,6 @@ static bool _try_resolve_generic_type_from_script(Object* p_object, const String
 						arg = arg.substr(eq + 1).strip_edges();
 					}
 					r_resolved_type = arg;
-					print_line(vformat("[Reginleif][GenericExport][Editor][Resolve] generic=%s resolved via metadata=%s", p_generic_name, r_resolved_type));
 					return true;
 				}
 
@@ -4199,7 +4168,6 @@ static bool _try_resolve_generic_type_from_script(Object* p_object, const String
 						const int eq = args[ai].find("=");
 						if (eq != -1 && args[ai].substr(0, eq).strip_edges() == p_generic_name) {
 							r_resolved_type = args[ai].substr(eq + 1).strip_edges();
-							print_line(vformat("[Reginleif][GenericExport][Editor][Resolve] generic=%s resolved via named arg value=%s", p_generic_name, r_resolved_type));
 							return true;
 						}
 					}
@@ -4212,7 +4180,6 @@ static bool _try_resolve_generic_type_from_script(Object* p_object, const String
 						arg = arg.substr(eq + 1).strip_edges();
 					}
 					r_resolved_type = arg;
-					print_line(vformat("[Reginleif][GenericExport][Editor][Resolve] generic=%s resolved via metadata=%s", p_generic_name, r_resolved_type));
 					return true;
 				}
 			}
@@ -4220,27 +4187,23 @@ static bool _try_resolve_generic_type_from_script(Object* p_object, const String
 	}
 
 	Variant script_variant = p_object->get("script");
-	print_line(vformat("[Reginleif][GenericExport][Editor][Resolve] script variant type=%d", int(script_variant.get_type())));
 	if (script_variant.get_type() != Variant::OBJECT) {
-		print_line("[Reginleif][GenericExport][Editor][Resolve][WARN] Object has no script object.");
 		return false;
 	}
 
 	Ref<Script> script = script_variant;
 	if (script.is_null()) {
-		print_line("[Reginleif][GenericExport][Editor][Resolve][WARN] Script ref is null.");
 		return false;
 	}
+
 	String script_generic_args;
 	if (script->has_method(SNAME("get_generic_type_args"))) {
 		script_generic_args = script->call(SNAME("get_generic_type_args"));
 	}
 	if (!script_generic_args.is_empty()) {
-		print_line(vformat("[Reginleif][GenericExport][Editor][Resolve] found script generic args payload=%s", script_generic_args));
 		Vector<String> args = script_generic_args.split(",", false);
 		if (args.size() == 1) {
 			r_resolved_type = args[0].strip_edges();
-			print_line(vformat("[Reginleif][GenericExport][Editor][Resolve] generic=%s resolved via script generic args=%s", p_generic_name, r_resolved_type));
 			return true;
 		}
 	}
@@ -4268,7 +4231,6 @@ static bool _try_resolve_generic_type_from_script(Object* p_object, const String
 
 	for (int probe_idx = 0; probe_idx < probe_texts.size(); probe_idx++) {
 		const String probe = probe_texts[probe_idx];
-		print_line(vformat("[Reginleif][GenericExport][Editor][Resolve] probe[%d]=%s", probe_idx, probe));
 		const int open = probe.find_char('[');
 		const int close = probe.rfind_char(']');
 		if (open == -1 || close == -1 || close <= open + 1) {
@@ -4283,13 +4245,10 @@ static bool _try_resolve_generic_type_from_script(Object* p_object, const String
 
 		if (args.size() == 1) {
 			r_resolved_type = args[0];
-			print_line(vformat("[Reginleif][GenericExport][Editor][Resolve] generic=%s resolved_to=%s from probe=%s", p_generic_name, r_resolved_type, probe));
 			return true;
 		}
 	}
 
-	print_line(vformat("[Reginleif][GenericExport][Editor][Resolve][WARN] Could not map generic=%s. Probes=%s", p_generic_name, String(", ").join(probe_texts)));
-	print_line("[Reginleif][GenericExport][Editor][Resolve][GAP] Missing concrete binding source. Expected __gd_generic_bindings metadata or script specialization name like Box[Image].");
 	return false;
 }
 
@@ -4304,7 +4263,6 @@ EditorProperty *EditorInspectorDefaultPlugin::get_editor_for_property(Object *p_
 
 	if (p_hint == PROPERTY_HINT_GENERIC || (p_usage & PROPERTY_USAGE_GENERIC)) {
 		
-		print_line(vformat("[Reginleif][GenericExport][Editor] property=%s usage=%d hint=%d hint_text=%s", p_path, int(p_usage), int(p_hint), p_hint_text));
 		PropertyHint decoded_hint = PROPERTY_HINT_NONE;
 		String decoded_hint_text;
 		if (_decode_generic_export_hint(p_hint_text, decoded_hint, decoded_hint_text)) {
@@ -4339,7 +4297,6 @@ EditorProperty *EditorInspectorDefaultPlugin::get_editor_for_property(Object *p_
 						} else {
 							effective_hint_text = resolved_type;
 						}
-						print_line(vformat("[Reginleif][GenericExport][Editor] overriding hint text with resolved generic type: %s", resolved_type));
 					}
 				}
 			}
@@ -4354,17 +4311,15 @@ EditorProperty *EditorInspectorDefaultPlugin::get_editor_for_property(Object *p_
 			Dictionary d = meta;
 			if (d.has("args")) {
 				const String generic_arg = String(d["args"]).strip_edges();
-				if (!generic_arg.is_empty() && (effective_hint == PROPERTY_HINT_TYPE_STRING || effective_hint == PROPERTY_HINT_ARRAY_TYPE || effective_hint == PROPERTY_HINT_DICTIONARY_TYPE)) {
-					if (generic_arg.contains(",")) {
-						print_line(vformat("[Reginleif][GenericExport][Editor][WARN] Skipping generic hint text rewrite for multi-arg payload on property=%s payload=%s", p_path, generic_arg));
-					} else {
-						const String replaced = effective_hint_text.replace("Resource", generic_arg);
-						if (replaced != effective_hint_text) {
-							print_line(vformat("[Reginleif][GenericExport][Editor] metadata-rewrote hint text: %s -> %s", effective_hint_text, replaced));
-							effective_hint_text = replaced;
-						}
+
+				Vector<String> top_args = _split_top_level_args_text(generic_arg);
+				if (!(top_args.size() > 1)) {
+					const String replaced = effective_hint_text.replace("Resource", generic_arg);
+					if (replaced != effective_hint_text) {
+						effective_hint_text = replaced;
 					}
 				}
+
 			}
 		}
 	}

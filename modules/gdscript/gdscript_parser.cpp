@@ -4905,11 +4905,10 @@ static StringName _find_narrowest_native_or_global_class(const GDScriptParser::D
 }
 
 ///ferry the hint in a specialised metadata format on the script
-///TODO: add actual fields to the script file to prevent String payload bullshit
-///this was just a "HACK:" i made up to get stuff done fast
+///unfortunately the Script metadata thing i talked about earlier is a pipe dream
+///the hint string is forced into being a string, duh
 static String _encode_generic_export_hint(PropertyHint p_base_hint, const String& p_base_hint_string, const GDScriptParser::DataType& p_type) {
 	String encoded = vformat("base_hint=%d|base_hint_string=%s|type=%s", int(p_base_hint), p_base_hint_string.replace("|", "||"), p_type.to_string().replace("|", "||"));
-	print_line(vformat("[Reginleif][GenericExport][Encode] hint=%s", encoded));
 	return encoded;
 }
 
@@ -4939,10 +4938,7 @@ static bool _resolve_generic_export_upper_bound(const GDScriptParser::DataType& 
 		return true;
 	}
 
-	print_line(vformat("[Reginleif][GenericExport][Resolve] trying generic=%s", p_type.generic_param));
-
 	if (p_class == nullptr) {
-		print_line("[Reginleif][GenericExport][Resolve][ERROR] class context is null");
 		return false;
 	}
 
@@ -4952,19 +4948,17 @@ static bool _resolve_generic_export_upper_bound(const GDScriptParser::DataType& 
 			continue;
 		}
 		if (param->generic_upper_bound == nullptr) {
-			print_line(vformat("[Reginleif][GenericExport][Resolve][ERROR] generic %s has no upper bound", p_type.generic_param));
 			return false;
 		}
 		const GDScriptParser::DataType bound = param->generic_upper_bound->get_datatype();
-		if (!bound.is_set()) {
-			print_line(vformat("[Reginleif][GenericExport][Resolve][ERROR] upper bound for %s is not resolved", p_type.generic_param));
+		if (!bound.is_set()) { ///unresolved upper bound 
 			return false;
 		}
 		r_resolved = bound;
-		print_line(vformat("[Reginleif][GenericExport][Resolve] generic %s resolved to %s", p_type.generic_param, r_resolved.to_string()));
 		return true;
 	}
-	print_line(vformat("[Reginleif][GenericExport][Resolve][ERROR] generic %s not found in class params", p_type.generic_param));
+
+	///generic isn't even in the class params
 	return false;
 }
 
@@ -5251,12 +5245,25 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 			if (export_type.is_variant() || export_type.has_no_type()) {
 				export_type.kind = GDScriptParser::DataType::BUILTIN;
 			}
+			
 			switch (export_type.kind) {
 				case GDScriptParser::DataType::BUILTIN:
 					variable->export_info.type = export_type.builtin_type;
 					variable->export_info.hint = PROPERTY_HINT_NONE;
 					variable->export_info.hint_string = String();
+					if (export_type.builtin_type == Variant::ARRAY && export_type.has_container_element_type(0)) {
+						DataType array_elem = export_type.get_container_element_type(0);
+						if (array_elem.kind == DataType::GENERIC_TYPE) {
+							DataType resolved;
+							if (_resolve_generic_export_upper_bound(array_elem, p_class, resolved)) {
+								array_elem = resolved;
+							}
+						}
+						variable->export_info.hint = PROPERTY_HINT_ARRAY_TYPE;
+						variable->export_info.hint_string = array_elem.to_property_info_hint_string();
+					}
 					break;
+
 				case GDScriptParser::DataType::NATIVE:
 				case GDScriptParser::DataType::SCRIPT:
 				case GDScriptParser::DataType::CLASS: {
@@ -5371,7 +5378,7 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 		variable->export_info.hint = PROPERTY_HINT_GENERIC;
 		variable->export_info.hint_string = _encode_generic_export_hint(original_hint, original_hint_string, variable->get_datatype());
 		variable->export_info.usage |= PROPERTY_USAGE_GENERIC;
-		print_line(vformat("[Reginleif][GenericExport][Annotate] name=%s type=%s usage=%d", variable->identifier->name, variable->get_datatype().to_string(), int(variable->export_info.usage)));
+		//// print_ line(vformat("[Reginleif][GenericExport][Annotate] name=%s type=%s usage=%d", variable->identifier->name, variable->get_datatype().to_string(), int(variable->export_info.usage)));
 	}
 
 	return true;
@@ -5825,7 +5832,7 @@ String GDScriptParser::DataType::to_property_info_hint_string() const {
 						}
 						first = false;
 						const DataType *bound = generic_type_bindings.getptr(param->name);
-						result += String(param->name) + "=" + (bound != nullptr ? bound->to_property_info_hint_string() : String(param->name));
+						result += (bound != nullptr ? bound->to_property_info_hint_string() : String(param->name));
 					}
 					result += "]";
 				}
