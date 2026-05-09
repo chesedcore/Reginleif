@@ -2890,6 +2890,21 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 					prop_info.hint = export_info.hint;
 					prop_info.hint_string = export_info.hint_string;
 					prop_info.usage = export_info.usage;
+
+					///
+					if ((export_info.usage & PROPERTY_USAGE_GENERIC) != 0) {
+						const PropertyInfo resolved_type_info = variable_type.to_property_info(name);
+						if (resolved_type_info.type != Variant::NIL) {
+							prop_info.type = resolved_type_info.type;
+							prop_info.class_name = resolved_type_info.class_name;
+						}
+						if (resolved_type_info.hint != PROPERTY_HINT_NONE || !resolved_type_info.hint_string.is_empty()) {
+							prop_info.hint = resolved_type_info.hint;
+							prop_info.hint_string = resolved_type_info.hint_string;
+						}
+						prop_info.usage |= resolved_type_info.usage;
+					}
+					
 				} else {
 					// Enum hint doesn't really belong to the data type information, so we don't want to add it to
 					// `GDScriptParser::DataType::to_property_info()`. However, we still want to add this metadata

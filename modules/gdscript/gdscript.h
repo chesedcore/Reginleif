@@ -193,6 +193,7 @@ private:
 	GDScriptInstance *_create_instance(const Variant **p_args, int p_argcount, Object *p_owner, Callable::CallError &r_error);
 
 	String _get_debug_path() const;
+	String generic_type_args;
 
 #ifdef TOOLS_ENABLED
 	HashSet<PlaceHolderScriptInstance *> placeholders;
@@ -233,6 +234,9 @@ public:
 	}
 
 	_FORCE_INLINE_ StringName get_local_name() const { return local_name; }
+	///
+	void set_generic_type_args(const String& p_args);
+	String get_generic_type_args() const;
 
 	void clear();
 
