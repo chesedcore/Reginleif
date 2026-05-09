@@ -118,6 +118,32 @@ succ::int(32)
 
 however, in 90% of cases, you will probably not need the turbobrick, as inference magics away the types for you.
 
+### exporting generics
+There are times when you'd rather want to export members set on a generic class. 
+
+Surely you've tried to do this:
+```gdscript
+class_name Box[T] extends Node
+@export var boxed: T
+#^^^^^^^^^^^^^^^^^^^ error!
+```
+The error will state that you cannot prove that T is a serialisable type and thus you cannot export T.
+
+To fulfill this, you **must set an upper bound** on T as something that is serialisable (a built-in, a Resource, a Node, or an enum, as Godot puts it).
+For an example:
+```gdscript
+class_name Box[T: Resource] extends Node
+               #  ^^^^^^^^^ since T must be a Resource, T is serialisable
+@export var boxed: T
+#no errors!
+```
+
+Now you can attach this script to a Node and make it active on the editor:
+```gdscript
+@export var box: Box[Shader] #summons an Export Box where you can fill in the value of boxed restricted to Shaders
+```
+This is a rather new feature, and I've tried my best to iron out any correctness bugs, but if you see any, please open issues!
+
 ### full nested typing
 
 you remember how you could not make an `Array[Dictionary[StringName, Resource]]` in vanilla gdscript?
