@@ -5831,8 +5831,8 @@ String GDScriptParser::DataType::to_property_info_hint_string() const {
 							result += ", ";
 						}
 						first = false;
-						const DataType *bound = generic_type_bindings.getptr(param->name);
-						result += (bound != nullptr ? bound->to_property_info_hint_string() : String(param->name));
+						const DataType* bound = generic_type_bindings.getptr(param->name);
+						result += String(param->name) + "=" + (bound != nullptr ? bound->to_property_info_hint_string() : String(param->name));
 					}
 					result += "]";
 				}
