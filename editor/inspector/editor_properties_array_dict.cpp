@@ -1263,6 +1263,9 @@ void EditorPropertyDictionary::update_property() {
 		String value_subtype_name = "Variant";
 		if (value_subtype == Variant::OBJECT && (value_subtype_hint == PROPERTY_HINT_RESOURCE_TYPE || value_subtype_hint == PROPERTY_HINT_NODE_TYPE)) {
 			value_subtype_name = value_subtype_hint_string;
+		///
+		} else if (value_subtype == Variant::ARRAY && value_subtype_hint == PROPERTY_HINT_ARRAY_TYPE && !value_subtype_hint_string.is_empty()) {
+			value_subtype_name = vformat("Array[%s]", value_subtype_hint_string);
 		} else if (value_subtype != Variant::NIL) {
 			value_subtype_name = Variant::get_type_name(value_subtype);
 		}
