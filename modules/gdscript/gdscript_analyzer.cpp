@@ -2477,7 +2477,7 @@ void GDScriptAnalyzer::resolve_function_body(GDScriptParser::FunctionNode *p_fun
 			
 			GDScriptParser::DataType return_type = p_function->get_datatype();
 			
-			if (!is_constructor_like && return_type.is_hard_type() && !(return_type.kind == GDScriptParser::DataType::BUILTIN && return_type.builtin_type == Variant::NIL)) {
+			if (!p_function->is_abstract && !is_constructor_like && return_type.is_hard_type() && !(return_type.kind == GDScriptParser::DataType::BUILTIN && return_type.builtin_type == Variant::NIL)) {
 				push_error(R"(Not all code paths return a value.)", p_function);
 			}
 		}
