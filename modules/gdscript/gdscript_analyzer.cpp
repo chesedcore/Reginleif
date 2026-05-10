@@ -3242,12 +3242,6 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 		}
 	}
 
-	if (has_expected_type && expected_type.kind == GDScriptParser::DataType::GENERIC_TYPE && p_return->return_value != nullptr) {
-		if (GDScriptParser::IdentifierNode* decl = find_generic_param_decl(expected_type.generic_param)) {
-			check_generic_assignable(decl, expected_type.generic_param, p_return->return_value, "return value");
-		}
-	}
-
 	if (has_expected_type && !expected_type.is_variant() && expected_type.is_hard_type()) {
 		if (result.is_variant() || !result.is_hard_type()) {
 			p_return->use_conversion = true;
