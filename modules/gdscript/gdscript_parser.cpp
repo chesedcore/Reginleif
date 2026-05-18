@@ -435,6 +435,15 @@ void GDScriptParser::set_last_completion_call_arg(int p_argument) {
 	completion_call_stack.back()->get().argument = p_argument;
 }
 
+
+void GDScriptParser::consume_indents_and_newlines() {
+	while  (check(GDScriptTokenizer::Token::NEWLINE) ||
+			check(GDScriptTokenizer::Token::INDENT)  ||
+			check(GDScriptTokenizer::Token::DEDENT)) { 
+				advance(); 
+			}
+}
+
 Error GDScriptParser::parse(const String &p_source_code, const String &p_script_path, bool p_for_completion, bool p_parse_body) {
 	clear();
 
@@ -663,7 +672,7 @@ void GDScriptParser::pop_multiline() {
 }
 
 bool GDScriptParser::is_statement_end_token() const {
-	return check(GDScriptTokenizer::Token::NEWLINE) || check(GDScriptTokenizer::Token::SEMICOLON) || check(GDScriptTokenizer::Token::TK_EOF);
+	return check(GDScriptTokenizer::Token::NEWLINE) || check(GDScriptTokenizer::Token::SEMICOLON) || check(GDScriptTokenizer::Token::TK_EOF) || check(GDScriptTokenizer::Token::BRACE_CLOSE);
 }
 
 bool GDScriptParser::is_statement_end() const {
@@ -675,6 +684,11 @@ void GDScriptParser::end_statement(const String &p_context) {
 	while (is_statement_end() && !is_at_end()) {
 		// Remove sequential newlines/semicolons.
 		if (is_statement_end_token()) {
+			///[Monarch] brace_close is an end signal but the suite itself has ownership of it, so don't eat it
+			if (check(GDScriptTokenizer::Token::BRACE_CLOSE)) {
+				found = true;
+				break;
+			}
 			// Only consume if this is an actual token.
 			advance();
 		} else if (lambda_ended) {
@@ -955,45 +969,63 @@ GDScriptParser::ClassNode *GDScriptParser::parse_class(bool p_is_static) {
 		} else {
 			n_class->fqcn = n_class->identifier->name;
 		}
+
+		/// [Monarch] inner classes have C++ style generic support, completely different from the outer classes' generics,
+		/// and can shadow them.
+		parse_generic_parameters(current_class->generic_parameters);
 	}
 
 	if (match(GDScriptTokenizer::Token::EXTENDS)) {
 		parse_extends();
 	}
 
-	consume(GDScriptTokenizer::Token::COLON, R"(Expected ":" after class declaration.)");
-
-	bool multiline = match(GDScriptTokenizer::Token::NEWLINE);
-
-	if (multiline && !consume(GDScriptTokenizer::Token::INDENT, R"(Expected indented block after class declaration.)")) {
-		current_class = previous_class;
-		complete_extents(n_class);
-		return n_class;
+	///
+	bool use_braces = check(GDScriptTokenizer::Token::BRACE_OPEN);
+	if (!use_braces) {
+		consume(GDScriptTokenizer::Token::COLON, R"([Reginleif] Expected ":" or "{" after class declaration.)");
 	}
+	bool multiline = !use_braces && match(GDScriptTokenizer::Token::NEWLINE);
 
-	if (match(GDScriptTokenizer::Token::EXTENDS)) {
-		if (n_class->extends_used) {
-			push_error(R"(Cannot use "extends" more than once in the same class.)");
+	if (use_braces) {
+
+			advance();
+			consume_indents_and_newlines();
+			parse_class_body(true);
+			consume_indents_and_newlines();
+			consume(GDScriptTokenizer::Token::BRACE_CLOSE, R"(Expected "}" after class body.)");
+
+		} else {
+			if (multiline && !consume(GDScriptTokenizer::Token::INDENT, R"(Expected indented block after class declaration.)")) {
+				current_class = previous_class;
+				complete_extents(n_class);
+				return n_class;
+			}
+			parse_class_body(multiline);
+
+			if (multiline) {
+				consume(GDScriptTokenizer::Token::DEDENT, R"(Expected indented block after class declaration.)");
+			}
 		}
-		parse_extends();
-		end_statement("superclass");
-	}
 
-	parse_class_body(multiline);
-	complete_extents(n_class);
+		complete_extents(n_class);
 
-	if (multiline) {
-		consume(GDScriptTokenizer::Token::DEDENT, R"(Missing unindent at the end of the class body.)");
-	}
-
-	current_class = previous_class;
-	return n_class;
+		current_class = previous_class;
+		return n_class;
 }
 
+
 void GDScriptParser::parse_class_name() {
+
+	/// [Monarch] this means that after "class_name", it expects Token::IDENTIFIER
+	/// so right after the fqcn ("Fully Qualified Class Name") is parsed, let's add a hook
+	/// that parses up the generic parameter list.
 	if (consume(GDScriptTokenizer::Token::IDENTIFIER, R"(Expected identifier for the global class name after "class_name".)")) {
 		current_class->identifier = parse_identifier();
 		current_class->fqcn = String(current_class->identifier->name);
+
+		/// [Monarch] Reginleif addition. Parses a comma-separated, rectangular bracket-bound identifier list.
+		/// Should do nothing if there is no generic parameter list to parse.
+		parse_generic_parameters(current_class->generic_parameters);
 	}
 
 	if (script_path.begins_with("res://") && script_path.contains("::")) {
@@ -1009,6 +1041,119 @@ void GDScriptParser::parse_class_name() {
 	} else {
 		end_statement("class_name statement");
 	}
+}
+
+/// [Monarch] Here's where Reginleif adds the ability to parse generics parameters! 
+/// So parsing [T] and [T,U,V] and so on is possible. It'll collect the identifiers into a Vec<IdentifierNode*>,
+/// then expect a bracket close.
+
+void GDScriptParser::parse_generic_parameters(Vector<IdentifierNode*>& p_generic_parameters) {
+
+	if (!match(GDScriptTokenizer::Token::BRACKET_OPEN)) {
+		return; ///no generics
+	}
+
+	///must have at least one ident ahead for proper generic parameter capture.
+	if (!consume(GDScriptTokenizer::Token::IDENTIFIER,  
+		R"([Reginleif] Expected at least one generic parameter.)")){	
+		return;
+	}
+
+	IdentifierNode* first_param = parse_identifier();
+	first_param->generic_upper_bound = parse_type_hint();
+	p_generic_parameters.push_back(first_param);
+
+	///grab other idents...
+	while (match(GDScriptTokenizer::Token::COMMA)) {
+
+		/// [Monarch] If the next token is a comma, collect the next identifier, 
+		/// then keep repeating until no more commas.
+
+        if (!consume(GDScriptTokenizer::Token::IDENTIFIER,
+                R"([Reginleif] Expected identifier after ',' in generic parameter list.)")) {
+            return;
+        }
+
+			IdentifierNode* param = parse_identifier();
+			param->generic_upper_bound = parse_type_hint();
+			p_generic_parameters.push_back(param);
+    }
+
+    consume(GDScriptTokenizer::Token::BRACKET_CLOSE,
+            R"([Reginleif] Expected ']' after generic parameter list.)");
+
+}
+
+/// [Monarch] parses `: Type`
+GDScriptParser::TypeNode* GDScriptParser::parse_type_hint(bool p_allow_void) {
+	if (!match(GDScriptTokenizer::Token::COLON)) {
+		return nullptr;
+	}
+
+	///i sure love completion fuckery, i had to look up how completion worked for standard types to figure out how to do this
+	///"godot codebase is easy to learn from!" so true bestie
+	make_completion_context(p_allow_void ? COMPLETION_TYPE_NAME_OR_VOID : COMPLETION_TYPE_NAME, current_class);
+	TypeNode* type = parse_type(p_allow_void);
+	if (type == nullptr) {
+		push_error(R"([Reginleif] Expected type after ":".)");
+	}
+	return type;
+}
+
+GDScriptParser::ExpressionNode* GDScriptParser::parse_generic_call(ExpressionNode* p_previous_operand, bool p_can_assign) {
+
+    /// previous token is now :: from the rules table, so collect type args from this point on
+    Vector<TypeNode*> explicit_args;
+
+    if (match(GDScriptTokenizer::Token::BRACKET_OPEN)) {
+
+        /// ::[T, U, ...]
+        do {
+
+            if (check(GDScriptTokenizer::Token::BRACKET_CLOSE)) { 
+				break; 
+			}
+
+            TypeNode* arg_type = parse_type(false);
+            if (arg_type == nullptr) {
+                push_error(R"([Reginleif] Expected type in generic argument list.)");
+                break;
+            }
+			
+            explicit_args.push_back(arg_type);
+        } while (match(GDScriptTokenizer::Token::COMMA));
+
+        consume(GDScriptTokenizer::Token::BRACKET_CLOSE, R"([Reginleif] Expected ']' after generic call arguments.)");
+
+    } else {
+        /// ::T  (in-house single argument sugar, yay?)
+        TypeNode* arg_type = parse_type(false);
+        if (arg_type == nullptr) {
+            push_error(R"([Reginleif] Expected type after '::' in generic call.)");
+            return p_previous_operand;
+        }
+
+        explicit_args.push_back(arg_type);
+    }
+
+    if (!check(GDScriptTokenizer::Token::PARENTHESIS_OPEN)) {
+        push_error(R"([Reginleif] Expected '(' after generic call arguments.)");
+        return p_previous_operand;
+    }
+
+    push_multiline(true);
+    advance();
+
+    ExpressionNode* result = parse_call(p_previous_operand, p_can_assign);
+    if (result == nullptr || result->type != Node::CALL) {
+        return result;
+    }
+
+    CallNode* call = static_cast<CallNode*>(result);
+    call->has_explicit_generic_args = true;
+    call->explicit_generic_args = explicit_args;
+
+    return call;
 }
 
 void GDScriptParser::parse_extends() {
@@ -1176,7 +1321,13 @@ void GDScriptParser::parse_class_body(bool p_is_multiline) {
 				advance();
 				end_statement(R"("pass")");
 				break;
+			case GDScriptTokenizer::Token::NEWLINE:
+				advance();
+				break;
 			case GDScriptTokenizer::Token::DEDENT:
+				class_end = true;
+				break;
+			case GDScriptTokenizer::Token::BRACE_CLOSE:
 				class_end = true;
 				break;
 			case GDScriptTokenizer::Token::LITERAL:
@@ -1768,9 +1919,16 @@ bool GDScriptParser::parse_function_signature(FunctionNode *p_function, SuiteNod
 
 	// TODO: Improve token consumption so it synchronizes to a statement boundary. This way we can get into the function body with unrecognized tokens.
 	if (p_type == "lambda") {
-		return consume(GDScriptTokenizer::Token::COLON, R"(Expected ":" after lambda declaration.)");
+		///
+		if (check(GDScriptTokenizer::Token::BRACE_OPEN)) {
+			return true;
+		}
+		return consume(GDScriptTokenizer::Token::COLON, R"([Reginleif] Expected ":" or "{" after lambda declaration.)");
 	}
 	// The colon may not be present in the case of abstract functions.
+	if (check(GDScriptTokenizer::Token::BRACE_OPEN)) {
+		return true; ///Monarch: brace block coming, so no colon is needed, so this can just be true
+	}
 	return match(GDScriptTokenizer::Token::COLON);
 }
 
@@ -1795,6 +1953,7 @@ GDScriptParser::FunctionNode *GDScriptParser::parse_function(bool p_is_static) {
 	current_function = function;
 
 	function->identifier = parse_identifier();
+	parse_generic_parameters(function->generic_parameters);
 
 	SuiteNode *body = alloc_node<SuiteNode>();
 
@@ -1823,6 +1982,7 @@ GDScriptParser::FunctionNode *GDScriptParser::parse_function(bool p_is_static) {
 		complete_extents(body);
 		function->body = body;
 	} else {
+		function->has_explicit_body = true;
 		function->body = parse_suite("function declaration", body);
 	}
 
@@ -1946,8 +2106,81 @@ GDScriptParser::SuiteNode *GDScriptParser::parse_suite(const String &p_context, 
 		suite->is_in_loop = true;
 	}
 
-	bool multiline = false;
+	bool use_braces = check(GDScriptTokenizer::Token::BRACE_OPEN);
 
+	if (use_braces) {
+
+		advance();
+
+		match(GDScriptTokenizer::Token::NEWLINE);
+		reset_extents(suite, current);
+
+		int error_count = 0;
+		while (!check(GDScriptTokenizer::Token::BRACE_CLOSE) && !is_at_end()) {
+
+			while (match(GDScriptTokenizer::Token::NEWLINE) ||
+				match(GDScriptTokenizer::Token::INDENT) ||
+				match(GDScriptTokenizer::Token::DEDENT)) {} /// [Monarch] this is required to gobble up anything that is scope-formatting related
+
+			if (check(GDScriptTokenizer::Token::BRACE_CLOSE)) { 
+				break;
+			}
+			
+			Node* statement = parse_statement();
+			if (statement == nullptr) {
+				if (error_count++ > 100) { push_error("[Reginleif] Too many errors! Breaking!", suite); break; }
+				continue;
+			}
+			suite->statements.push_back(statement);
+
+			/// [Monarch] Register locals ;)
+			switch (statement->type) {
+				case Node::VARIABLE: {
+					VariableNode *variable = static_cast<VariableNode *>(statement);
+					const SuiteNode::Local &local = current_suite->get_local(variable->identifier->name);
+					if (local.type != SuiteNode::Local::UNDEFINED) {
+						push_error(vformat(R"(There is already a %s named "%s" declared in this scope.)", local.get_name(), variable->identifier->name), variable->identifier);
+					}
+					current_suite->add_local(variable, current_function);
+					break;
+				}
+				case Node::CONSTANT: {
+					ConstantNode *constant = static_cast<ConstantNode *>(statement);
+					const SuiteNode::Local &local = current_suite->get_local(constant->identifier->name);
+					if (local.type != SuiteNode::Local::UNDEFINED) {
+						String name;
+						if (local.type == SuiteNode::Local::CONSTANT) {
+							name = "constant";
+						} else {
+							name = "variable";
+						}
+						push_error(vformat(R"(There is already a %s named "%s" declared in this scope.)", name, constant->identifier->name), constant->identifier);
+					}
+					current_suite->add_local(constant, current_function);
+					break;
+				}
+				default: break;
+			}
+		}
+
+		complete_extents(suite);
+		consume(GDScriptTokenizer::Token::BRACE_CLOSE, vformat(R"([Reginleif] Expected "}" at end of %s.)", p_context));
+
+		///[Monarch] drain any stray newlines/dedents the tokeniser spits out after that closing brace up there
+		///this is to prevent "oops i walked too far" errors
+		while (check(GDScriptTokenizer::Token::NEWLINE) || check(GDScriptTokenizer::Token::DEDENT)) {
+			current = tokenizer->scan();
+		}
+
+		if (p_for_lambda) {
+			lambda_ended = true;
+		}
+
+		current_suite = suite->parent_block;
+		return suite;
+	}
+
+	bool multiline = false;
 	if (match(GDScriptTokenizer::Token::NEWLINE)) {
 		multiline = true;
 	}
@@ -2315,7 +2548,9 @@ GDScriptParser::ForNode *GDScriptParser::parse_for() {
 	if (match(GDScriptTokenizer::Token::COLON)) {
 		n_for->datatype_specifier = parse_type();
 		if (n_for->datatype_specifier == nullptr) {
-			push_error(R"(Expected type specifier after ":".)");
+			if (!check(GDScriptTokenizer::Token::BRACE_OPEN)){
+				consume(GDScriptTokenizer::Token::COLON, vformat(R"([Reginleif] Expected ":" or "{" after "for")"));
+			}
 		}
 	}
 
@@ -2331,7 +2566,9 @@ GDScriptParser::ForNode *GDScriptParser::parse_for() {
 		push_error(R"(Expected iterable after "in".)");
 	}
 
-	consume(GDScriptTokenizer::Token::COLON, R"(Expected ":" after "for" condition.)");
+	if (!check(GDScriptTokenizer::Token::BRACE_OPEN)) {
+		consume(GDScriptTokenizer::Token::COLON, R"([Reginleif] Expected ":" or "{" after "for" condition.)");
+	}
 
 	// Save break/continue state.
 	bool could_break = can_break;
@@ -2368,7 +2605,10 @@ GDScriptParser::IfNode *GDScriptParser::parse_if(const String &p_token) {
 		push_error(vformat(R"(Expected conditional expression after "%s".)", p_token));
 	}
 
-	consume(GDScriptTokenizer::Token::COLON, vformat(R"(Expected ":" after "%s" condition.)", p_token));
+	/// [Monarch] The evil entity that I am, we are adding BRACES AHAHAHAAA
+	if (!check(GDScriptTokenizer::Token::BRACE_OPEN)){
+		consume(GDScriptTokenizer::Token::COLON, vformat(R"([Reginleif] Expected ":" or "{" after "%s" condition.)", p_token));
+	}
 
 	n_if->true_block = parse_suite(vformat(R"("%s" block)", p_token));
 	n_if->true_block->parent_if = n_if;
@@ -2392,7 +2632,10 @@ GDScriptParser::IfNode *GDScriptParser::parse_if(const String &p_token) {
 
 		current_suite = previous_suite;
 	} else if (match(GDScriptTokenizer::Token::ELSE)) {
-		consume(GDScriptTokenizer::Token::COLON, R"(Expected ":" after "else".)");
+		///
+		if (!check(GDScriptTokenizer::Token::BRACE_OPEN)){
+			consume(GDScriptTokenizer::Token::COLON, vformat(R"([Reginleif] Expected ":" or "{" after 'else'.)"));
+		}
 		n_if->false_block = parse_suite(R"("else" block)");
 	}
 	complete_extents(n_if);
@@ -2543,17 +2786,20 @@ GDScriptParser::MatchBranchNode *GDScriptParser::parse_match_branch() {
 		branch->has_wildcard = false; // If it has a guard, the wildcard might still not match.
 	}
 
-	if (!consume(GDScriptTokenizer::Token::COLON, vformat(R"(Expected ":"%s after "match" %s.)", has_guard ? "" : R"( or "when")", has_guard ? "pattern guard" : "patterns"))) {
-		branch->block = alloc_recovery_suite();
-		complete_extents(branch);
-		// Consume the whole line and treat the next one as new match branch.
-		while (current.type != GDScriptTokenizer::Token::NEWLINE && !is_at_end()) {
-			advance();
+	///
+	if (!check(GDScriptTokenizer::Token::BRACE_OPEN)){
+		if (!consume(GDScriptTokenizer::Token::COLON, vformat(R"([Reginleif] Expected ":" or "{"%s after "match" %s.)", has_guard ? "" : R"( or "when")", has_guard ? "pattern guard" : "patterns"))) {
+			branch->block = alloc_recovery_suite();
+			complete_extents(branch);
+			// Consume the whole line and treat the next one as new match branch.
+			while (current.type != GDScriptTokenizer::Token::NEWLINE && !is_at_end()) {
+				advance();
+			}
+			if (!is_at_end()) {
+				advance();
+			}
+			return branch;
 		}
-		if (!is_at_end()) {
-			advance();
-		}
-		return branch;
 	}
 
 	SuiteNode *suite = alloc_node<SuiteNode>();
@@ -2726,7 +2972,10 @@ GDScriptParser::WhileNode *GDScriptParser::parse_while() {
 		push_error(R"(Expected conditional expression after "while".)");
 	}
 
-	consume(GDScriptTokenizer::Token::COLON, R"(Expected ":" after "while" condition.)");
+	if (!check(GDScriptTokenizer::Token::BRACE_OPEN)){
+		consume(GDScriptTokenizer::Token::COLON, vformat(R"([Reginleif] Expected ":" or "{" after "while" condition.)"));
+	}
+
 
 	// Save break/continue state.
 	bool could_break = can_break;
@@ -3900,8 +4149,6 @@ GDScriptParser::TypeNode *GDScriptParser::parse_type(bool p_allow_void) {
 				complete_extents(type);
 				type = nullptr;
 				break;
-			} else if (container_type->container_types.size() > 0) {
-				push_error("Nested typed collections are not supported.");
 			} else {
 				type->container_types.append(container_type);
 			}
@@ -4343,6 +4590,7 @@ GDScriptParser::ParseRule *GDScriptParser::get_rule(GDScriptTokenizer::Token::Ty
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // PERIOD_PERIOD,
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // PERIOD_PERIOD_PERIOD,
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // COLON,
+		{ nullptr,                                          &GDScriptParser::parse_generic_call,            PREC_CALL }, /// COLON_COLON
 		{ &GDScriptParser::parse_get_node,               	nullptr,                                        PREC_NONE }, // DOLLAR,
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // FORWARD_ARROW,
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // UNDERSCORE,
@@ -4656,6 +4904,64 @@ static StringName _find_narrowest_native_or_global_class(const GDScriptParser::D
 	}
 }
 
+///ferry the hint in a specialised metadata format on the script
+///unfortunately the Script metadata thing i talked about earlier is a pipe dream
+///the hint string is forced into being a string, duh
+static String _encode_generic_export_hint(PropertyHint p_base_hint, const String& p_base_hint_string, const GDScriptParser::DataType& p_type) {
+	String encoded = vformat("base_hint=%d|base_hint_string=%s|type=%s", int(p_base_hint), p_base_hint_string.replace("|", "||"), p_type.to_string().replace("|", "||"));
+	return encoded;
+}
+
+
+static bool _datatype_contains_generic_parameter(const GDScriptParser::DataType& p_type) {
+	if (p_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+		return true;
+	}
+	for (int i = 0; i < p_type.container_element_types.size(); i++) {
+		if (_datatype_contains_generic_parameter(p_type.container_element_types[i])) {
+			return true;
+		}
+	}
+	for (const KeyValue<StringName, GDScriptParser::DataType>& E : p_type.generic_type_bindings) {
+		if (_datatype_contains_generic_parameter(E.value)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+
+static bool _resolve_generic_export_upper_bound(const GDScriptParser::DataType& p_type, const GDScriptParser::ClassNode* p_class, GDScriptParser::DataType& r_resolved) {
+	
+	if (p_type.kind != GDScriptParser::DataType::GENERIC_TYPE) {
+		r_resolved = p_type;
+		return true;
+	}
+
+	if (p_class == nullptr) {
+		return false;
+	}
+
+	for (int i = 0; i < p_class->generic_parameters.size(); i++) {
+		const GDScriptParser::IdentifierNode* param = p_class->generic_parameters[i];
+		if (param->name != p_type.generic_param) {
+			continue;
+		}
+		if (param->generic_upper_bound == nullptr) {
+			return false;
+		}
+		const GDScriptParser::DataType bound = param->generic_upper_bound->get_datatype();
+		if (!bound.is_set()) { ///unresolved upper bound 
+			return false;
+		}
+		r_resolved = bound;
+		return true;
+	}
+
+	///generic isn't even in the class params
+	return false;
+}
+
 template <PropertyHint t_hint, Variant::Type t_type>
 bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class) {
 	ERR_FAIL_COND_V_MSG(p_target->type != Node::VARIABLE, false, vformat(R"("%s" annotation can only be applied to variables.)", p_annotation->name));
@@ -4741,6 +5047,16 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 	// This is called after the analyzer is done finding the type, so this should be set here.
 	DataType export_type = variable->get_datatype();
 
+	if (export_type.kind == DataType::GENERIC_TYPE) {
+		DataType resolved_generic_bound;
+		if (_resolve_generic_export_upper_bound(export_type, p_class, resolved_generic_bound)) {
+			export_type = resolved_generic_bound;
+		} else {
+			push_error(R"(Export type can only be built-in, a resource, a node, or an enum.)", p_annotation);
+			return false;
+		}
+	}
+
 	// Use initializer type if specified type is `Variant`.
 	if (export_type.is_variant() && variable->initializer != nullptr && variable->initializer->datatype.is_set()) {
 		export_type = variable->initializer->get_datatype();
@@ -4754,17 +5070,61 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 	if (export_type.builtin_type == Variant::ARRAY && export_type.has_container_element_type(0)) {
 		is_array = true;
 		export_type = export_type.get_container_element_type(0);
+
+		///
+		if (export_type.kind == DataType::GENERIC_TYPE) {
+			DataType resolved_generic_bound;
+			if (_resolve_generic_export_upper_bound(export_type, p_class, resolved_generic_bound)) {
+				export_type = resolved_generic_bound;
+			}
+		}
+
+
 	} else if (export_type.is_typed_container_type()) {
 		is_array = true;
 		export_type = export_type.get_typed_container_type();
 		export_type.type_source = variable->datatype.type_source;
+
+		///
+		if (export_type.kind == DataType::GENERIC_TYPE) {
+			DataType resolved_generic_bound;
+			if (_resolve_generic_export_upper_bound(export_type, p_class, resolved_generic_bound)) {
+				export_type = resolved_generic_bound;
+			} else {
+				push_error(R"(Generics can only be exported if their upper bound is a built-in, a resource, a node, or an enum.)", p_annotation);
+				return false;
+			}
+		}
 	}
+
 
 	bool is_dict = false;
 	if (export_type.builtin_type == Variant::DICTIONARY && export_type.has_container_element_types()) {
 		is_dict = true;
 		DataType inner_type = export_type.get_container_element_type_or_variant(1);
+
+		if (inner_type.kind == DataType::GENERIC_TYPE) {
+			DataType resolved_generic_bound;
+			if (_resolve_generic_export_upper_bound(inner_type, p_class, resolved_generic_bound)) {
+				inner_type = resolved_generic_bound;
+			} else {
+				push_error(R"(Generics can only be exported if their upper bound is a built-in, a resource, a node, or an enum.)", p_annotation);
+				return false;
+			}
+		}
+
+
 		export_type = export_type.get_container_element_type_or_variant(0);
+		if (export_type.kind == DataType::GENERIC_TYPE) {
+			DataType resolved_generic_bound;
+			if (_resolve_generic_export_upper_bound(export_type, p_class, resolved_generic_bound)) {
+				export_type = resolved_generic_bound;
+			} else {
+				push_error(R"(Generics can only be exported if their upper bound is a built-in, a resource, a node, or an enum.)", p_annotation);
+				return false;
+			}
+		}
+
 		export_type.set_container_element_type(0, inner_type); // Store earlier extracted value within key to separately parse after.
 	}
 
@@ -4809,14 +5169,15 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 			case GDScriptParser::DataType::SCRIPT:
 			case GDScriptParser::DataType::CLASS: {
 				const StringName class_name = _find_narrowest_native_or_global_class(export_type);
+				const String generic_aware_class_name = export_type.to_property_info_hint_string(); ///
 				if (ClassDB::is_parent_class(export_type.native_type, SNAME("Resource"))) {
 					variable->export_info.type = Variant::OBJECT;
 					variable->export_info.hint = PROPERTY_HINT_RESOURCE_TYPE;
-					variable->export_info.hint_string = class_name;
+					variable->export_info.hint_string = generic_aware_class_name.is_empty() ? String(class_name) : generic_aware_class_name;
 				} else if (ClassDB::is_parent_class(export_type.native_type, SNAME("Node"))) {
 					variable->export_info.type = Variant::OBJECT;
 					variable->export_info.hint = PROPERTY_HINT_NODE_TYPE;
-					variable->export_info.hint_string = class_name;
+					variable->export_info.hint_string = generic_aware_class_name.is_empty() ? String(class_name) : generic_aware_class_name;
 				} else {
 					push_error(R"(Export type can only be built-in, a resource, a node, or an enum.)", p_annotation);
 					return false;
@@ -4872,28 +5233,50 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 
 			// Now parse value.
 			export_type = export_type.get_container_element_type(0);
+		
+		///
+		if (export_type.kind == DataType::GENERIC_TYPE) {
+			DataType resolved_generic_bound;
+			if (_resolve_generic_export_upper_bound(export_type, p_class, resolved_generic_bound)) {
+				export_type = resolved_generic_bound;
+			}
+		}
 
 			if (export_type.is_variant() || export_type.has_no_type()) {
 				export_type.kind = GDScriptParser::DataType::BUILTIN;
 			}
+			
 			switch (export_type.kind) {
 				case GDScriptParser::DataType::BUILTIN:
 					variable->export_info.type = export_type.builtin_type;
 					variable->export_info.hint = PROPERTY_HINT_NONE;
 					variable->export_info.hint_string = String();
+					if (export_type.builtin_type == Variant::ARRAY && export_type.has_container_element_type(0)) {
+						DataType array_elem = export_type.get_container_element_type(0);
+						if (array_elem.kind == DataType::GENERIC_TYPE) {
+							DataType resolved;
+							if (_resolve_generic_export_upper_bound(array_elem, p_class, resolved)) {
+								array_elem = resolved;
+							}
+						}
+						variable->export_info.hint = PROPERTY_HINT_ARRAY_TYPE;
+						variable->export_info.hint_string = array_elem.to_property_info_hint_string();
+					}
 					break;
+
 				case GDScriptParser::DataType::NATIVE:
 				case GDScriptParser::DataType::SCRIPT:
 				case GDScriptParser::DataType::CLASS: {
 					const StringName class_name = _find_narrowest_native_or_global_class(export_type);
+					const String generic_aware_class_name = export_type.to_property_info_hint_string();
 					if (ClassDB::is_parent_class(export_type.native_type, SNAME("Resource"))) {
 						variable->export_info.type = Variant::OBJECT;
 						variable->export_info.hint = PROPERTY_HINT_RESOURCE_TYPE;
-						variable->export_info.hint_string = class_name;
+						variable->export_info.hint_string = generic_aware_class_name.is_empty() ? String(class_name) : generic_aware_class_name;
 					} else if (ClassDB::is_parent_class(export_type.native_type, SNAME("Node"))) {
 						variable->export_info.type = Variant::OBJECT;
 						variable->export_info.hint = PROPERTY_HINT_NODE_TYPE;
-						variable->export_info.hint_string = class_name;
+						variable->export_info.hint_string = generic_aware_class_name.is_empty() ? String(class_name) : generic_aware_class_name;
 					} else {
 						push_error(R"(Export type can only be built-in, a resource, a node, or an enum.)", p_annotation);
 						return false;
@@ -4986,6 +5369,16 @@ bool GDScriptParser::export_annotations(AnnotationNode *p_annotation, Node *p_ta
 		variable->export_info.hint_string = hint_prefix + ":" + variable->export_info.hint_string;
 		variable->export_info.usage = PROPERTY_USAGE_DEFAULT;
 		variable->export_info.class_name = StringName();
+	}
+
+	///if the datatype has a generic parameter, annotate the metadata and the usage before sending downstream
+	if (_datatype_contains_generic_parameter(variable->get_datatype())) {
+		const PropertyHint original_hint = variable->export_info.hint;
+		const String original_hint_string = variable->export_info.hint_string;
+		variable->export_info.hint = PROPERTY_HINT_GENERIC;
+		variable->export_info.hint_string = _encode_generic_export_hint(original_hint, original_hint_string, variable->get_datatype());
+		variable->export_info.usage |= PROPERTY_USAGE_GENERIC;
+		//// print_ line(vformat("[Reginleif][GenericExport][Annotate] name=%s type=%s usage=%d", variable->identifier->name, variable->get_datatype().to_string(), int(variable->export_info.usage)));
 	}
 
 	return true;
@@ -5348,16 +5741,39 @@ String GDScriptParser::DataType::to_string() const {
 				return vformat("Dictionary[%s, %s]", get_container_element_type_or_variant(0).to_string(), get_container_element_type_or_variant(1).to_string());
 			}
 			return Variant::get_type_name(builtin_type);
+		
 		case NATIVE:
 			if (is_meta_type) {
 				return GDScriptNativeClass::get_class_static();
 			}
 			return native_type.operator String();
-		case CLASS:
+		
+		///
+		case CLASS: {
+			String base_name;
 			if (class_type->identifier != nullptr) {
-				return class_type->identifier->name.operator String();
+				base_name = class_type->identifier->name.operator String();
+			} else {
+				base_name = class_type->fqcn;
 			}
-			return class_type->fqcn;
+			if (!generic_type_bindings.is_empty()) {
+				base_name += "[";
+				bool first = true;
+				for (const GDScriptParser::IdentifierNode* param : class_type->generic_parameters) {
+					if (!first) { base_name += ", "; }
+					first = false;
+					const DataType* bound = generic_type_bindings.getptr(param->name);
+					if (bound != nullptr) {
+						base_name += bound->to_string();
+					} else {
+						base_name += param->name.operator String();
+					}
+				}
+				base_name += "]";
+			}
+			return base_name;
+		}
+
 		case SCRIPT: {
 			if (is_meta_type) {
 				return script_type.is_valid() ? script_type->get_class_name().operator String() : "";
@@ -5372,6 +5788,12 @@ String GDScriptParser::DataType::to_string() const {
 			}
 			return native_type.operator String();
 		}
+
+		///
+		case GENERIC_TYPE: {
+			return generic_param.operator String();
+		}
+
 		case ENUM: {
 			// native_type contains either the native class defining the enum
 			// or the fully qualified class name of the script defining the enum
@@ -5398,8 +5820,24 @@ String GDScriptParser::DataType::to_property_info_hint_string() const {
 				return native_type;
 			}
 		case CLASS:
+			///
 			if (class_type != nullptr && class_type->get_global_name() != StringName()) {
-				return class_type->get_global_name();
+				String result = class_type->get_global_name();
+				if (!generic_type_bindings.is_empty() && class_type->has_generic_parameters()) {
+					result += "[";
+					bool first = true;
+					for (const GDScriptParser::IdentifierNode* param : class_type->generic_parameters) {
+						if (!first) {
+							result += ", ";
+						}
+						first = false;
+						const DataType* bound = generic_type_bindings.getptr(param->name);
+						result += String(param->name) + "=" + (bound != nullptr ? bound->to_property_info_hint_string() : String(param->name));
+					}
+					result += "]";
+				}
+				return result;
+
 			} else {
 				return native_type;
 			}
@@ -5407,6 +5845,12 @@ String GDScriptParser::DataType::to_property_info_hint_string() const {
 			return String(native_type).replace("::", ".");
 		case VARIANT:
 			return "Variant";
+		case GENERIC_TYPE: {
+			if (const DataType* binding = generic_type_bindings.getptr(generic_param)) {
+				return binding->to_property_info_hint_string();
+			}
+			return generic_param;
+		}
 		case RESOLVING:
 		case UNRESOLVED:
 			break;
@@ -5484,6 +5928,7 @@ PropertyInfo GDScriptParser::DataType::to_property_info(const String &p_name) co
 			}
 			break;
 		case VARIANT:
+		case GENERIC_TYPE:
 		case RESOLVING:
 		case UNRESOLVED:
 			result.usage |= PROPERTY_USAGE_NIL_IS_VARIANT;

@@ -49,6 +49,8 @@
 
 class FileAccess;
 
+class FileAccess;
+
 // Design principles:
 // - Vulkan structs are zero-initialized and fields not requiring a non-zero value are omitted (except in cases where expresivity reasons apply).
 class RenderingDeviceDriverVulkan : public RenderingDeviceDriver {

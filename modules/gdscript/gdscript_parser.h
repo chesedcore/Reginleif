@@ -111,6 +111,10 @@ public:
 			VARIANT, // Can be any type.
 			RESOLVING, // Currently resolving.
 			UNRESOLVED,
+
+			/// [Monarch] Reginleif addition. Allows us to tell Godot that this type is 
+			/// generic and links against a specified generic parameter.
+			GENERIC_TYPE,
 		};
 		Kind kind = UNRESOLVED;
 
@@ -137,6 +141,16 @@ public:
 
 		MethodInfo method_info; // For callable/signals.
 		HashMap<StringName, int64_t> enum_values; // For enums.
+
+		/// [Monarch] Reginleif addition. Holds the class node that declared the generic params.
+		ClassNode* generic_owner_class = nullptr;
+		/// [Monarch] I was new to the codebase when I wrote the generic owner class stuff. Man I wish I had the same level of enthusiasm
+		///           and diligence to comment shit properly back then. But yeah, have a function owner field, bucko
+		FunctionNode* generic_owner_function = nullptr;
+		/// [Monarch] Reginleif addition. A dedicated generic parameter field!
+		StringName generic_param;
+		/// [Monarch] Reginleif addition. Stores concrete type argument bindings for generic classes.
+		HashMap<StringName, DataType> generic_type_bindings;
 
 		_FORCE_INLINE_ bool is_set() const { return kind != RESOLVING && kind != UNRESOLVED; }
 		_FORCE_INLINE_ bool is_resolving() const { return kind == RESOLVING; }
@@ -218,8 +232,29 @@ public:
 					return native_type == p_other.native_type;
 				case SCRIPT:
 					return script_type == p_other.script_type;
+				
+				/// [Monarch] Classes are now only equal if they have the same fqcn and the same generic params.
 				case CLASS:
-					return class_type == p_other.class_type || class_type->fqcn == p_other.class_type->fqcn;
+					if (class_type != p_other.class_type && class_type->fqcn != p_other.class_type->fqcn) {
+						return false;
+					}
+					if (generic_type_bindings.size() != p_other.generic_type_bindings.size()) {
+						return false;
+					}
+					for (const KeyValue<StringName, DataType>& E : generic_type_bindings) {
+						const DataType* other_val = p_other.generic_type_bindings.getptr(E.key);
+						if (other_val == nullptr || *other_val != E.value) {
+							return false;
+						}
+    				}
+					return true;
+
+				/// [Monarch] Now scoped to the declaring class so that Shit[T] doesnt equal Ass[T]
+				case GENERIC_TYPE:
+					return generic_owner_class == p_other.generic_owner_class && 
+					       generic_param == p_other.generic_param && 
+						   generic_owner_function == p_other.generic_owner_function;
+				
 				case RESOLVING:
 				case UNRESOLVED:
 					break;
@@ -249,6 +284,10 @@ public:
 			method_info = p_other.method_info;
 			enum_values = p_other.enum_values;
 			container_element_types = p_other.container_element_types;
+			generic_owner_class = p_other.generic_owner_class;
+			generic_param = p_other.generic_param;
+			generic_type_bindings = p_other.generic_type_bindings;
+			generic_owner_function = p_other.generic_owner_function;
 		}
 
 		DataType() = default;
@@ -511,6 +550,9 @@ public:
 		StringName function_name;
 		bool is_super = false;
 		bool is_static = false;
+		///
+		Vector<TypeNode*> explicit_generic_args;
+		bool has_explicit_generic_args = false;
 
 		CallNode() {
 			type = CALL;
@@ -748,6 +790,10 @@ public:
 		};
 
 		IdentifierNode *identifier = nullptr;
+
+		/// [Monarch] A field for storing generic parameters.
+		Vector<IdentifierNode*> generic_parameters;
+
 		String icon_path;
 		String simplified_icon_path;
 		Vector<Member> members;
@@ -788,6 +834,24 @@ public:
 		bool has_function(const StringName &p_name) const {
 			return has_member(p_name) && members[members_indices[p_name]].type == Member::FUNCTION;
 		}
+
+		/// [Monarch] Reginleif addition. Checks if this class has any generic parameters declared.
+		bool has_generic_parameters() {
+			return generic_parameters.size() > 0;
+		}
+
+		/// [Monarch] Reginleif addition. Checks if the given identifier is recognised as a generic
+		/// parameter for this class's scope.
+		/// do NOT access the outer class' generics! we are going with fully independent c++ style generics!
+		bool is_generic_parameter(const IdentifierNode* p_identifier) const {
+			for (IdentifierNode* generic_id : generic_parameters) {
+				if (generic_id->name == p_identifier->name) {
+					return true;
+				}
+			}
+			return false;
+		}
+
 		template <typename T>
 		void add_member(T *p_member_node) {
 			members_indices[p_member_node->identifier->name] = members.size();
@@ -857,6 +921,7 @@ public:
 
 	struct FunctionNode : public Node {
 		IdentifierNode *identifier = nullptr;
+		Vector<IdentifierNode*> generic_parameters;
 		Vector<ParameterNode *> parameters;
 		HashMap<StringName, int> parameters_indices;
 		ParameterNode *rest_parameter = nullptr;
@@ -865,6 +930,7 @@ public:
 		bool is_abstract = false;
 		bool is_static = false; // For lambdas it's determined in the analyzer.
 		bool is_coroutine = false;
+		bool has_explicit_body = false; ///[Monarch] Set to true if the parser saw { or : followed by a real suite
 		Variant rpc_config;
 		MethodInfo info;
 		LambdaNode *source_lambda = nullptr;
@@ -879,6 +945,16 @@ public:
 		bool resolved_body = false;
 
 		_FORCE_INLINE_ bool is_vararg() const { return rest_parameter != nullptr; }
+		///
+		_FORCE_INLINE_ bool has_generic_parameters() const { return generic_parameters.size() > 0; }
+		bool is_generic_parameter(const IdentifierNode* p_identifier) const {
+			for (IdentifierNode* generic_ident : generic_parameters) {
+				if (generic_ident->name == p_identifier->name) {
+					return true;
+				}
+			}
+			return false;
+		}
 
 		FunctionNode() {
 			type = FUNCTION;
@@ -896,6 +972,7 @@ public:
 
 	struct IdentifierNode : public ExpressionNode {
 		StringName name;
+		TypeNode* generic_upper_bound = nullptr;
 		SuiteNode *suite = nullptr; // The block in which the identifier is used.
 
 		enum Source {
@@ -1543,6 +1620,13 @@ private:
 	void parse_program();
 	ClassNode *parse_class(bool p_is_static);
 	void parse_class_name();
+
+	/// [Monarch] Reginleif addition. Grants ability to parse generic parameter lists.
+	void parse_generic_parameters(Vector<IdentifierNode*>& p_generic_params);
+	TypeNode* parse_type_hint(bool p_allow_void = false);
+
+	void consume_indents_and_newlines();
+
 	void parse_extends();
 	void parse_class_body(bool p_is_multiline);
 	template <typename T>
@@ -1618,6 +1702,8 @@ private:
 	ExpressionNode *parse_type_test(ExpressionNode *p_previous_operand, bool p_can_assign);
 	ExpressionNode *parse_yield(ExpressionNode *p_previous_operand, bool p_can_assign);
 	ExpressionNode *parse_invalid_token(ExpressionNode *p_previous_operand, bool p_can_assign);
+	///
+	ExpressionNode* parse_generic_call(ExpressionNode* p_previous_operand, bool p_can_assign);
 	TypeNode *parse_type(bool p_allow_void = false);
 
 #ifdef TOOLS_ENABLED

@@ -30,6 +30,8 @@
 
 #pragma once
 
+#include "core/config/engine.h"
+
 #ifdef DEBUG_ENABLED
 #include "core/config/engine.h" // IWYU pragma: keep. Used in macro.
 

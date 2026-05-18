@@ -32,6 +32,7 @@
 
 #include "core/object/class_db.h"
 #include "core/object/script_language.h"
+#include "core/templates/local_vector.h"
 #include "core/variant/variant.h"
 
 struct ContainerType {
@@ -40,13 +41,28 @@ struct ContainerType {
 	Ref<Script> script;
 };
 
+
 struct ContainerTypeValidate {
+
+	/// [Monarch] Imagine there's an `Array[Array[int]]`. This `type` field says that the top-level type
+	///           is an `Array`.
 	Variant::Type type = Variant::NIL;
 	StringName class_name;
 	Ref<Script> script;
+
+	/// [Monarch] Following the previous example, this `nested_type` argument holds types, so from that example,
+	///           this field would be a type validation field that holds an Array in it as its `type`.
+	///           Recursive typing, in the simplest sense.
+	Vector<ContainerTypeValidate> nested_types;
+
 	const char *where = "container";
 
 private:
+	struct TypePair {
+		const ContainerTypeValidate* lhs = nullptr;
+		const ContainerTypeValidate* rhs = nullptr;
+	};
+
 	_FORCE_INLINE_ bool _internal_validate(Variant &inout_variant, const char *p_operation, bool p_output_errors) const {
 		if (type == Variant::NIL) {
 			return true;
@@ -70,7 +86,7 @@ private:
 			}
 
 			if (p_output_errors) {
-				ERR_FAIL_V_MSG(false, vformat("Attempted to %s a variable of type '%s' into a %s of type '%s'.", String(p_operation), Variant::get_type_name(inout_variant.get_type()), where, Variant::get_type_name(type)));
+				ERR_FAIL_V_MSG(false, vformat("[Reginleif] Tried to %s type '%s' into %s of type '%s'.", String(p_operation), Variant::get_type_name(inout_variant.get_type()), where, Variant::get_type_name(type)));
 			} else {
 				return false;
 			}
@@ -143,9 +159,74 @@ private:
 		return true;
 	}
 
+	///[Monarch] validates internal containers, and stuff passed inside the containers might mutate to accomodate the given type
+	bool _validate_nested(Variant& inout_variant, const char* p_operation, bool p_output_errors) const {
+
+		if (nested_types.is_empty()) {
+			return true;
+		}
+
+		if (type != Variant::ARRAY && type != Variant::DICTIONARY) {
+			return true;
+		}
+
+		if (type == Variant::ARRAY) {
+			Array arr = inout_variant;
+			
+			const ContainerTypeValidate& elem_type = nested_types[0];
+			for (int i = 0; i < arr.size(); i++) {
+				Variant elem = arr[i];
+				if (!(p_output_errors ? elem_type.validate(elem, p_operation) : elem_type.validate_silent(elem, p_operation))) {
+					return false;
+				}
+				arr[i] = elem;
+			}
+			inout_variant = arr;
+		}
+
+		if (type == Variant::DICTIONARY && nested_types.size() >= 2) { ///maybe an errorr case?
+			Dictionary dict = inout_variant;
+			const ContainerTypeValidate& key_type = nested_types[0];
+			const ContainerTypeValidate& value_type = nested_types[1];
+			Array keys = dict.keys();
+			for (int i = 0; i < keys.size(); i++) {
+				Variant old_key = keys[i];
+				Variant new_key = old_key;
+				if (!(p_output_errors ? key_type.validate(new_key, p_operation) : key_type.validate_silent(new_key, p_operation))) {
+					return false;
+				}
+				Variant value = dict[old_key];
+				if (!(p_output_errors ? value_type.validate(value, p_operation) : value_type.validate_silent(value, p_operation))) {
+					return false;
+				}
+				if (new_key != old_key) {
+					dict.erase(old_key);
+				}
+				dict[new_key] = value;
+			}
+			inout_variant = dict;
+		}
+
+		/// TODO: expand to (maybe) cover generic classes?
+		return true;
+	}
+
 public:
-	_FORCE_INLINE_ bool validate(Variant &inout_variant, const char *p_operation = "use") const {
-		return _internal_validate(inout_variant, p_operation, true);
+
+	bool validate(Variant &inout_variant, const char *p_operation = "use") const {
+
+		if(!_internal_validate(inout_variant, p_operation, true)) {
+			return false;
+		}
+		return _validate_nested(inout_variant, p_operation, true);
+	}
+
+	///was made out of necessity because both the vm and the validation layer outputted errors, leading to noise
+	_FORCE_INLINE_ bool validate_silent(Variant& inout_variant, const char* p_operation = "use") const {
+		if (!_internal_validate(inout_variant, p_operation, false)) {
+			return false;
+		}
+		return _validate_nested(inout_variant, p_operation, false);
 	}
 
 	_FORCE_INLINE_ bool validate_object(const Variant &p_variant, const char *p_operation = "use") const {
@@ -158,35 +239,79 @@ public:
 	}
 
 	_FORCE_INLINE_ bool can_reference(const ContainerTypeValidate &p_type) const {
-		if (type != p_type.type) {
-			return false;
-		} else if (type != Variant::OBJECT) {
-			return true;
-		}
+		LocalVector<TypePair> stack;
+		stack.push_back({ this, &p_type });
 
-		if (class_name == StringName()) {
-			return true;
-		} else if (p_type.class_name == StringName()) {
-			return false;
-		} else if (class_name != p_type.class_name && !ClassDB::is_parent_class(p_type.class_name, class_name)) {
-			return false;
-		}
+		while (!stack.is_empty()) {
+			const TypePair current = stack[stack.size() - 1];
+			stack.resize(stack.size() - 1);
 
-		if (script.is_null()) {
-			return true;
-		} else if (p_type.script.is_null()) {
-			return false;
-		} else if (script != p_type.script && !p_type.script->inherits_script(script)) {
-			return false;
+			const ContainerTypeValidate &lhs = *current.lhs;
+			const ContainerTypeValidate &rhs = *current.rhs;
+
+			if (lhs.type != rhs.type) {
+				return false;
+			}
+			if (lhs.type != Variant::OBJECT) {
+				continue;
+			}
+
+			if (lhs.nested_types.size() != rhs.nested_types.size()) {
+				return false;
+			}
+			for (int i = 0; i < lhs.nested_types.size(); i++) {
+				stack.push_back({ &lhs.nested_types[i], &rhs.nested_types[i] });
+			}
+
+			if (lhs.class_name != StringName()) {
+				if (rhs.class_name == StringName()) {
+					return false;
+				}
+				if (lhs.class_name != rhs.class_name && !ClassDB::is_parent_class(rhs.class_name, lhs.class_name)) {
+					return false;
+				}
+			}
+
+			if (!lhs.script.is_null()) {
+				if (rhs.script.is_null()) {
+					return false;
+				}
+				if (lhs.script != rhs.script && !rhs.script->inherits_script(lhs.script)) {
+					return false;
+				}
+			}
 		}
 
 		return true;
 	}
 
 	_FORCE_INLINE_ bool operator==(const ContainerTypeValidate &p_type) const {
-		return type == p_type.type && class_name == p_type.class_name && script == p_type.script;
+		LocalVector<TypePair> stack;
+		stack.push_back({ this, &p_type });
+
+		while (!stack.is_empty()) {
+			const TypePair current = stack[stack.size() - 1];
+			stack.resize(stack.size() - 1);
+
+			const ContainerTypeValidate &lhs = *current.lhs;
+			const ContainerTypeValidate &rhs = *current.rhs;
+
+			if (lhs.type != rhs.type || lhs.class_name != rhs.class_name || lhs.script != rhs.script) {
+				return false;
+			}
+			if (lhs.nested_types.size() != rhs.nested_types.size()) {
+				return false;
+			}
+
+			for (int i = 0; i < lhs.nested_types.size(); i++) {
+				stack.push_back({ &lhs.nested_types[i], &rhs.nested_types[i] });
+			}
+		}
+
+		return true;
 	}
+
 	_FORCE_INLINE_ bool operator!=(const ContainerTypeValidate &p_type) const {
-		return type != p_type.type || class_name != p_type.class_name || script != p_type.script;
+		return !(*this == p_type);
 	}
 };

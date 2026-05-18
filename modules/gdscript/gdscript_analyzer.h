@@ -154,6 +154,10 @@ class GDScriptAnalyzer {
 	void mark_lambda_use_self();
 	void resolve_pending_lambda_bodies();
 	void reduce_identifier_from_base_set_class(GDScriptParser::IdentifierNode *p_identifier, GDScriptParser::DataType p_identifier_datatype);
+	void check_generic_parameter_default(GDScriptParser::ParameterNode* p_param); ///
+	bool resolve_generic_bound_chain(const StringName& p_generic_param, GDScriptParser::DataType& r_resolved_bound, StringName& r_terminal_param); ///
+	GDScriptParser::IdentifierNode* find_generic_param_decl(const StringName& p_generic_param); ///
+	void check_generic_assignable(GDScriptParser::IdentifierNode* p_generic_decl, const StringName& p_generic_param, GDScriptParser::ExpressionNode* p_initializer, const char* p_kind); ///
 	Ref<GDScriptParserRef> ensure_cached_external_parser_for_class(const GDScriptParser::ClassNode *p_class, const GDScriptParser::ClassNode *p_from_class, const char *p_context, const GDScriptParser::Node *p_source);
 	Ref<GDScriptParserRef> find_cached_external_parser_for_class(const GDScriptParser::ClassNode *p_class, const Ref<GDScriptParserRef> &p_dependant_parser);
 	Ref<GDScriptParserRef> find_cached_external_parser_for_class(const GDScriptParser::ClassNode *p_class, GDScriptParser *p_dependant_parser);
@@ -173,7 +177,7 @@ public:
 
 	Variant make_variable_default_value(GDScriptParser::VariableNode *p_variable);
 
-	static bool check_type_compatibility(const GDScriptParser::DataType &p_target, const GDScriptParser::DataType &p_source, bool p_allow_implicit_conversion = false, const GDScriptParser::Node *p_source_node = nullptr);
+	static bool check_type_compatibility(const GDScriptParser::DataType &p_target, const GDScriptParser::DataType &p_source, bool p_allow_implicit_conversion = false, const GDScriptParser::Node *p_source_node = nullptr, const GDScriptParser::ClassNode* p_class = nullptr, const GDScriptParser::FunctionNode* p_func = nullptr);
 	static GDScriptParser::DataType type_from_metatype(const GDScriptParser::DataType &p_meta_type);
 	static bool class_exists(const StringName &p_class);
 

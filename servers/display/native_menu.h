@@ -32,6 +32,7 @@
 
 #include "core/object/object.h"
 #include "core/os/keyboard.h"
+#include "core/variant/binder_common.h"
 #include "core/variant/callable.h"
 #include "core/variant/type_info.h"
 

@@ -82,6 +82,7 @@ enum PropertyHint {
 	PROPERTY_HINT_GROUP_ENABLE, ///< used to make the property's group checkable. Only use for boolean types.
 	PROPERTY_HINT_INPUT_NAME,
 	PROPERTY_HINT_FILE_PATH,
+	PROPERTY_HINT_GENERIC, ///<--- hey the triple slash signature bullshit!
 	PROPERTY_HINT_MAX,
 };
 
@@ -101,7 +102,7 @@ enum PropertyUsageFlags {
 	PROPERTY_USAGE_SCRIPT_VARIABLE = 1 << 12,
 	PROPERTY_USAGE_STORE_IF_NULL = 1 << 13,
 	PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED = 1 << 14,
-	PROPERTY_USAGE_SCRIPT_DEFAULT_VALUE = 1 << 15, // Deprecated.
+	PROPERTY_USAGE_GENERIC = 1 << 15, /// Repurposed into generic export flag :)
 	PROPERTY_USAGE_CLASS_IS_ENUM = 1 << 16,
 	PROPERTY_USAGE_NIL_IS_VARIANT = 1 << 17,
 	PROPERTY_USAGE_ARRAY = 1 << 18, // Used in the inspector to group properties as elements of an array.

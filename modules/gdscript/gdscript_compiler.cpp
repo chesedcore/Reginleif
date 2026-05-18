@@ -139,6 +139,13 @@ GDScriptDataType GDScriptCompiler::_gdtype_from_datatype(const GDScriptParser::D
 			result.script_type = result.script_type_ref.ptr();
 			result.native_type = p_datatype.native_type;
 		} break;
+
+		/// [Monarch] I've got no idea if this is what I'm supposed to do
+		/// But I'm sure as hell gonna pray it works until it explodes in my face.
+		case GDScriptParser::DataType::GENERIC_TYPE: {
+			return GDScriptDataType(); /// return Variant for now, just type erasure
+		} break;
+
 		case GDScriptParser::DataType::CLASS: {
 			if (p_handle_metatype && p_datatype.is_meta_type) {
 				result.kind = GDScriptDataType::NATIVE;
@@ -2171,9 +2178,21 @@ Error GDScriptCompiler::_parse_block(CodeGen &codegen, const GDScriptParser::Sui
 				if (return_n->void_return) {
 					// Always return `null`, even if the expression is a call to a `void` function.
 					gen->write_return(codegen.add_constant(Variant()), false);
+
+				///always force typed return for dicts
 				} else {
-					gen->write_return(return_value, return_n->use_conversion);
+					bool use_conversion = return_n->use_conversion;
+					if (codegen.function_node) {
+						const GDScriptDataType function_return_type = _gdtype_from_datatype(codegen.function_node->get_datatype(), codegen.script);
+						if (function_return_type.kind == GDScriptDataType::BUILTIN &&
+								function_return_type.builtin_type == Variant::DICTIONARY &&
+								function_return_type.has_container_element_types()) {
+							use_conversion = true;
+						}
+					}
+					gen->write_return(return_value, use_conversion);
 				}
+
 				if (return_value.mode == GDScriptCodeGenerator::Address::TEMPORARY) {
 					codegen.generator->pop_temporary();
 				}
@@ -2871,6 +2890,21 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 					prop_info.hint = export_info.hint;
 					prop_info.hint_string = export_info.hint_string;
 					prop_info.usage = export_info.usage;
+
+					///
+					if ((export_info.usage & PROPERTY_USAGE_GENERIC) != 0) {
+						const PropertyInfo resolved_type_info = variable_type.to_property_info(name);
+						if (resolved_type_info.type != Variant::NIL) {
+							prop_info.type = resolved_type_info.type;
+							prop_info.class_name = resolved_type_info.class_name;
+						}
+						if (resolved_type_info.hint != PROPERTY_HINT_NONE || !resolved_type_info.hint_string.is_empty()) {
+							prop_info.hint = resolved_type_info.hint;
+							prop_info.hint_string = resolved_type_info.hint_string;
+						}
+						prop_info.usage |= resolved_type_info.usage;
+					}
+					
 				} else {
 					// Enum hint doesn't really belong to the data type information, so we don't want to add it to
 					// `GDScriptParser::DataType::to_property_info()`. However, we still want to add this metadata

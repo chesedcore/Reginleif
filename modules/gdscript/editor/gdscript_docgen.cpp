@@ -148,6 +148,9 @@ void GDScriptDocGen::_doctype_from_gdtype(const GDType &p_gdtype, String &r_type
 				}
 			}
 			return;
+		case GDType::GENERIC_TYPE:
+			r_type = "Generic parameter";
+			return;
 		case GDType::VARIANT:
 		case GDType::RESOLVING:
 		case GDType::UNRESOLVED:
