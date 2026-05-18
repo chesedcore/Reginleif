@@ -86,6 +86,16 @@ class MaterialEditor : public Control {
 	Ref<SphereMesh> sphere_mesh;
 	Ref<BoxMesh> box_mesh;
 	Ref<QuadMesh> quad_mesh;
+<<<<<<< Updated upstream
+=======
+	Ref<PlaneMesh> floor_mesh;
+
+	VBoxContainer *layout_error = nullptr;
+	Label *error_label = nullptr;
+	bool is_unsupported_shader_mode = false;
+	bool autohide_buttons = false;
+
+>>>>>>> Stashed changes
 	HBoxContainer *layout_3d = nullptr;
 
 	Button *sphere_switch = nullptr;
