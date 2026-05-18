@@ -90,6 +90,7 @@ class MaterialEditor : public Control {
 	VBoxContainer *layout_error = nullptr;
 	Label *error_label = nullptr;
 	bool is_unsupported_shader_mode = false;
+	bool autohide_buttons = false;
 
 	HBoxContainer *layout_3d = nullptr;
 
