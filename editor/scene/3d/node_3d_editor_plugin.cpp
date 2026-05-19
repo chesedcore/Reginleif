@@ -2606,6 +2606,7 @@ void Node3DEditorViewport::_sinput(const Ref<InputEvent> &p_event) {
 							}
 
 							se->gizmo->commit_subgizmos(ids, restore, false);
+							finish_transform();
 						} else {
 							if (_edit.original_mouse_pos != _edit.mouse_pos) {
 								commit_transform();
@@ -9748,6 +9749,9 @@ void Node3DEditor::_notification(int p_what) {
 				update_all_gizmos();
 			}
 			_update_vertex_snap_tooltips();
+			if (EditorSettings::get_singleton()->check_changed_settings_in_group("interface/inspector")) {
+				snap_translate->set_step(EDITOR_GET("interface/inspector/default_float_step"));
+			}
 		} break;
 
 		case NOTIFICATION_PHYSICS_PROCESS: {
@@ -10822,7 +10826,7 @@ Node3DEditor::Node3DEditor() {
 
 	snap_translate = memnew(EditorSpinSlider);
 	snap_translate->set_min(0.0);
-	snap_translate->set_step(0.001);
+	snap_translate->set_step(EDITOR_GET("interface/inspector/default_float_step"));
 	snap_translate->set_max(10.0);
 	snap_translate->set_suffix("m");
 	snap_translate->set_allow_greater(true);

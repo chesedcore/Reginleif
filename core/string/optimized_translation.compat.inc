@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  tree.compat.inc                                                       */
+/*  optimized_translation.compat.inc                                      */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,21 +30,16 @@
 
 #ifndef DISABLE_DEPRECATED
 
-#include "tree.h"
+#include "optimized_translation.h"
 
 #include "core/object/class_db.h"
 
-void TreeItem::_select_bind_compat_119367(int p_column) {
-	select(p_column, true);
+void OptimizedTranslation::_generate_bind_compat_119563(const Ref<Translation> &p_from) {
+	generate(p_from);
 }
 
-void TreeItem::_add_button_bind_compat_76829(int p_column, const Ref<Texture2D> &p_button, int p_id, bool p_disabled, const String &p_tooltip) {
-	add_button(p_column, p_button, p_id, p_disabled, p_tooltip, String());
+void OptimizedTranslation::_bind_compatibility_methods() {
+	ClassDB::bind_compatibility_method(D_METHOD("generate", "from"), &OptimizedTranslation::_generate_bind_compat_119563);
 }
 
-void TreeItem::_bind_compatibility_methods() {
-	ClassDB::bind_compatibility_method(D_METHOD("select", "column"), &TreeItem::_select_bind_compat_119367);
-	ClassDB::bind_compatibility_method(D_METHOD("add_button", "column", "button", "id", "disabled", "tooltip_text"), &TreeItem::_add_button_bind_compat_76829, DEFVAL(-1), DEFVAL(false), DEFVAL(""));
-}
-
-#endif // DISABLE_DEPRECATED
+#endif
