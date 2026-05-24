@@ -391,7 +391,7 @@ void FileSystemDock::_update_tree(const Vector<String> &p_uncollapsed_paths, boo
 	// Handles the favorites.
 	favorites_item = tree->create_item(root);
 	favorites_item->set_icon(0, get_editor_theme_icon(SNAME("Favorites")));
-	favorites_item->set_text(0, TTRC("Favorites:"));
+	favorites_item->set_text(0, TTRC("Favorites"));
 	favorites_item->set_auto_translate_mode(0, AUTO_TRANSLATE_MODE_ALWAYS);
 	favorites_item->set_metadata(0, "Favorites");
 	favorites_item->set_collapsed(!p_uncollapsed_paths.has("Favorites"));
@@ -533,23 +533,13 @@ void FileSystemDock::_update_display_mode(bool p_force) {
 
 			tree->show();
 			tree->set_v_size_flags(SIZE_EXPAND_FILL);
-			if (is_vertical) {
-				tree->set_theme_type_variation("");
-				tree->set_scroll_hint_mode(Tree::SCROLL_HINT_MODE_BOTH);
-				tree_mc->set_theme_type_variation(horizontal ? "NoBorderBottomPanel" : "NoBorderHorizontal");
+			tree->set_theme_type_variation("TreeSecondary");
+			tree->set_scroll_hint_mode(Tree::SCROLL_HINT_MODE_DISABLED);
+			tree_mc->set_theme_type_variation("");
 
-				files->set_theme_type_variation(horizontal ? "ItemListSecondary" : "");
-				files->set_scroll_hint_mode(horizontal ? ItemList::SCROLL_HINT_MODE_DISABLED : ItemList::SCROLL_HINT_MODE_TOP);
-				files_mc->set_theme_type_variation(horizontal ? "" : "NoBorderHorizontalBottom");
-			} else {
-				tree->set_theme_type_variation("TreeSecondary");
-				tree->set_scroll_hint_mode(Tree::SCROLL_HINT_MODE_DISABLED);
-				tree_mc->set_theme_type_variation("");
-
-				files->set_theme_type_variation("ItemListSecondary");
-				files->set_scroll_hint_mode(ItemList::SCROLL_HINT_MODE_DISABLED);
-				files_mc->set_theme_type_variation("");
-			}
+			files->set_theme_type_variation("ItemListSecondary");
+			files->set_scroll_hint_mode(ItemList::SCROLL_HINT_MODE_DISABLED);
+			files_mc->set_theme_type_variation("");
 			tree->ensure_cursor_is_visible();
 
 			// Properly allocate the selections between the views.
