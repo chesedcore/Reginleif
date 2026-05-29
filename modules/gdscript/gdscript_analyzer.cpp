@@ -3251,8 +3251,17 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 			}
 		} else if (!is_type_compatible(expected_type, result, true, p_return)) {
 			if (is_type_compatible(result, expected_type)) {
-				p_return->use_conversion = true;
-				mark_node_unsafe(p_return);
+				
+				/// don't allow conversion assignment when expected type is an open generic
+				/// blocks you from returning 3 when return type is T or something
+
+				if (expected_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+					push_error(vformat(R"(Cannot return value of type "%s" because the function return type is generic: "%s".)", result.to_string(), expected_type.to_string()), p_return);
+				} else {
+					p_return->use_conversion = true;
+					mark_node_unsafe(p_return);
+				}
+			
 			} else {
 				push_error(vformat(R"(Cannot return value of type "%s" because the function return type is "%s".)", result.to_string(), expected_type.to_string()), p_return);
 			}
@@ -7288,6 +7297,16 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 		if (is_generic_in_open_context(p_target, p_class) || is_generic_fn_in_open_context(p_target, p_func)) {
 			return p_target.kind == GDScriptParser::DataType::GENERIC_TYPE && p_target == p_source;
 		}
+
+		/// if the source is open-context generic but the target is a concrete non-generic type, reject
+		/// prevents you from coercing T -> int or something stupid like that
+		
+		if (is_generic_in_open_context(p_source, p_class) || is_generic_fn_in_open_context(p_source, p_func)) {
+			if (p_target.kind != GDScriptParser::DataType::GENERIC_TYPE) {
+				return false;
+			}
+		}
+
 		return true;
 	}
 
