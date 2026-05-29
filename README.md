@@ -23,6 +23,8 @@ Compile the engine by `git clone`ing this repository, use `pip install scons` to
 
 If you don't want to go through the hassle of all that, I periodically throw a few prebuilt binaries in the releases section on the right. Ideally, there should be backwards compatibility with projects that use strongly typed GDScript, but back-compat is not the biggest prio for me, even if it *is* a priority.
 
+**It is not guaranteed that the latest release matches nightly.** Compile yourself for the latest version or request another release if it seems too stale.
+
 ## Shit I want to add
 - type unifier
 - traits (holy shit!!!)
@@ -231,3 +233,10 @@ because i don't wanna. if you want to, good! go ahead.
 
 ## you should've waited for GDType/Big Core Rewrite/Godot 5/Weekly Steel Ball Run
 i don't wanna. i prioritise usability now. i'm not saying GDType and shit are bad, i'm saying i'm an impatient kid.
+
+## special thanks
+- the Free Will dev team, for stress-testing this fork
+- polanas, for lending me compute for compilation, and helping benchmark bottlenecks
+- regulars in InboundShovel discord's godot channel for being awesome
+- godot upstream for getting me into gamedev in the first place
+- you!
