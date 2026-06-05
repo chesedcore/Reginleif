@@ -237,6 +237,7 @@ i don't wanna. i prioritise usability now. i'm not saying GDType and shit are ba
 ## special thanks
 - the Free Will dev team, for stress-testing this fork
 - polanas, for lending me compute for compilation, and helping benchmark bottlenecks
+- Hannah (jmejuniper) for the awesome custom-built icon for this fork!
 - regulars in InboundShovel discord's godot channel for being awesome
 - godot upstream for getting me into gamedev in the first place
 - you!
