@@ -1311,14 +1311,38 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 				if (generic_param->generic_upper_bound != nullptr) {
 					GDScriptParser::DataType upper_bound_type = type_from_metatype(resolve_datatype(generic_param->generic_upper_bound));
 					upper_bound_type = resolve_generic_type(upper_bound_type, result.generic_type_bindings);
+
 					if (!upper_bound_type.is_variant() && !is_type_compatible(upper_bound_type, arg_type, true, contained_type)) {
+						
+						/// if arg_type is an open generic, you can't just reject it outright!! you need to check if its own
+						/// upper bound satisfies the constraint!! so U: Node -> T: Node is fine! BUT U: int -> T: Node is provably wrong
+						/// this is where we do the hard labour of checking that. yay. go me. 
+						if (arg_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+							GDScriptParser::IdentifierNode* decl = find_generic_param_decl(arg_type.generic_param);
+
+							if (decl != nullptr && decl->generic_upper_bound != nullptr) {
+								GDScriptParser::DataType arg_upper = type_from_metatype(resolve_datatype(decl->generic_upper_bound));
+								if (is_type_compatible(upper_bound_type, arg_upper, true, contained_type)) {
+									result.generic_type_bindings[param_name] = arg_type;
+									continue; /// U's upper bound satisfies T's upper bound, we're good!
+								}
+							}
+
+							/// no upper bound on U, or its upper bound doesn't satisfy the constraint
+							/// most likely provably wrong, fall through to error
+						}
+
 						push_error(vformat(
-								   R"([Reginleif] Type argument '%s' for generic parameter '%s' does not satisfy upper bound '%s'.)",
-								   arg_type.to_string(),
-								   param_name,
-								   upper_bound_type.to_string()),
-								contained_type);
+								R"([Reginleif] Type argument '%s' for generic parameter '%s' does not satisfy upper bound '%s'.)",
+								arg_type.to_string(),
+								param_name,
+								upper_bound_type.to_string()),
+
+							contained_type
+						);
+
 						return bad_type;
+
 					}
 				}
 
@@ -4580,6 +4604,14 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				GDScriptParser::DataType upper_bound_type = type_from_metatype(resolve_datatype(generic_param->generic_upper_bound));
 				
 				if (!upper_bound_type.is_variant() && !is_type_compatible(upper_bound_type, *bound_arg, true, p_call)) {
+
+				/// if bound_arg is still an open generic, don't reject it outright!! it may have its own upper bound
+				/// that already satisfies this constraint!! U: Node passed as T: Node is fine, you just can't prove
+				/// it concretely yet. rejecting it here is wrong, instead throw it downstream
+				if (bound_arg->kind == GDScriptParser::DataType::GENERIC_TYPE) {
+					continue;
+				}
+
 					push_error(vformat(
 							   R"([Reginleif] Type argument '%s' for class generic parameter '%s' does not satisfy upper bound '%s'.)",
 							   bound_arg->to_string(),
