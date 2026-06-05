@@ -3354,11 +3354,13 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 			if (return_bound == nullptr) { continue; }
 			if (return_bound->kind == GDScriptParser::DataType::GENERIC_TYPE) { continue; }
 
+			bool appears_in_param = false;
 			for (int i = 0; i < parser->current_function->parameters.size(); i++) {
 
 				const GDScriptParser::DataType& param_type = parser->current_function->parameters[i]->get_datatype();
 
 				if (type_contains_this_generic_param(param_type, gp->name, parser->current_function, parser->current_class)) {
+					appears_in_param = true;
 					push_error(vformat(
 						R"([Reginleif] Return expression fixes generic '%s' to '%s', but '%s' is already determined by parameter '%s'. The return type must preserve the generic.)",
 						gp->name, return_bound->to_string(), gp->name,
@@ -3366,6 +3368,37 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 						p_return);
 					break;
 
+				}
+			}
+
+			if (!appears_in_param) {
+				bool satisfies_bound = false;
+				GDScriptParser::DataType upper;
+				bool has_bound = gp->generic_upper_bound != nullptr;
+				if (has_bound) {
+					upper = type_from_metatype(resolve_datatype(gp->generic_upper_bound));
+
+					///only exact match is safe! subtype isn't, the caller controls what T is!!
+					if (*return_bound == upper) {
+						satisfies_bound = true;
+					}
+				}
+
+				if (!satisfies_bound) {
+					if (has_bound) {
+						push_error(vformat(
+
+							///ah, if only i could COLOUR THE FUCKING ERROR MESSAGE to DIFF between the ERROR and the REASONING
+
+							R"([Reginleif] Return expression fixes generic '%s' to '%s', which does not exactly match its upper bound '%s'. Reasoning: The caller controls what '%s' is, not the upper bound. Only returning exactly '%s' is provably correct here.)",
+							gp->name, return_bound->to_string(), upper.to_string(), gp->name, upper.to_string()),
+							p_return);
+					} else {
+						push_error(vformat(
+							R"([Reginleif] Return expression fixes generic '%s' to '%s', but '%s' is not constrained by any parameter so the caller controls its type. The return type must remain generic.)",
+							gp->name, return_bound->to_string(), gp->name),
+							p_return);
+					}
 				}
 			}
 		}
