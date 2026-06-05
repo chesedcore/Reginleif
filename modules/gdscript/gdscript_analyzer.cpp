@@ -7310,11 +7310,49 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 		return true;
 	}
 
-	/// case 3, target is generic, source is concrete, should always be fine
+	/// case 3, target is generic, source is concrete
 	if (p_target.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+
+		/// going to leave comments here as a note to future monarch, because this is a TOUCHY part of the analyser
 		if (is_generic_in_open_context(p_target, p_class) || is_generic_fn_in_open_context(p_target, p_func)) {
-			return false;
+
+			/// open context means we're inside the definition body, for example, assigning into a variable typed T or A or whatever
+			/// so you can't just return true blindly, you still gotta check if int assigned to A: Node should still be an error
+			///
+			/// but now, you also can't return false, that incorrectly rejects perfectly legal shit like Node onto A: Node (notice the upper bound)
+			/// so the right move becomes to redirect the check against the upper bound instead
+			/// and not T or A or whatever
+			///
+			/// but if there's no upper bound, T is unconstrained (effectively Variant), anything goes
+
+			GDScriptParser::IdentifierNode* decl = nullptr;
+
+
+			if (p_func != nullptr) {
+				for (GDScriptParser::IdentifierNode* gp : p_func->generic_parameters) {
+					if (gp != nullptr && gp->name == p_target.generic_param) { decl = gp; break; }
+				}
+			}
+
+			if (decl == nullptr && p_class != nullptr) {
+				for (GDScriptParser::IdentifierNode* gp : p_class->generic_parameters) {
+					if (gp != nullptr && gp->name == p_target.generic_param) { decl = gp; break; }
+				}
+			}
+
+			if (decl == nullptr || decl->generic_upper_bound == nullptr) {
+				return true; /// unconstrained generic! treat as Variant
+			}
+
+			/// now delegate to the normal compatibility check against the upper bound
+			/// Node -> A: Node becomes Node -> Node and int -> A: Node becomes int -> Node
+			/// so it SHOULD fail correctly
+
+			GDScriptParser::DataType upper = type_from_metatype(decl->generic_upper_bound->get_datatype());
+			return check_type_compatibility(upper, p_source, p_allow_implicit_conversion, p_source_node, p_class, p_func);
+
 		}
+
 		return true;
 	}
 
