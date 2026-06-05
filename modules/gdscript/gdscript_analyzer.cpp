@@ -333,6 +333,37 @@ static bool has_unbound_generic_parameter(const GDScriptParser::DataType& p_type
 	return false;
 }
 
+/// [Monarch] Returns true if p_type contains a GENERIC_TYPE node that specifically
+/// refers to p_param (matched by name AND owner, to avoid confusing same-named
+/// generics from different classes/functions)
+static bool type_contains_this_generic_param(const GDScriptParser::DataType& p_type, const StringName& p_name, const GDScriptParser::FunctionNode* p_owner_fn, const GDScriptParser::ClassNode* p_owner_class) {
+
+	if (p_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+		if (p_type.generic_param != p_name) {
+			return false;
+		}
+		if (p_owner_fn != nullptr && p_type.generic_owner_function == p_owner_fn) {
+			return true;
+		}
+		if (p_owner_class != nullptr && p_type.generic_owner_class == p_owner_class) {
+			return true;
+		}
+		return false;
+	}
+
+	for (int i = 0; i < p_type.container_element_types.size(); i++) {
+		if (type_contains_this_generic_param(p_type.container_element_types[i], p_name, p_owner_fn, p_owner_class)) {
+			return true;
+		}
+	}
+	for (const KeyValue<StringName, GDScriptParser::DataType>& E : p_type.generic_type_bindings) {
+		if (type_contains_this_generic_param(E.value, p_name, p_owner_fn, p_owner_class)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool is_script_or_class(const GDScriptParser::DataType p_datatype) {
 	return p_datatype.kind == GDScriptParser::DataType::CLASS || p_datatype.kind == GDScriptParser::DataType::SCRIPT;
 }
@@ -3298,6 +3329,45 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 				parser->push_warning(p_return, GDScriptWarning::NARROWING_CONVERSION);
 			}
 #endif // DEBUG_ENABLED
+		}
+	}
+
+	/// if this function has generic parameters, check that the return value
+	/// doesn't INDEPENDENTLY fix a generic that is already constrained by a parameter
+	///
+	/// for example: combine[T,U](opt_a: Option[T], opt_b: Option[U]) -> Option[Pair[T,U]]
+	/// must not allow `return Option(Pair(3, 4))` because that fixes T=int
+	/// and U=int independently of what opt_a and opt_b actually are
+	///
+
+	if (has_expected_type && parser->current_function != nullptr && parser->current_function->has_generic_parameters()) {
+
+		HashMap<StringName, GDScriptParser::DataType> return_bindings;
+		infer_generic_bindings_from_types(expected_type, result, return_bindings);
+
+		for (const GDScriptParser::IdentifierNode* gp : parser->current_function->generic_parameters) {
+
+			if (gp == nullptr) { continue; }
+
+			const GDScriptParser::DataType* return_bound = return_bindings.getptr(gp->name);
+
+			if (return_bound == nullptr) { continue; }
+			if (return_bound->kind == GDScriptParser::DataType::GENERIC_TYPE) { continue; }
+
+			for (int i = 0; i < parser->current_function->parameters.size(); i++) {
+
+				const GDScriptParser::DataType& param_type = parser->current_function->parameters[i]->get_datatype();
+
+				if (type_contains_this_generic_param(param_type, gp->name, parser->current_function, parser->current_class)) {
+					push_error(vformat(
+						R"([Reginleif] Return expression fixes generic '%s' to '%s', but '%s' is already determined by parameter '%s'. The return type must preserve the generic.)",
+						gp->name, return_bound->to_string(), gp->name,
+						parser->current_function->parameters[i]->identifier->name),
+						p_return);
+					break;
+
+				}
+			}
 		}
 	}
 
@@ -7529,7 +7599,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 								return false;
 							}
 
-							if(!check_type_compatibility(*target_bound, *source_bound, p_allow_implicit_conversion, p_source_node, p_class)) {
+							if(!check_type_compatibility(*target_bound, *source_bound, p_allow_implicit_conversion, p_source_node, p_class, p_func)) {
 								return false;
 							}
 						}
