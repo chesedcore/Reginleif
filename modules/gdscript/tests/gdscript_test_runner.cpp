@@ -396,6 +396,60 @@ static bool generate_class_index_recursive(const String &p_dir) {
 	return true;
 }
 
+static bool verify_utils_global_class_static_methods(const String& p_source_dir) {
+	const String expected_utils_path = p_source_dir.path_join("utils.notest.gd");
+	if (!FileAccess::exists(expected_utils_path)) {
+		return true;
+	}
+
+	static const StringName utils_class_name = SNAME("Utils");
+	ERR_FAIL_COND_V_MSG(!ScriptServer::is_global_class(utils_class_name), false,
+			"Expected utils.notest.gd to register the global class Utils.");
+
+	const String utils_path = ScriptServer::get_global_class_path(utils_class_name);
+	ERR_FAIL_COND_V_MSG(!GDScript::is_canonically_equal_paths(utils_path, expected_utils_path), false,
+			"Global class Utils resolved to " + utils_path + " instead of " + expected_utils_path + ".");
+
+	Error err = OK;
+	const String source_code = FileAccess::get_file_as_string(utils_path, &err);
+	ERR_FAIL_COND_V_MSG(err != OK, false, "Could not read global class Utils from " + utils_path + ".");
+
+	GDScriptParser parser;
+	err = parser.parse(source_code, utils_path, false);
+	ERR_FAIL_COND_V_MSG(err != OK, false, "Could not parse global class Utils from " + utils_path + ".");
+
+	const GDScriptParser::ClassNode *script_class = parser.get_tree();
+	ERR_FAIL_NULL_V_MSG(script_class, false, "Global class Utils from " + utils_path + " did not produce a parser class tree.");
+	ERR_FAIL_COND_V_MSG(script_class->identifier == nullptr || script_class->identifier->name != utils_class_name, false,
+			"Expected utils.notest.gd parser class to be named Utils.");
+
+	static const StringName static_methods[] = {
+		SNAME("check"),
+		SNAME("get_type"),
+		SNAME("get_property_signature"),
+		SNAME("get_property_extended_info"),
+		SNAME("get_method_signature"),
+		SNAME("get_property_hint_name"),
+		SNAME("get_property_hint_string"),
+		SNAME("get_property_usage_string"),
+	};
+
+	for (const StringName& method_name : static_methods) {
+		ERR_FAIL_COND_V_MSG(!script_class->has_member(method_name), false,
+				"Global class Utils parser tree is missing static function '" + String(method_name) + "'.");
+
+		const GDScriptParser::ClassNode::Member member = script_class->get_member(method_name);
+		ERR_FAIL_COND_V_MSG(member.type != GDScriptParser::ClassNode::Member::FUNCTION, false,
+				"Global class Utils parser member '" + String(method_name) + "' is not a function.");
+		ERR_FAIL_COND_V_MSG(!member.function->is_static, false,
+				"Global class Utils parser function '" + String(method_name) + "' is not static.");
+		ERR_FAIL_COND_V_MSG(!member.function->has_explicit_body, false,
+				"Global class Utils parser function '" + String(method_name) + "' was treated as bodyless.");
+	}
+
+	return true;
+}
+
 bool GDScriptTestRunner::generate_class_index() {
 	Error err = OK;
 	Ref<DirAccess> dir(DirAccess::open(source_dir, &err));
@@ -403,7 +457,11 @@ bool GDScriptTestRunner::generate_class_index() {
 	ERR_FAIL_COND_V_MSG(err != OK, false, "Could not open specified test directory.");
 
 	source_dir = dir->get_current_dir() + "/"; // Make it absolute path.
-	return generate_class_index_recursive(dir->get_current_dir());
+	if (!generate_class_index_recursive(dir->get_current_dir())) {
+		return false;
+	}
+
+	return verify_utils_global_class_static_methods(source_dir);
 }
 
 GDScriptTest::GDScriptTest(const String &p_source_path, const String &p_output_path, const String &p_base_dir) {
