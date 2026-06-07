@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 3: [Reginleif] Default value of type "int" for unconstrained generic variable "T" cannot be verified to necessarily be of that type. Note: Consider adding an upper bound on T as such: [T: int]
