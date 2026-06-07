@@ -1,2 +1,2 @@
 GDTEST_PARSER_ERROR
-Expected ":" after lambda declaration.
+[Reginleif] Expected ":" or "{" after lambda declaration.

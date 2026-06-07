@@ -1,2 +1,2 @@
 GDTEST_PARSER_ERROR
-Expected ":" after "if" condition.
+[Reginleif] Expected ":" or "{" after "if" condition.
