@@ -1330,6 +1330,15 @@ void GDScriptParser::parse_class_body(bool p_is_multiline) {
 			case GDScriptTokenizer::Token::BRACE_CLOSE:
 				class_end = true;
 				break;
+			case GDScriptTokenizer::Token::EXTENDS:
+				advance();
+				if (current_class->extends_used) {
+					push_error(R"("extends" can only be used once.)");
+				} else {
+					parse_extends();
+					end_statement("superclass");
+				}
+				break;
 			case GDScriptTokenizer::Token::LITERAL:
 				if (current.literal.get_type() == Variant::STRING) {
 					// Allow strings in class body as multiline comments.
