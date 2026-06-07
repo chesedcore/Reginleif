@@ -7,7 +7,7 @@ GDTEST_ANALYZER_ERROR
 >> ERROR at line 28: "@abstract" annotation can only be used once per function.
 >> ERROR at line 32: An abstract function cannot have a body.
 >> ERROR at line 35: "@abstract" annotation cannot be applied to static functions.
->> ERROR at line 35: A function must either have a ":" followed by a body, or be marked as "@abstract".
+>> ERROR at line 35: [Reginleif] A function must either have a ":" or "{" followed by a body, or be marked as "@abstract".
 >> ERROR at line 37: "@abstract" annotation can only be used once per class.
->> ERROR at line 40: A lambda function must have a ":" followed by a body.
->> ERROR at line 41: A lambda function must have a ":" followed by a body.
+>> ERROR at line 40: [Reginleif] A lambda function must have a ":" or "{" followed by a body.
+>> ERROR at line 41: [Reginleif] A lambda function must have a ":" or "{" followed by a body.

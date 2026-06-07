@@ -4610,6 +4610,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 		List<GDScriptParser::DataType>::ConstIterator par_itr = par_types.begin();
 		for (int i = 0; i < p_call->arguments.size() && i < par_types.size(); ++i, ++par_itr) {
 			GDScriptParser::DataType param_type = *par_itr;
+			const bool param_needs_generic_validation = param_type_still_has_open_generics(param_type);
 			
 			/// First resolve parameter with known bindings from base
 			if (!call_generic_bindings.is_empty()) {
@@ -4618,7 +4619,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 
 			GDScriptParser::DataType arg_type = p_call->arguments[i]->get_datatype();
 
-			if (!has_turbobrick) { ///only try to infer if there's no explicit params
+			if (param_needs_generic_validation && !has_turbobrick) { ///only try to infer if there's no explicit params
 				if (!infer_generic_bindings_from_types(param_type, arg_type, call_generic_bindings)) {
 					push_error(vformat(
 							R"([Reginleif] Conflicting generic type inference for call '%s()'.)",
@@ -4627,12 +4628,14 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 					p_call->set_datatype(call_type);
 					return;
 				}
+				param_type = resolve_generic_type(param_type, call_generic_bindings);
 			}
 
 			/// [Monarch] if param_type is now fully concrete (no longer an open generic),
 			/// actually validate the argument type, infer_generic_bindings_from_types only
 			/// catches inference conflicts, not type mismatches against resolved concrete types
-			if (param_type.kind != GDScriptParser::DataType::GENERIC_TYPE && 
+			if (param_needs_generic_validation &&
+				param_type.kind != GDScriptParser::DataType::GENERIC_TYPE &&
 				!param_type_still_has_open_generics(param_type) &&
 				!arg_type.is_variant() &&
 				arg_type.is_hard_type() &&
