@@ -32,6 +32,7 @@
 
 #include "../gdscript.h"
 #include "../gdscript_analyzer.h"
+#include "../gdscript_cache.h"
 #include "../gdscript_compiler.h"
 #include "../gdscript_parser.h"
 #include "../gdscript_tokenizer_buffer.h"
@@ -410,18 +411,13 @@ static bool verify_utils_global_class_static_methods(const String& p_source_dir)
 	ERR_FAIL_COND_V_MSG(!GDScript::is_canonically_equal_paths(utils_path, expected_utils_path), false,
 			"Global class Utils resolved to " + utils_path + " instead of " + expected_utils_path + ".");
 
+	GDScriptCache::remove_script(utils_path);
+
 	Error err = OK;
-	const String source_code = FileAccess::get_file_as_string(utils_path, &err);
-	ERR_FAIL_COND_V_MSG(err != OK, false, "Could not read global class Utils from " + utils_path + ".");
-
-	GDScriptParser parser;
-	err = parser.parse(source_code, utils_path, false);
-	ERR_FAIL_COND_V_MSG(err != OK, false, "Could not parse global class Utils from " + utils_path + ".");
-
-	const GDScriptParser::ClassNode *script_class = parser.get_tree();
-	ERR_FAIL_NULL_V_MSG(script_class, false, "Global class Utils from " + utils_path + " did not produce a parser class tree.");
-	ERR_FAIL_COND_V_MSG(script_class->identifier == nullptr || script_class->identifier->name != utils_class_name, false,
-			"Expected utils.notest.gd parser class to be named Utils.");
+	Ref<GDScript> utils_script = GDScriptCache::get_full_script(utils_path, err);
+	ERR_FAIL_COND_V_MSG(err != OK, false, "Could not compile global class Utils from " + utils_path + ". Error code: " + itos(err) + ".");
+	ERR_FAIL_COND_V_MSG(utils_script.is_null(), false, "Compiled global class Utils from " + utils_path + " is null.");
+	ERR_FAIL_COND_V_MSG(!utils_script->is_valid(), false, "Compiled global class Utils from " + utils_path + " is not valid.");
 
 	static const StringName static_methods[] = {
 		SNAME("check"),
@@ -434,17 +430,15 @@ static bool verify_utils_global_class_static_methods(const String& p_source_dir)
 		SNAME("get_property_usage_string"),
 	};
 
+	const HashMap<StringName, GDScriptFunction*> &member_functions = utils_script->get_member_functions();
 	for (const StringName& method_name : static_methods) {
-		ERR_FAIL_COND_V_MSG(!script_class->has_member(method_name), false,
-				"Global class Utils parser tree is missing static function '" + String(method_name) + "'.");
-
-		const GDScriptParser::ClassNode::Member member = script_class->get_member(method_name);
-		ERR_FAIL_COND_V_MSG(member.type != GDScriptParser::ClassNode::Member::FUNCTION, false,
-				"Global class Utils parser member '" + String(method_name) + "' is not a function.");
-		ERR_FAIL_COND_V_MSG(!member.function->is_static, false,
-				"Global class Utils parser function '" + String(method_name) + "' is not static.");
-		ERR_FAIL_COND_V_MSG(!member.function->has_explicit_body, false,
-				"Global class Utils parser function '" + String(method_name) + "' was treated as bodyless.");
+		const HashMap<StringName, GDScriptFunction*>::ConstIterator function_element = member_functions.find(method_name);
+		ERR_FAIL_COND_V_MSG(!function_element, false,
+				"Compiled global class Utils from " + utils_path + " is missing static function '" + String(method_name) + "'.");
+		ERR_FAIL_COND_V_MSG(function_element->value == nullptr, false,
+				"Compiled global class Utils from " + utils_path + " has a null function entry for '" + String(method_name) + "'.");
+		ERR_FAIL_COND_V_MSG(!function_element->value->is_static(), false,
+				"Compiled global class Utils function '" + String(method_name) + "' from " + utils_path + " is not static.");
 	}
 
 	return true;
