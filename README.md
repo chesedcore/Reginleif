@@ -203,17 +203,7 @@ have fuuun with that!
 
 
 ## Backwards compat breaks
-Currently, this specific syntax is broken:
-```gdscript
-class InnerClass:
-	extends Object
-```
-Instead, you should just 1-line this:
-```gdscript
-class InnerClass extends Object:
-```
-
-I didn't even know this was possible until making this project. But it looks so cursed I'm not fixing it just yet.
+There are known none so far that have not been fixed. Yay!
 
 
 ## Motivation
