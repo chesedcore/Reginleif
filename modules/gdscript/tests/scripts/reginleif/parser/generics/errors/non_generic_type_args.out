@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 3: [Reginleif] Only arrays, dictionaries and generic classes can specify type arguments.

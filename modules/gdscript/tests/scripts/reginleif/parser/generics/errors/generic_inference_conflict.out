@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 7: [Reginleif] Invalid argument 2 for 'choose()': cannot convert from 'String' to 'int'.

@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 7: [Reginleif] Generic args provided for 'not_generic()' but the function takes no generic call parameters.
