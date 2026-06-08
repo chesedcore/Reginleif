@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 4: [Reginleif] Return expression fixes generic 'T' to 'int', but 'T' is not constrained by any parameter so the caller controls its type. The return type must remain generic.

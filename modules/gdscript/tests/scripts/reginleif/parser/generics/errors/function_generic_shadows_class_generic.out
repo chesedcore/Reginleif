@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 3: [Reginleif] Function generic parameter 'T' shadows a class-level generic parameter of the same name. Rename one of them.

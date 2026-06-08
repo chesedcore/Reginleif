@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 7: [Reginleif] Generic call argument 'int' for parameter 'T' violates upper bound 'Node'.

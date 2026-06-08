@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 1: [Reginleif] Please don't bind the generic T against itself.

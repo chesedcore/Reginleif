@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 3: [Reginleif] The type GenericTypeArgCount is generic over 2 argument(s), but during instantiation, 1 argument(s) were provided.

@@ -746,7 +746,7 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 		if (param->generic_upper_bound != nullptr) {
 			GDScriptParser::DataType bound_type = type_from_metatype(resolve_datatype(param->generic_upper_bound));
 			if (bound_type.kind == GDScriptParser::DataType::GENERIC_TYPE && bound_type.generic_param == this_name) {
-				push_error(vformat(R"([Reginleif] Please don't bind the generic %s against itself.)", this_name, this_name), param->generic_upper_bound);
+				push_error(vformat(R"([Reginleif] Please don't bind the generic %s against itself.)", this_name), param->generic_upper_bound);
 			}
 		}
 	}
@@ -2789,7 +2789,6 @@ void GDScriptAnalyzer::resolve_constant(GDScriptParser::ConstantNode *p_constant
 void GDScriptAnalyzer::resolve_parameter(GDScriptParser::ParameterNode *p_parameter) {
 	static constexpr const char *kind = "parameter";
 	resolve_assignable(p_parameter, kind);
-	check_generic_parameter_default(p_parameter); ///
 }
 
 
@@ -2921,21 +2920,6 @@ void GDScriptAnalyzer::check_generic_assignable(GDScriptParser::IdentifierNode* 
 				default_type.to_string(), p_kind, p_generic_param, upper_bound.to_string(), p_generic_param, p_generic_param, default_type.to_string()),
 				p_initializer);
 	}
-}
-
-void GDScriptAnalyzer::check_generic_parameter_default(GDScriptParser::ParameterNode* p_param) {
-	if (p_param->initializer == nullptr) {
-		return;
-	}
-	const GDScriptParser::DataType& param_type = p_param->get_datatype();
-	if (param_type.kind != GDScriptParser::DataType::GENERIC_TYPE) {
-		return;
-	}
-	GDScriptParser::IdentifierNode* decl = find_generic_param_decl(param_type.generic_param);
-	if (decl == nullptr) {
-		return;
-	}
-	check_generic_assignable(decl, param_type.generic_param, p_param->initializer, "parameter");
 }
 
 ///[Monarch] chases a generic upper bound chain until it hits a concrete type or runs out.

@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 3: [Reginleif] Generic class "GenericClassMissingTypeArgs" requires type arguments. Use "GenericClassMissingTypeArgs[T]" syntax.

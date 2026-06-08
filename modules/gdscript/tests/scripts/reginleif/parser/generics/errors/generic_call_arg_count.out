@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 7: [Reginleif] 'one()' has 1 generic parameter(s) but 2 parameters were provided.

@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 1: [Reginleif] Caught duplicate generic parameter 'T'. Note: Consider naming it something else.
