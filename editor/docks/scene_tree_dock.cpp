@@ -54,6 +54,7 @@
 #include "editor/inspector/editor_context_menu_plugin.h"
 #include "editor/inspector/multi_node_edit.h"
 #include "editor/scene/3d/node_3d_editor_plugin.h"
+#include "editor/scene/3d/node_3d_editor_viewport.h"
 #include "editor/scene/canvas_item_editor_plugin.h"
 #include "editor/scene/rename_dialog.h"
 #include "editor/scene/reparent_dialog.h"
@@ -652,7 +653,6 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 			// Prefer nodes that inherit from the current scene root.
 			Node *current_edited_scene_root = EditorNode::get_singleton()->get_edited_scene();
 			if (current_edited_scene_root) {
-				String root_class = current_edited_scene_root->get_class_name();
 				static Vector<String> preferred_types;
 				if (preferred_types.is_empty()) {
 					preferred_types.push_back("Control");
@@ -661,7 +661,7 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 				}
 
 				for (int i = 0; i < preferred_types.size(); i++) {
-					if (ClassDB::is_parent_class(root_class, preferred_types[i])) {
+					if (current_edited_scene_root->is_class(preferred_types[i])) {
 						create_dialog->set_preferred_search_result_type(preferred_types[i]);
 						break;
 					}
@@ -4729,6 +4729,8 @@ void SceneTreeDock::_update_create_root_dialog(bool p_initializing) {
 			favorite_node_shortcuts->get_child(i)->queue_free();
 		}
 
+		bool favorite_node_shortcuts_empty = true;
+
 		Ref<FileAccess> f = FileAccess::open(EditorPaths::get_singleton()->get_project_settings_dir().path_join("favorites.Node"), FileAccess::READ);
 		if (f.is_valid()) {
 			while (!f->eof_reached()) {
@@ -4737,6 +4739,7 @@ void SceneTreeDock::_update_create_root_dialog(bool p_initializing) {
 				if (!l.is_empty()) {
 					Button *button = memnew(Button);
 					favorite_node_shortcuts->add_child(button);
+					favorite_node_shortcuts_empty = false;
 					button->set_text(l);
 					button->set_clip_text(true);
 					String name = l.get_slicec(' ', 0);
@@ -4749,17 +4752,13 @@ void SceneTreeDock::_update_create_root_dialog(bool p_initializing) {
 			}
 		}
 
-		if (!favorite_node_shortcuts->is_visible_in_tree()) {
-			favorite_node_shortcuts->show();
-			beginner_node_shortcuts->hide();
-		}
+		favorite_node_shortcuts->set_visible(!favorite_node_shortcuts_empty);
+		beginner_node_shortcuts->hide();
 	} else {
-		if (!beginner_node_shortcuts->is_visible_in_tree()) {
-			beginner_node_shortcuts->show();
-			favorite_node_shortcuts->hide();
-		}
-		button_clipboard->set_visible(!node_clipboard.is_empty());
+		beginner_node_shortcuts->show();
+		favorite_node_shortcuts->hide();
 	}
+	button_clipboard->set_visible(!node_clipboard.is_empty());
 }
 
 void SceneTreeDock::_favorite_root_selected(const String &p_class) {
@@ -5205,10 +5204,12 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	vb->add_child(delete_tracks_checkbox);
 
 	editable_instance_remove_dialog = memnew(ConfirmationDialog);
+	editable_instance_remove_dialog->set_flag(Window::FLAG_RESIZE_DISABLED, true);
 	add_child(editable_instance_remove_dialog);
 	editable_instance_remove_dialog->connect(SceneStringName(confirmed), callable_mp(this, &SceneTreeDock::_toggle_editable_children_from_selection));
 
 	placeholder_editable_instance_remove_dialog = memnew(ConfirmationDialog);
+	placeholder_editable_instance_remove_dialog->set_flag(Window::FLAG_RESIZE_DISABLED, true);
 	add_child(placeholder_editable_instance_remove_dialog);
 	placeholder_editable_instance_remove_dialog->connect(SceneStringName(confirmed), callable_mp(this, &SceneTreeDock::_toggle_placeholder_from_selection));
 
@@ -5233,6 +5234,7 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
 	menu_properties->connect(SceneStringName(id_pressed), callable_mp(this, &SceneTreeDock::_property_selected));
 
 	clear_inherit_confirm = memnew(ConfirmationDialog);
+	clear_inherit_confirm->set_flag(Window::FLAG_RESIZE_DISABLED, true);
 	clear_inherit_confirm->set_text(TTR("Clear Inheritance? (No Undo!)"));
 	clear_inherit_confirm->set_ok_button_text(TTR("Clear"));
 	add_child(clear_inherit_confirm);
