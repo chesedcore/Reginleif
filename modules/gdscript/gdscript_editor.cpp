@@ -1817,7 +1817,71 @@ struct RecursionCheck {
 
 static bool _guess_identifier_type(GDScriptParser::CompletionContext &p_context, const GDScriptParser::IdentifierNode *p_identifier, GDScriptCompletionIdentifier &r_type);
 static bool _guess_identifier_type_from_base(GDScriptParser::CompletionContext &p_context, const GDScriptCompletionIdentifier &p_base, const StringName &p_identifier, GDScriptCompletionIdentifier &r_type);
-static bool _guess_method_return_type_from_base(GDScriptParser::CompletionContext &p_context, const GDScriptCompletionIdentifier &p_base, const StringName &p_method, GDScriptCompletionIdentifier &r_type);
+///
+static bool _guess_method_return_type_from_base(GDScriptParser::CompletionContext &p_context, const GDScriptCompletionIdentifier &p_base, const GDScriptParser::CallNode* p_call, GDScriptCompletionIdentifier& r_type);
+
+///
+static GDScriptParser::DataType _completion_resolve_generic_type(const GDScriptParser::DataType& p_type, const HashMap<StringName, GDScriptParser::DataType>& p_bindings, HashSet<StringName>& p_resolving) {
+	if (p_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+
+		if (p_resolving.has(p_type.generic_param)) {
+			return p_type; /// prevent infinite recursion when generics ref each other, so T -> U -> T -> U doesn't explode
+		}
+
+		const GDScriptParser::DataType* bound = p_bindings.getptr(p_type.generic_param);
+		if (bound != nullptr && *bound != p_type) {
+			p_resolving.insert(p_type.generic_param);
+			GDScriptParser::DataType resolved = _completion_resolve_generic_type(*bound, p_bindings, p_resolving);
+			p_resolving.erase(p_type.generic_param);
+			return resolved;
+		}
+
+		return p_type;
+	}
+
+	GDScriptParser::DataType result = p_type;
+	for (int i = 0; i < result.container_element_types.size(); i++) {
+		result.container_element_types.write[i] = _completion_resolve_generic_type(result.container_element_types[i], p_bindings, p_resolving);
+	}
+
+	for (KeyValue<StringName, GDScriptParser::DataType>& E : result.generic_type_bindings) {
+		E.value = _completion_resolve_generic_type(E.value, p_bindings, p_resolving);
+	}
+
+	return result;
+}
+
+static GDScriptParser::DataType _completion_resolve_generic_type(const GDScriptParser::DataType& p_type, const HashMap<StringName, GDScriptParser::DataType>& p_bindings) {
+	HashSet<StringName> resolving;
+	return _completion_resolve_generic_type(p_type, p_bindings, resolving);
+}
+
+static void _completion_infer_generic_bindings(const GDScriptParser::DataType& p_param, const GDScriptParser::DataType& p_arg, HashMap<StringName, GDScriptParser::DataType>& r_bindings) {
+	if (p_param.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+		if (p_arg.is_set() && !p_arg.has_no_type() && !(p_arg.kind == GDScriptParser::DataType::BUILTIN && p_arg.builtin_type == Variant::NIL)) {
+			GDScriptParser::DataType arg = p_arg;
+			arg.is_constant = false;
+			arg.is_read_only = false;
+			r_bindings[p_param.generic_param] = arg;
+		}
+		return;
+	}
+
+	if (p_param.container_element_types.size() == p_arg.container_element_types.size()) {
+		for (int i = 0; i < p_param.container_element_types.size(); i++) {
+			_completion_infer_generic_bindings(p_param.container_element_types[i], p_arg.container_element_types[i], r_bindings);
+		}
+	}
+
+	if (p_param.class_type != nullptr && p_param.class_type == p_arg.class_type) {
+		for (const KeyValue<StringName, GDScriptParser::DataType>& E : p_param.generic_type_bindings) {
+			const GDScriptParser::DataType* arg_bound = p_arg.generic_type_bindings.getptr(E.key);
+			if (arg_bound != nullptr) {
+				_completion_infer_generic_bindings(E.value, *arg_bound, r_bindings);
+			}
+		}
+	}
+}
 
 static bool _is_expression_named_identifier(const GDScriptParser::ExpressionNode *p_expression, const StringName &p_name) {
 	if (p_expression) {
@@ -2116,7 +2180,7 @@ static bool _guess_expression_type(GDScriptParser::CompletionContext &p_context,
 				}
 
 				if (!found) {
-					found = _guess_method_return_type_from_base(c, base, call->function_name, r_type);
+					found = _guess_method_return_type_from_base(c, base, call, r_type);
 				}
 			} break;
 			case GDScriptParser::Node::SUBSCRIPT: {
@@ -2842,8 +2906,8 @@ static void _find_last_return_in_block(GDScriptParser::CompletionContext &p_cont
 	}
 }
 
-static bool _guess_method_return_type_from_base(GDScriptParser::CompletionContext &p_context, const GDScriptCompletionIdentifier &p_base, const StringName &p_method, GDScriptCompletionIdentifier &r_type) {
-	static int recursion_depth = 0;
+static bool _guess_method_return_type_from_base(GDScriptParser::CompletionContext &p_context, const GDScriptCompletionIdentifier &p_base, const GDScriptParser::CallNode* p_call, GDScriptCompletionIdentifier& r_type) {
+	const StringName &p_method = p_call->function_name;	static int recursion_depth = 0;
 	RecursionCheck recursion(&recursion_depth);
 	if (unlikely(recursion.check())) {
 		ERR_FAIL_V_MSG(false, "Reached recursion limit while trying to guess type.");
@@ -2856,6 +2920,38 @@ static bool _guess_method_return_type_from_base(GDScriptParser::CompletionContex
 		r_type.type = base_type;
 		r_type.type.is_meta_type = false;
 		r_type.type.is_constant = false;
+
+		HashMap<StringName, GDScriptParser::DataType> bindings(base_type.generic_type_bindings);
+		const GDScriptParser::ClassNode* current = base_type.class_type;
+
+		while (current != nullptr) {
+			if (current->has_member("_init")) {
+
+				/// because for some reason i decided _init constructors must also need generics... bah
+				const GDScriptParser::ClassNode::Member& member = current->get_member("_init");
+
+				if (member.type == GDScriptParser::ClassNode::Member::FUNCTION) {
+					for (int i = 0; i < p_call->arguments.size() && i < member.function->parameters.size(); i++) {
+						const GDScriptParser::DataType param_type = member.function->parameters[i]->get_datatype();
+						GDScriptCompletionIdentifier arg_type;
+						if (_guess_expression_type(p_context, p_call->arguments[i], arg_type)) {
+							_completion_infer_generic_bindings(param_type, arg_type.type, bindings);
+						} else {
+							_completion_infer_generic_bindings(param_type, p_call->arguments[i]->get_datatype(), bindings);
+						}
+					}
+				}
+
+				break;
+			}
+
+			current = current->base_type.class_type;
+
+		}
+
+		for (const KeyValue<StringName, GDScriptParser::DataType>& E : bindings) {
+			r_type.type.generic_type_bindings[E.key] = E.value;
+		}
 		return true;
 	}
 
@@ -2867,6 +2963,9 @@ static bool _guess_method_return_type_from_base(GDScriptParser::CompletionContex
 					if (!is_static || method->is_static) {
 						if (method->get_datatype().is_set() && !method->get_datatype().is_variant()) {
 							r_type.type = method->get_datatype();
+							if (!base_type.generic_type_bindings.is_empty()) {
+								r_type.type = _completion_resolve_generic_type(r_type.type, base_type.generic_type_bindings);
+							}
 							return true;
 						}
 
