@@ -5795,7 +5795,7 @@ String GDScriptParser::DataType::to_string() const {
 					if (bound != nullptr) {
 						base_name += bound->to_string();
 					} else {
-						base_name += param->name.operator String();
+						base_name += param->name.string();
 					}
 				}
 				base_name += "]";
@@ -5820,7 +5820,7 @@ String GDScriptParser::DataType::to_string() const {
 
 		///
 		case GENERIC_TYPE: {
-			return generic_param.operator String();
+			return generic_param.string();
 		}
 
 		case ENUM: {
