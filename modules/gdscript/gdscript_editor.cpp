@@ -2681,6 +2681,15 @@ static bool _guess_identifier_type_from_base(GDScriptParser::CompletionContext &
 							if (!is_static || member.variable->is_static) {
 								if (member.variable->get_datatype().is_set() && !member.variable->get_datatype().is_variant()) {
 									r_type.type = member.variable->get_datatype();
+									
+									///
+									if (!base_type.generic_type_bindings.is_empty()) {
+										r_type.type = _completion_resolve_generic_type(
+											r_type.type,
+											base_type.generic_type_bindings
+										);
+									}
+
 									return true;
 								} else if (member.variable->initializer) {
 									const GDScriptParser::ExpressionNode *init = member.variable->initializer;
