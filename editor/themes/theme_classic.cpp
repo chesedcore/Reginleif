@@ -1122,10 +1122,12 @@ void ThemeClassic::populate_standard_styles(const Ref<EditorTheme> &p_theme, Edi
 
 			p_theme->set_icon("checked", "PopupMenu", p_theme->get_icon(SNAME("GuiChecked"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("unchecked", "PopupMenu", p_theme->get_icon(SNAME("GuiUnchecked"), EditorStringName(EditorIcons)));
+			p_theme->set_icon("indeterminate", "PopupMenu", p_theme->get_icon(SNAME("GuiIndeterminate"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("radio_checked", "PopupMenu", p_theme->get_icon(SNAME("GuiRadioChecked"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("radio_unchecked", "PopupMenu", p_theme->get_icon(SNAME("GuiRadioUnchecked"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("checked_disabled", "PopupMenu", p_theme->get_icon(SNAME("GuiCheckedDisabled"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("unchecked_disabled", "PopupMenu", p_theme->get_icon(SNAME("GuiUncheckedDisabled"), EditorStringName(EditorIcons)));
+			p_theme->set_icon("indeterminate_disabled", "PopupMenu", p_theme->get_icon(SNAME("GuiIndeterminateDisabled"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("radio_checked_disabled", "PopupMenu", p_theme->get_icon(SNAME("GuiRadioCheckedDisabled"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("radio_unchecked_disabled", "PopupMenu", p_theme->get_icon(SNAME("GuiRadioUncheckedDisabled"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("submenu", "PopupMenu", p_theme->get_icon(SNAME("ArrowRight"), EditorStringName(EditorIcons)));
@@ -1777,6 +1779,9 @@ void ThemeClassic::populate_editor_styles(const Ref<EditorTheme> &p_theme, Edito
 		p_theme->set_stylebox(CoreStringName(normal), "EditorAudioBus", style_bottom_panel);
 		p_theme->set_stylebox("master", "EditorAudioBus", p_config.button_style_disabled);
 		p_theme->set_stylebox("focus", "EditorAudioBus", p_config.button_style_focus);
+
+		p_theme->set_type_variation("EditorAudioBusAddBusPanel", "PanelContainer");
+		p_theme->set_stylebox(SceneStringName(panel), "EditorAudioBusAddBusPanel", style_bottom_panel);
 	}
 
 	// Editor GUI widgets.

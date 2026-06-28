@@ -43,8 +43,8 @@ static bool _profile_count_as_native(const Object *p_base_obj, const StringName 
 	if (!p_base_obj) {
 		return false;
 	}
-	StringName cname = p_base_obj->get_class_name();
-	if ((p_methodname == "new" && cname == "GDScript") || p_methodname == "call") {
+	const StringName &cname = p_base_obj->get_class_name();
+	if ((p_methodname == SNAME("new") && cname == GDScript::get_class_static()) || p_methodname == CoreStringName(call)) {
 		return false;
 	}
 	return ClassDB::class_exists(cname) && ClassDB::has_method(cname, p_methodname, false);
@@ -54,7 +54,7 @@ static String _get_element_type(Variant::Type builtin_type, const StringName &na
 	if (script_type.is_valid() && script_type->is_valid()) {
 		return GDScript::debug_get_script_name(script_type);
 	} else if (native_type != StringName()) {
-		return native_type.operator String();
+		return native_type.string();
 	} else {
 		return Variant::get_type_name(builtin_type);
 	}
@@ -607,7 +607,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 		}
 		String err_func = name;
 		if (!_script->local_name.is_empty()) {
-			err_func = String(_script->local_name) + "." + err_func;
+			err_func = _script->local_name.string() + "." + err_func;
 		}
 		int err_line = _initial_line;
 		const char *err_text = "Stack overflow. Check for infinite recursion in your script.";
@@ -971,7 +971,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Variant::Type builtin_type = (Variant::Type)_code_ptr[ip + 4];
 				int native_type_idx = _code_ptr[ip + 5];
 				GD_ERR_BREAK(native_type_idx < 0 || native_type_idx >= _global_names_count);
-				const StringName native_type = _global_names_ptr[native_type_idx];
+				const StringName &native_type = _global_names_ptr[native_type_idx];
 
 				bool result = false;
 				if (value->get_type() == Variant::ARRAY) {
@@ -994,13 +994,13 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Variant::Type key_builtin_type = (Variant::Type)_code_ptr[ip + 5];
 				int key_native_type_idx = _code_ptr[ip + 6];
 				GD_ERR_BREAK(key_native_type_idx < 0 || key_native_type_idx >= _global_names_count);
-				const StringName key_native_type = _global_names_ptr[key_native_type_idx];
+				const StringName &key_native_type = _global_names_ptr[key_native_type_idx];
 
 				GET_VARIANT_PTR(value_script_type, 3);
 				Variant::Type value_builtin_type = (Variant::Type)_code_ptr[ip + 7];
 				int value_native_type_idx = _code_ptr[ip + 8];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
-				const StringName value_native_type = _global_names_ptr[value_native_type_idx];
+				const StringName &value_native_type = _global_names_ptr[value_native_type_idx];
 
 				bool result = false;
 				if (value->get_type() == Variant::DICTIONARY) {
@@ -1022,7 +1022,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 				int native_type_idx = _code_ptr[ip + 3];
 				GD_ERR_BREAK(native_type_idx < 0 || native_type_idx >= _global_names_count);
-				const StringName native_type = _global_names_ptr[native_type_idx];
+				const StringName &native_type = _global_names_ptr[native_type_idx];
 
 				bool was_freed = false;
 				Object *object = value->get_validated_object_with_check(was_freed);
@@ -1363,7 +1363,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 #endif
 #ifdef DEBUG_ENABLED
 				if (!valid) {
-					err_text = "Invalid access to property or key '" + index->operator String() + "' on a base object of type '" + _get_var_type(src) + "'.";
+					err_text = "Invalid access to property or key '" + index->string() + "' on a base object of type '" + _get_var_type(src) + "'.";
 					OPCODE_BREAK;
 				}
 				*dst = ret;
@@ -1545,7 +1545,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Variant::Type builtin_type = (Variant::Type)_code_ptr[ip + 4];
 				int native_type_idx = _code_ptr[ip + 5];
 				GD_ERR_BREAK(native_type_idx < 0 || native_type_idx >= _global_names_count);
-				const StringName native_type = _global_names_ptr[native_type_idx];
+				const StringName &native_type = _global_names_ptr[native_type_idx];
 
 				if (src->get_type() != Variant::ARRAY) {
 #ifdef DEBUG_ENABLED
@@ -1668,13 +1668,13 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Variant::Type key_builtin_type = (Variant::Type)_code_ptr[ip + 5];
 				int key_native_type_idx = _code_ptr[ip + 6];
 				GD_ERR_BREAK(key_native_type_idx < 0 || key_native_type_idx >= _global_names_count);
-				const StringName key_native_type = _global_names_ptr[key_native_type_idx];
+				const StringName &key_native_type = _global_names_ptr[key_native_type_idx];
 
 				GET_VARIANT_PTR(value_script_type, 3);
 				Variant::Type value_builtin_type = (Variant::Type)_code_ptr[ip + 7];
 				int value_native_type_idx = _code_ptr[ip + 8];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
-				const StringName value_native_type = _global_names_ptr[value_native_type_idx];
+				const StringName &value_native_type = _global_names_ptr[value_native_type_idx];
 
 				if (src->get_type() != Variant::DICTIONARY) {
 #ifdef DEBUG_ENABLED
@@ -2055,7 +2055,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Variant::Type builtin_type = (Variant::Type)_code_ptr[ip + 2];
 				int native_type_idx = _code_ptr[ip + 3];
 				GD_ERR_BREAK(native_type_idx < 0 || native_type_idx >= _global_names_count);
-				const StringName native_type = _global_names_ptr[native_type_idx];
+				const StringName &native_type = _global_names_ptr[native_type_idx];
 
 				Array array;
 				array.set_typed(builtin_type, native_type, *script_type);
@@ -2110,13 +2110,13 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Variant::Type key_builtin_type = (Variant::Type)_code_ptr[ip + 2];
 				int key_native_type_idx = _code_ptr[ip + 3];
 				GD_ERR_BREAK(key_native_type_idx < 0 || key_native_type_idx >= _global_names_count);
-				const StringName key_native_type = _global_names_ptr[key_native_type_idx];
+				const StringName &key_native_type = _global_names_ptr[key_native_type_idx];
 
 				GET_INSTRUCTION_ARG(value_script_type, argc * 2 + 2);
 				Variant::Type value_builtin_type = (Variant::Type)_code_ptr[ip + 4];
 				int value_native_type_idx = _code_ptr[ip + 5];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
-				const StringName value_native_type = _global_names_ptr[value_native_type_idx];
+				const StringName &value_native_type = _global_names_ptr[value_native_type_idx];
 
 				Dictionary dict;
 				dict.set_typed(key_builtin_type, key_native_type, *key_script_type, value_builtin_type, value_native_type, *value_script_type);
@@ -2380,7 +2380,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 #ifdef DEBUG_ENABLED
 				if (err.error != Callable::CallError::CALL_OK) {
-					err_text = _get_call_error("static function '" + methodname->operator String() + "' in type '" + Variant::get_type_name(builtin_type) + "'", argptrs, argc, *ret, err);
+					err_text = _get_call_error("static function '" + methodname->string() + "' in type '" + Variant::get_type_name(builtin_type) + "'", argptrs, argc, *ret, err);
 					OPCODE_BREAK;
 				}
 #endif
@@ -2426,7 +2426,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 #endif
 
 				if (err.error != Callable::CallError::CALL_OK) {
-					err_text = _get_call_error("static function '" + method->get_name().operator String() + "' in type '" + method->get_instance_class().operator String() + "'", argptrs, argc, *ret, err);
+					err_text = _get_call_error("static function '" + method->get_name().string() + "' in type '" + method->get_instance_class().string() + "'", argptrs, argc, *ret, err);
 					OPCODE_BREAK;
 				}
 
@@ -2649,7 +2649,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				GD_ERR_BREAK(argc < 0);
 
 				GD_ERR_BREAK(_code_ptr[ip + 2] < 0 || _code_ptr[ip + 2] >= _global_names_count);
-				StringName function = _global_names_ptr[_code_ptr[ip + 2]];
+				const StringName &function = _global_names_ptr[_code_ptr[ip + 2]];
 
 				Variant **argptrs = instruction_args;
 
@@ -3088,7 +3088,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Variant::Type builtin_type = (Variant::Type)_code_ptr[ip + 3];
 				int native_type_idx = _code_ptr[ip + 4];
 				GD_ERR_BREAK(native_type_idx < 0 || native_type_idx >= _global_names_count);
-				const StringName native_type = _global_names_ptr[native_type_idx];
+				const StringName &native_type = _global_names_ptr[native_type_idx];
 
 				if (r->get_type() != Variant::ARRAY) {
 #ifdef DEBUG_ENABLED
@@ -3124,13 +3124,13 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Variant::Type key_builtin_type = (Variant::Type)_code_ptr[ip + 4];
 				int key_native_type_idx = _code_ptr[ip + 5];
 				GD_ERR_BREAK(key_native_type_idx < 0 || key_native_type_idx >= _global_names_count);
-				const StringName key_native_type = _global_names_ptr[key_native_type_idx];
+				const StringName &key_native_type = _global_names_ptr[key_native_type_idx];
 
 				GET_VARIANT_PTR(value_script_type, 2);
 				Variant::Type value_builtin_type = (Variant::Type)_code_ptr[ip + 6];
 				int value_native_type_idx = _code_ptr[ip + 7];
 				GD_ERR_BREAK(value_native_type_idx < 0 || value_native_type_idx >= _global_names_count);
-				const StringName value_native_type = _global_names_ptr[value_native_type_idx];
+				const StringName &value_native_type = _global_names_ptr[value_native_type_idx];
 
 				if (r->get_type() != Variant::DICTIONARY) {
 #ifdef DEBUG_ENABLED
@@ -4295,7 +4295,7 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 		}
 		String err_func = name;
 		if (!_script->local_name.is_empty()) {
-			err_func = String(_script->local_name) + "." + err_func;
+			err_func = _script->local_name.string() + "." + err_func;
 		}
 		int err_line = line;
 		if (err_text.is_empty()) {

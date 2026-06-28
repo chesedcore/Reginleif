@@ -1097,10 +1097,12 @@ void ThemeModern::populate_standard_styles(const Ref<EditorTheme> &p_theme, Edit
 
 			p_theme->set_icon("checked", "PopupMenu", p_theme->get_icon(SNAME("GuiChecked"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("unchecked", "PopupMenu", p_theme->get_icon(SNAME("GuiUnchecked"), EditorStringName(EditorIcons)));
+			p_theme->set_icon("indeterminate", "PopupMenu", p_theme->get_icon(SNAME("GuiIndeterminate"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("radio_checked", "PopupMenu", p_theme->get_icon(SNAME("GuiRadioChecked"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("radio_unchecked", "PopupMenu", p_theme->get_icon(SNAME("GuiRadioUnchecked"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("checked_disabled", "PopupMenu", p_theme->get_icon(SNAME("GuiCheckedDisabled"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("unchecked_disabled", "PopupMenu", p_theme->get_icon(SNAME("GuiUncheckedDisabled"), EditorStringName(EditorIcons)));
+			p_theme->set_icon("indeterminate_disabled", "PopupMenu", p_theme->get_icon(SNAME("GuiIndeterminateDisabled"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("radio_checked_disabled", "PopupMenu", p_theme->get_icon(SNAME("GuiRadioCheckedDisabled"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("radio_unchecked_disabled", "PopupMenu", p_theme->get_icon(SNAME("GuiRadioUncheckedDisabled"), EditorStringName(EditorIcons)));
 			p_theme->set_icon("submenu", "PopupMenu", p_theme->get_icon(SNAME("ArrowRight"), EditorStringName(EditorIcons)));
@@ -1777,6 +1779,7 @@ void ThemeModern::populate_editor_styles(const Ref<EditorTheme> &p_theme, Editor
 
 		// Bottom panel.
 		Ref<StyleBoxFlat> style_bottom_panel = p_config.content_panel_style->duplicate();
+		style_bottom_panel->set_content_margin_all(p_config.tab_container_style->get_content_margin(SIDE_LEFT));
 		style_bottom_panel->set_border_width(SIDE_BOTTOM, 0);
 		style_bottom_panel->set_corner_radius_all(p_config.corner_radius * EDSCALE);
 		style_bottom_panel->set_corner_radius(CORNER_BOTTOM_LEFT, 0);
@@ -2079,20 +2082,17 @@ void ThemeModern::populate_editor_styles(const Ref<EditorTheme> &p_theme, Editor
 			p_theme->set_constant("margin_left", "NoBorderAssetLibProjectManagerHorizontal", margin);
 			p_theme->set_constant("margin_right", "NoBorderAssetLibProjectManagerHorizontal", margin);
 
-			int bottom_margin = p_theme->get_stylebox(SNAME("BottomPanel"), EditorStringName(EditorStyles))->get_content_margin(SIDE_LEFT);
-			margin = -bottom_margin;
-
-			// Used in editors residing in the bottom panel.
-			p_theme->set_type_variation("NoBorderBottomPanel", "MarginContainer");
-			p_theme->set_constant("margin_left", "NoBorderBottomPanel", margin);
-			p_theme->set_constant("margin_right", "NoBorderBottomPanel", margin);
-
-			margin = -panel_margin - bottom_margin;
+			int bottom_panel_margin = p_theme->get_stylebox(SNAME("BottomPanel"), EditorStringName(EditorStyles))->get_content_margin(SIDE_LEFT);
+			margin = -panel_margin - bottom_panel_margin;
 
 			// Used in the animation track editor.
 			p_theme->set_type_variation("NoBorderAnimation", "MarginContainer");
 			p_theme->set_constant("margin_left", "NoBorderAnimation", margin);
 			p_theme->set_constant("margin_right", "NoBorderAnimation", margin);
+
+			// Used in the OpenXR action map editor.
+			p_theme->set_type_variation("NoBorderOpenXR", "NoBorderAnimation");
+			p_theme->set_constant("margin_bottom", "NoBorderOpenXR", -panel_margin);
 
 			margin = -p_theme->get_stylebox(SceneStringName(panel), SNAME("AcceptDialog"))->get_content_margin(SIDE_LEFT);
 
@@ -2206,6 +2206,7 @@ void ThemeModern::populate_editor_styles(const Ref<EditorTheme> &p_theme, Editor
 			p_theme->set_type_variation("TreeSecondary", "Tree");
 			p_theme->set_type_variation("ItemListSecondary", "ItemList");
 			p_theme->set_type_variation("EditorAudioBusEffectsTree", "Tree");
+			p_theme->set_type_variation("EditorAudioBusAddBusPanel", "PanelContainer");
 
 			Ref<StyleBoxFlat> style_sidebar = p_config.base_style->duplicate();
 			style_sidebar->set_bg_color(p_config.surface_low_color);
@@ -2242,6 +2243,8 @@ void ThemeModern::populate_editor_styles(const Ref<EditorTheme> &p_theme, Editor
 			}
 			p_theme->set_stylebox(SceneStringName(panel), "EditorAudioBusEffectsTree", style_audio_bus_effect_tree);
 			p_theme->set_constant("h_separation", "EditorAudioBusEffectsTree", 0);
+
+			p_theme->set_stylebox(SceneStringName(panel), "EditorAudioBusAddBusPanel", style_audio_bus_effect_tree);
 		}
 
 		// ForegroundPanel.

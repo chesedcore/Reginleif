@@ -1475,6 +1475,9 @@ void TreeItem::set_button_tooltip_text(int p_column, int p_index, const String &
 void TreeItem::set_button(int p_column, int p_index, const Ref<Texture2D> &p_button) {
 	ERR_FAIL_COND(p_button.is_null());
 	ERR_FAIL_INDEX(p_column, cells.size());
+	if (p_index < 0) {
+		p_index += cells[p_column].buttons.size();
+	}
 	ERR_FAIL_INDEX(p_index, cells[p_column].buttons.size());
 
 	if (cells[p_column].buttons[p_index].texture == p_button) {
@@ -1489,6 +1492,9 @@ void TreeItem::set_button(int p_column, int p_index, const Ref<Texture2D> &p_but
 
 void TreeItem::set_button_description(int p_column, int p_index, const String &p_description) {
 	ERR_FAIL_INDEX(p_column, cells.size());
+	if (p_index < 0) {
+		p_index += cells[p_column].buttons.size();
+	}
 	ERR_FAIL_INDEX(p_index, cells[p_column].buttons.size());
 
 	if (cells[p_column].buttons[p_index].description == p_description) {
@@ -1504,6 +1510,9 @@ void TreeItem::set_button_description(int p_column, int p_index, const String &p
 
 void TreeItem::set_button_color(int p_column, int p_index, const Color &p_color) {
 	ERR_FAIL_INDEX(p_column, cells.size());
+	if (p_index < 0) {
+		p_index += cells[p_column].buttons.size();
+	}
 	ERR_FAIL_INDEX(p_index, cells[p_column].buttons.size());
 
 	if (cells[p_column].buttons[p_index].color == p_color) {
@@ -1516,6 +1525,9 @@ void TreeItem::set_button_color(int p_column, int p_index, const Color &p_color)
 
 void TreeItem::set_button_disabled(int p_column, int p_index, bool p_disabled) {
 	ERR_FAIL_INDEX(p_column, cells.size());
+	if (p_index < 0) {
+		p_index += cells[p_column].buttons.size();
+	}
 	ERR_FAIL_INDEX(p_index, cells[p_column].buttons.size());
 
 	if (cells[p_column].buttons[p_index].disabled == p_disabled) {
@@ -5160,7 +5172,10 @@ void Tree::_notification(int p_what) {
 		} break;
 
 		case NOTIFICATION_VISIBILITY_CHANGED: {
-			drag_touching = false;
+			if (!is_visible()) {
+				drag_touching = false;
+				popup_editor->hide();
+			}
 		} break;
 
 		case NOTIFICATION_DRAG_END: {
@@ -5642,7 +5657,7 @@ void Tree::_notification(int p_what) {
 
 		case NOTIFICATION_RESIZED:
 		case NOTIFICATION_TRANSFORM_CHANGED: {
-			if (popup_edited_item != nullptr) {
+			if (popup_edited_item != nullptr && popup_editor->is_visible()) {
 				Rect2 rect = _get_item_focus_rect(popup_edited_item);
 
 				popup_editor->set_position(get_screen_position() + rect.position);
@@ -7075,7 +7090,7 @@ int Tree::get_drop_section_at_position(const Point2 &p_pos) const {
 }
 
 bool Tree::can_drop_data(const Point2 &p_point, const Variant &p_data) const {
-	if (using_native_touch) {
+	if (using_native_touch && drag_touching) {
 		// Disable data drag & drop when touch dragging.
 		return false;
 	}
@@ -7084,7 +7099,7 @@ bool Tree::can_drop_data(const Point2 &p_point, const Variant &p_data) const {
 }
 
 Variant Tree::get_drag_data(const Point2 &p_point) {
-	if (using_native_touch) {
+	if (using_native_touch && drag_touching) {
 		// Disable data drag & drop when touch dragging.
 		return Variant();
 	}

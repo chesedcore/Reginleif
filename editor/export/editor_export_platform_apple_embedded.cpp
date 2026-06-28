@@ -1924,6 +1924,21 @@ Error EditorExportPlatformAppleEmbedded::_export_project_helper(const Ref<Editor
 		return err;
 	}
 
+	// Generate a unique name for the launch screen to avoid caching.
+	{
+		const String custom_launch_image_2x = p_preset->get("storyboard/custom_image@2x");
+		const String custom_launch_image_3x = p_preset->get("storyboard/custom_image@3x");
+
+		String launch_image_hash;
+		if (custom_launch_image_2x.length() > 0 && custom_launch_image_3x.length() > 0) {
+			Vector<String> launch_scr_files;
+			launch_scr_files.push_back(custom_launch_image_2x);
+			launch_scr_files.push_back(custom_launch_image_3x);
+			launch_image_hash = "_" + FileAccess::get_multiple_md5(launch_scr_files);
+		}
+		launch_screen_image_file_name = "SplashImage" + launch_image_hash;
+	}
+
 	//export rest of the files
 	int ret = unzGoToFirstFile(src_pkg_zip);
 	Vector<uint8_t> project_file_data;
@@ -1952,6 +1967,8 @@ Error EditorExportPlatformAppleEmbedded::_export_project_helper(const Ref<Editor
 		unzCloseCurrentFile(src_pkg_zip);
 
 		//write
+
+		file = file.replace("Images.xcassets/SplashImage.imageset", "Images.xcassets/" + launch_screen_image_file_name + ".imageset");
 
 		if (files_to_parse.has(file)) {
 			_fix_config_file(p_preset, data, config_data, p_debug);
@@ -2076,7 +2093,7 @@ Error EditorExportPlatformAppleEmbedded::_export_project_helper(const Ref<Editor
 
 			if (appnames.is_empty()) {
 				domain->set_locale_override(lang);
-				const String &name = domain->translate(project_name, String());
+				String name = domain->translate(project_name, String());
 				if (name != project_name) {
 					f->store_line("CFBundleDisplayName = \"" + name.xml_escape(true) + "\";");
 				}
@@ -2128,13 +2145,14 @@ Error EditorExportPlatformAppleEmbedded::_export_project_helper(const Ref<Editor
 	}
 
 	{
-		String splash_image_path = binary_dir + "/Images.xcassets/SplashImage.imageset/";
+		String splash_image_path = binary_dir + "/Images.xcassets/" + launch_screen_image_file_name + ".imageset/";
 
 		Ref<DirAccess> launch_screen_da = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
 		if (launch_screen_da.is_null()) {
 			add_message(EXPORT_MESSAGE_ERROR, TTR("Export"), TTR("Could not access the filesystem."));
 			return ERR_CANT_CREATE;
 		}
+		launch_screen_da->make_dir_recursive(splash_image_path);
 
 		print_line("Exporting launch screen storyboard");
 
@@ -2361,6 +2379,9 @@ bool EditorExportPlatformAppleEmbedded::has_valid_project_configuration(const Re
 	}
 
 	if (!ResourceImporterTextureSettings::should_import_etc2_astc()) {
+		if (EditorNode::is_cmdline_mode()) {
+			err += vformat(TTR("ETC2/ASTC texture compression is required for %s export. In the Project Settings, search for 'ETC2' in the search field, or enable 'Advanced Settings', and go to Rendering > Textures > VRAM Compression to enable 'Import ETC2 ASTC'."), get_name()) + "\n";
+		}
 		valid = false;
 	}
 

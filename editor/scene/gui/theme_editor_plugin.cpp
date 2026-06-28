@@ -763,7 +763,7 @@ void ThemeItemImportTree::_deselect_all_data_type_pressed(int p_data_type) {
 
 void ThemeItemImportTree::_import_selected() {
 	if (selected_items.is_empty()) {
-		EditorNode::get_singleton()->show_accept(TTR("Nothing was selected for the import."), TTR("OK"));
+		EditorNode::get_singleton()->show_warning(TTR("Nothing was selected for the import."));
 		return;
 	}
 
@@ -3638,16 +3638,22 @@ ThemeTypeEditor::ThemeTypeEditor() {
 
 	data_type_tabs = memnew(TabContainer);
 	data_type_tabs->set_tab_alignment(TabBar::ALIGNMENT_CENTER);
-	main_vb->add_child(data_type_tabs);
 	data_type_tabs->set_v_size_flags(SIZE_EXPAND_FILL);
 	data_type_tabs->set_use_hidden_tabs_for_min_size(true);
+	main_vb->add_child(data_type_tabs);
 
 	color_items_list = _create_item_list(Theme::DATA_TYPE_COLOR);
+	data_type_tabs->set_tab_tooltip(data_type_tabs->get_tab_count() - 1, TTRC("Colors"));
 	constant_items_list = _create_item_list(Theme::DATA_TYPE_CONSTANT);
+	data_type_tabs->set_tab_tooltip(data_type_tabs->get_tab_count() - 1, TTRC("Constants"));
 	font_items_list = _create_item_list(Theme::DATA_TYPE_FONT);
+	data_type_tabs->set_tab_tooltip(data_type_tabs->get_tab_count() - 1, TTRC("Fonts"));
 	font_size_items_list = _create_item_list(Theme::DATA_TYPE_FONT_SIZE);
+	data_type_tabs->set_tab_tooltip(data_type_tabs->get_tab_count() - 1, TTRC("Font Sizes"));
 	icon_items_list = _create_item_list(Theme::DATA_TYPE_ICON);
+	data_type_tabs->set_tab_tooltip(data_type_tabs->get_tab_count() - 1, TTRC("Icons"));
 	stylebox_items_list = _create_item_list(Theme::DATA_TYPE_STYLEBOX);
+	data_type_tabs->set_tab_tooltip(data_type_tabs->get_tab_count() - 1, TTRC("StyleBoxes"));
 
 	VBoxContainer *type_settings_tab = memnew(VBoxContainer);
 	type_settings_tab->set_custom_minimum_size(Size2(0, 160) * EDSCALE);

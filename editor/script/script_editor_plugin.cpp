@@ -966,7 +966,7 @@ void _save_text_editor_theme_as(const String &p_file) {
 	text_colors.sort();
 	for (const KeyValue<StringName, Color> &text_color : text_colors) {
 		const Color val = EditorSettings::get_singleton()->get_setting(text_color.key);
-		const String &key = text_color.key.operator String().replace("text_editor/theme/highlighting/", "");
+		const String &key = text_color.key.string().replace("text_editor/theme/highlighting/", "");
 		cf->set_value(theme_section, key, val.to_html());
 	}
 
@@ -1027,7 +1027,7 @@ void ScriptEditor::_file_dialog_action(const String &p_file) {
 				Error err = _save_text_file(resource, path);
 
 				if (err != OK) {
-					EditorNode::get_singleton()->show_accept(TTR("Error saving file!"), TTR("OK"));
+					EditorNode::get_singleton()->show_warning(TTR("Error saving file!"));
 					return;
 				}
 
@@ -1852,14 +1852,13 @@ void ScriptEditor::_update_members_overview() {
 			search_names.append(functions[i].get_slicec(':', 0));
 		}
 
-		Vector<FuzzySearchResult> results;
 		FuzzySearch fuzzy;
-		fuzzy.set_query(filter, false);
-		fuzzy.search_all(search_names, results);
+		fuzzy.set_case_sensitive(false);
+		Vector<Ref<FuzzySearchMatch>> results = fuzzy.search_all(filter, search_names);
 
-		for (const FuzzySearchResult &res : results) {
-			String name = functions[res.original_index].get_slicec(':', 0);
-			int line = functions[res.original_index].get_slicec(':', 1).to_int() - 1;
+		for (const Ref<FuzzySearchMatch> &res : results) {
+			String name = functions[res->get_original_index()].get_slicec(':', 0);
+			int line = functions[res->get_original_index()].get_slicec(':', 1).to_int() - 1;
 			members_overview->add_item(name);
 			members_overview->set_item_metadata(-1, line);
 		}
@@ -2122,13 +2121,12 @@ void ScriptEditor::_update_script_names() {
 			search_names.append(sedata[i].name);
 		}
 
-		Vector<FuzzySearchResult> results;
 		FuzzySearch fuzzy;
-		fuzzy.set_query(filter, false);
-		fuzzy.search_all(search_names, results);
+		fuzzy.set_case_sensitive(false);
+		Vector<Ref<FuzzySearchMatch>> results = fuzzy.search_all(filter, search_names);
 
-		for (const FuzzySearchResult &res : results) {
-			sedata_filtered.push_back(sedata[res.original_index]);
+		for (const Ref<FuzzySearchMatch> &res : results) {
+			sedata_filtered.push_back(sedata[res->get_original_index()]);
 		}
 	}
 
