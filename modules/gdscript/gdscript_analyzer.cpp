@@ -4640,12 +4640,25 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			GDScriptParser::ClassNode* base_class = base_type.class_type;
 			while (base_class != nullptr) {
 				if (base_class->has_member(p_call->function_name)) {
-					const auto &member = base_class->get_member(p_call->function_name);
+					const GDScriptParser::ClassNode::Member& member = base_class->get_member(p_call->function_name);
 					if (member.type == GDScriptParser::ClassNode::Member::FUNCTION) {
 						script_func = member.function;
 					}
 					break;
 				}
+
+				if (base_class->base_type.class_type == nullptr) {
+					break;
+				}
+
+				HashMap<StringName, GDScriptParser::DataType> next_level_bindings;
+				for (const KeyValue<StringName, GDScriptParser::DataType>& E : base_class->base_type.generic_type_bindings) {
+					next_level_bindings[E.key] = call_generic_bindings.is_empty() ? 
+													E.value : 
+													resolve_generic_type(E.value, call_generic_bindings);
+				}
+
+				call_generic_bindings = next_level_bindings;
 				base_class = base_class->base_type.class_type;
 			}
 		}
