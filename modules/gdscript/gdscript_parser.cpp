@@ -4130,6 +4130,7 @@ GDScriptParser::ExpressionNode *GDScriptParser::parse_lambda(ExpressionNode *p_p
 	current_suite = body;
 
 	const bool has_body = parse_function_signature(function, body, "lambda", -1);
+	const bool has_brace_body = has_body && check(GDScriptTokenizer::Token::BRACE_OPEN);
 
 	current_suite = previous_suite;
 
@@ -4144,7 +4145,7 @@ GDScriptParser::ExpressionNode *GDScriptParser::parse_lambda(ExpressionNode *p_p
 	can_break = false;
 	can_continue = false;
 
-	function->has_explicit_body = has_body;
+	function->has_explicit_body = has_brace_body;
 	function->body = parse_suite("lambda declaration", body, true);
 	complete_extents(function);
 	complete_extents(lambda);
