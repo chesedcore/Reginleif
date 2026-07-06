@@ -1584,7 +1584,10 @@ void GDScriptParser::parse_property_setter(VariableNode *p_variable) {
 			complete_extents(parameter);
 
 			consume(GDScriptTokenizer::Token::PARENTHESIS_CLOSE, R"*(Expected ")" after parameter name.)*");
-			consume(GDScriptTokenizer::Token::COLON, R"*(Expected ":" after ")".)*");
+			///
+			if (!check(GDScriptTokenizer::Token::BRACE_OPEN)) {
+				consume(GDScriptTokenizer::Token::COLON, R"*([Reginleif] Expected ":" or "{" after ")".)*");
+			}
 
 			function->header_end_line = previous.start_line;
 			function->header_end_column = previous.start_column;
@@ -1618,11 +1621,14 @@ void GDScriptParser::parse_property_getter(VariableNode *p_variable) {
 		case VariableNode::PROP_INLINE: {
 			FunctionNode *function = alloc_node<FunctionNode>();
 
+			///
 			if (match(GDScriptTokenizer::Token::PARENTHESIS_OPEN)) {
 				consume(GDScriptTokenizer::Token::PARENTHESIS_CLOSE, R"*(Expected ")" after "get(".)*");
-				consume(GDScriptTokenizer::Token::COLON, R"*(Expected ":" after "get()".)*");
-			} else {
-				consume(GDScriptTokenizer::Token::COLON, R"(Expected ":" or "(" after "get".)");
+				if (!check(GDScriptTokenizer::Token::BRACE_OPEN)) {
+					consume(GDScriptTokenizer::Token::COLON, R"*([Reginleif] Expected ":" or "{" after "get()".)*");
+				}
+			} else if (!check(GDScriptTokenizer::Token::BRACE_OPEN)) {
+				consume(GDScriptTokenizer::Token::COLON, R"([Reginleif] Expected ":" or "{" after "get".)");
 			}
 
 			function->header_end_line = previous.start_line;
@@ -2154,12 +2160,39 @@ GDScriptParser::SuiteNode *GDScriptParser::parse_suite(const String &p_context, 
 		match(GDScriptTokenizer::Token::NEWLINE);
 		reset_extents(suite, current);
 
+		///the tokenizer doesn't care about our cute little braces, it still tracks real
+		///indentation based on column position... so if the suite's body actually sits one column deeper
+		///than "{", we get a real INDENT/DEDENT pair queued up around it...
+		///gotta track if we actually saw that INDENT come through, so we know whether we OWE a DEDENT
+		///back before we leave
+		bool opened_implicit_indent = false;
+		int depth = 0;
+
 		int error_count = 0;
 		while (!check(GDScriptTokenizer::Token::BRACE_CLOSE) && !is_at_end()) {
 
-			while (match(GDScriptTokenizer::Token::NEWLINE) ||
-				match(GDScriptTokenizer::Token::INDENT) ||
-				match(GDScriptTokenizer::Token::DEDENT)) {} /// [Monarch] this is required to gobble up anything that is scope-formatting related
+			while (true) {
+				if (match(GDScriptTokenizer::Token::INDENT)) {
+					if (!opened_implicit_indent) {
+						opened_implicit_indent = true;
+					}
+					depth += 1;
+					continue;
+				}
+				if (match(GDScriptTokenizer::Token::DEDENT)) {
+					
+					depth -= 1;
+					if (depth == 0) {
+        				opened_implicit_indent = false; // Only reset when we've closed ALL indents
+    				}
+					continue;
+				}
+				if (match(GDScriptTokenizer::Token::NEWLINE)) {
+					continue;
+				}
+				break;
+
+			} /// [Monarch] this is required to gobble up anything that is scope-formatting related
 
 			if (check(GDScriptTokenizer::Token::BRACE_CLOSE)) { 
 				break;
@@ -2205,10 +2238,21 @@ GDScriptParser::SuiteNode *GDScriptParser::parse_suite(const String &p_context, 
 		complete_extents(suite);
 		consume(GDScriptTokenizer::Token::BRACE_CLOSE, vformat(R"([Reginleif] Expected "}" at end of %s.)", p_context));
 
-		///[Monarch] drain any stray newlines/dedents the tokeniser spits out after that closing brace up there
-		///this is to prevent "oops i walked too far" errors
-		while (check(GDScriptTokenizer::Token::NEWLINE) || check(GDScriptTokenizer::Token::DEDENT)) {
-			current = tokenizer->scan();
+		///we already accounted for any INDENT/DEDENT pair belonging to THIS suite's body while
+		///gobbling inside the loop above. so by the time we're here, opened_implicit_indent tells us if
+		///we still owe a DEDENT, or did it already get eaten before the "}"
+		///so an outer indent-based block (like a property's "get:"/"set:" wrapper) 
+		///still gets its own DEDENT intact when this suite is done
+		match(GDScriptTokenizer::Token::NEWLINE);
+		if (opened_implicit_indent) {
+			while (depth > 0) {
+				if (!match(GDScriptTokenizer::Token::DEDENT)) {
+					///this shouldn't happen... i hope?
+					push_error("[Reginleif] Expected DEDENT to close implicit indent?! please report!", suite);
+					break;
+				}
+				depth -= 1;
+			}
 		}
 
 		if (p_for_lambda) {
@@ -2697,12 +2741,19 @@ GDScriptParser::MatchNode *GDScriptParser::parse_match() {
 		push_error(R"(Expected expression to test after "match".)");
 	}
 
-	consume(GDScriptTokenizer::Token::COLON, R"(Expected ":" after "match" expression.)");
-	consume(GDScriptTokenizer::Token::NEWLINE, R"(Expected a newline after "match" statement.)");
+	bool use_braces = check(GDScriptTokenizer::Token::BRACE_OPEN);
 
-	if (!consume(GDScriptTokenizer::Token::INDENT, R"(Expected an indented block after "match" statement.)")) {
-		complete_extents(match_node);
-		return match_node;
+	if (use_braces) {
+		advance();
+		consume_indents_and_newlines();
+	} else {
+		consume(GDScriptTokenizer::Token::COLON, R"([Reginleif] Expected ":" or "{" after "match" expression.)");
+		consume(GDScriptTokenizer::Token::NEWLINE, R"(Expected a newline after "match" statement.)");
+
+		if (!consume(GDScriptTokenizer::Token::INDENT, R"(Expected an indented block after "match" statement.)")) {
+			complete_extents(match_node);
+			return match_node;
+		}
 	}
 
 	bool all_have_return = true;
@@ -2710,7 +2761,30 @@ GDScriptParser::MatchNode *GDScriptParser::parse_match() {
 
 	List<AnnotationNode *> match_branch_annotation_stack;
 
-	while (!check(GDScriptTokenizer::Token::DEDENT) && !is_at_end()) {
+	while (!is_at_end()) {
+
+		bool block_closed = use_braces ? 
+							check(GDScriptTokenizer::Token::BRACE_CLOSE) : 
+							check(GDScriptTokenizer::Token::DEDENT);
+		
+		if (block_closed) {
+			break;
+		}
+
+		if (use_braces) {
+			consume_indents_and_newlines();
+			if (check(GDScriptTokenizer::Token::BRACE_CLOSE)) {
+				break;
+			}
+		}
+
+		if (use_braces) {
+			consume_indents_and_newlines();
+			if (check(GDScriptTokenizer::Token::BRACE_CLOSE)) {
+				break;
+			}
+		}
+
 		if (match(GDScriptTokenizer::Token::PASS)) {
 			consume(GDScriptTokenizer::Token::NEWLINE, R"(Expected newline after "pass".)");
 			continue;
@@ -2752,7 +2826,12 @@ GDScriptParser::MatchNode *GDScriptParser::parse_match() {
 	}
 	complete_extents(match_node);
 
-	consume(GDScriptTokenizer::Token::DEDENT, R"(Expected an indented block after "match" statement.)");
+	if (use_braces) {
+		consume_indents_and_newlines();
+		consume(GDScriptTokenizer::Token::BRACE_CLOSE, R"([Reginleif] Expected "}" after "match" block.)");
+	} else {
+		consume(GDScriptTokenizer::Token::DEDENT, R"(Expected an indented block after "match" statement.)");
+	}
 
 	if (all_have_return && have_wildcard) {
 		current_suite->has_return = true;
@@ -4050,7 +4129,7 @@ GDScriptParser::ExpressionNode *GDScriptParser::parse_lambda(ExpressionNode *p_p
 	SuiteNode *previous_suite = current_suite;
 	current_suite = body;
 
-	parse_function_signature(function, body, "lambda", -1);
+	const bool has_body = parse_function_signature(function, body, "lambda", -1);
 
 	current_suite = previous_suite;
 
@@ -4065,6 +4144,7 @@ GDScriptParser::ExpressionNode *GDScriptParser::parse_lambda(ExpressionNode *p_p
 	can_break = false;
 	can_continue = false;
 
+	function->has_explicit_body = has_body;
 	function->body = parse_suite("lambda declaration", body, true);
 	complete_extents(function);
 	complete_extents(lambda);

@@ -2522,9 +2522,9 @@ void GDScriptAnalyzer::resolve_function_body(GDScriptParser::FunctionNode *p_fun
 	if (p_function->body->statements.is_empty()) {
 		///
 		// Non-abstract functions must have a body.
-		if (p_function->source_lambda != nullptr) {
+		if (p_function->source_lambda != nullptr && !p_function->has_explicit_body) {
 			push_error(R"([Reginleif] A lambda function must have a ":" or "{" followed by a body.)", p_function);
-		} else if (!p_function->is_abstract && !p_function->has_explicit_body) {
+		} else if (p_function->source_lambda == nullptr && !p_function->is_abstract && !p_function->has_explicit_body) {
 			push_error(R"([Reginleif] A function must either have a ":" or "{" followed by a body, or be marked as "@abstract".)", p_function);
 		} else {
 			/// still need to check the return type even if the brace body is empty lol
