@@ -2697,12 +2697,19 @@ GDScriptParser::MatchNode *GDScriptParser::parse_match() {
 		push_error(R"(Expected expression to test after "match".)");
 	}
 
-	consume(GDScriptTokenizer::Token::COLON, R"(Expected ":" after "match" expression.)");
-	consume(GDScriptTokenizer::Token::NEWLINE, R"(Expected a newline after "match" statement.)");
+	bool use_braces = check(GDScriptTokenizer::Token::BRACE_OPEN);
 
-	if (!consume(GDScriptTokenizer::Token::INDENT, R"(Expected an indented block after "match" statement.)")) {
-		complete_extents(match_node);
-		return match_node;
+	if (use_braces) {
+		advance();
+		consume_indents_and_newlines();
+	} else {
+		consume(GDScriptTokenizer::Token::COLON, R"([Reginleif] Expected ":" or "{" after "match" expression.)");
+		consume(GDScriptTokenizer::Token::NEWLINE, R"(Expected a newline after "match" statement.)");
+
+		if (!consume(GDScriptTokenizer::Token::INDENT, R"(Expected an indented block after "match" statement.)")) {
+			complete_extents(match_node);
+			return match_node;
+		}
 	}
 
 	bool all_have_return = true;
@@ -2710,7 +2717,30 @@ GDScriptParser::MatchNode *GDScriptParser::parse_match() {
 
 	List<AnnotationNode *> match_branch_annotation_stack;
 
-	while (!check(GDScriptTokenizer::Token::DEDENT) && !is_at_end()) {
+	while (!is_at_end()) {
+
+		bool block_closed = use_braces ? 
+							check(GDScriptTokenizer::Token::BRACE_CLOSE) : 
+							check(GDScriptTokenizer::Token::DEDENT);
+		
+		if (block_closed) {
+			break;
+		}
+
+		if (use_braces) {
+			consume_indents_and_newlines();
+			if (check(GDScriptTokenizer::Token::BRACE_CLOSE)) {
+				break;
+			}
+		}
+
+		if (use_braces) {
+			consume_indents_and_newlines();
+			if (check(GDScriptTokenizer::Token::BRACE_CLOSE)) {
+				break;
+			}
+		}
+
 		if (match(GDScriptTokenizer::Token::PASS)) {
 			consume(GDScriptTokenizer::Token::NEWLINE, R"(Expected newline after "pass".)");
 			continue;
@@ -2752,7 +2782,12 @@ GDScriptParser::MatchNode *GDScriptParser::parse_match() {
 	}
 	complete_extents(match_node);
 
-	consume(GDScriptTokenizer::Token::DEDENT, R"(Expected an indented block after "match" statement.)");
+	if (use_braces) {
+		consume_indents_and_newlines();
+		consume(GDScriptTokenizer::Token::BRACE_CLOSE, R"([Reginleif] Expected "}" after "match" block.)");
+	} else {
+		consume(GDScriptTokenizer::Token::DEDENT, R"(Expected an indented block after "match" statement.)");
+	}
 
 	if (all_have_return && have_wildcard) {
 		current_suite->has_return = true;
