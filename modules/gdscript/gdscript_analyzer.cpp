@@ -364,6 +364,25 @@ static bool type_contains_this_generic_param(const GDScriptParser::DataType& p_t
 	return false;
 }
 
+///checks if a type contains any generic param owned by a specific class,
+///including ones buried in type bindings like Entity[T]
+static bool type_contains_class_generic(const GDScriptParser::DataType& p_type, const GDScriptParser::ClassNode* p_class) {
+	if (p_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+		return p_type.generic_owner_class == p_class;
+	}
+	for (int i = 0; i < p_type.container_element_types.size(); i++) {
+		if (type_contains_class_generic(p_type.container_element_types[i], p_class)) {
+			return true;
+		}
+	}
+	for (const KeyValue<StringName, GDScriptParser::DataType>& E : p_type.generic_type_bindings) {
+		if (type_contains_class_generic(E.value, p_class)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 bool is_script_or_class(const GDScriptParser::DataType p_datatype) {
 	return p_datatype.kind == GDScriptParser::DataType::CLASS || p_datatype.kind == GDScriptParser::DataType::SCRIPT;
 }
@@ -2487,16 +2506,14 @@ void GDScriptAnalyzer::resolve_function_signature(GDScriptParser::FunctionNode *
 	///static funcs should not be able to access class level generic params
 	if (p_function->is_static && parser->current_class != nullptr && parser->current_class->has_generic_parameters()) {
 		GDScriptParser::DataType return_type = p_function->get_datatype();
-		if (return_type.kind == GDScriptParser::DataType::GENERIC_TYPE &&
-				return_type.generic_owner_class == parser->current_class) {
-			push_error(vformat(R"([Reginleif] Static function "%s" cannot use class-level generic parameter "%s". Use a function-level generic instead.)", function_name, return_type.generic_param), p_function);
+		if (type_contains_class_generic(return_type, parser->current_class)) {
+			push_error(vformat(R"([Reginleif] Static function "%s" cannot use class-level generic parameter in its return type. Use a function-level generic instead.)", function_name), p_function);
 		}
 
 		for (int i = 0; i < p_function->parameters.size(); i++) {
 			GDScriptParser::DataType param_type = p_function->parameters[i]->get_datatype();
-			if (param_type.kind == GDScriptParser::DataType::GENERIC_TYPE &&
-					param_type.generic_owner_class == parser->current_class) {
-				push_error(vformat(R"([Reginleif] Static function "%s" cannot use class-level generic parameter "%s" in parameter "%s". Use a function-level generic instead.)", function_name, param_type.generic_param, p_function->parameters[i]->identifier->name), p_function->parameters[i]);
+			if (type_contains_class_generic(param_type, parser->current_class)) {
+				push_error(vformat(R"([Reginleif] Static function "%s" cannot use class-level generic parameter in parameter "%s". Use a function-level generic instead.)", function_name, p_function->parameters[i]->identifier->name), p_function->parameters[i]);
 			}
 		}
 	}
@@ -2628,6 +2645,13 @@ void GDScriptAnalyzer::resolve_assignable(GDScriptParser::AssignableNode *p_assi
 	if (has_specified_type) {
 		specified_type = type_from_metatype(resolve_datatype(p_assignable->datatype_specifier));
 		type = specified_type;
+
+		///dont allow static functions trying to smuggle class level generics into local vars
+		if (static_context && parser->current_class != nullptr && parser->current_class->has_generic_parameters()) {
+			if (type_contains_class_generic(specified_type, parser->current_class)) {
+				push_error(vformat(R"([Reginleif] Static context cannot use class-level generic parameter in declaration of "%s". Use a function-level generic instead.)", p_assignable->identifier->name), p_assignable->datatype_specifier);
+			}
+		}
 	}
 
 	if (p_assignable->initializer != nullptr) {
