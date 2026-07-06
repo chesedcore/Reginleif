@@ -1,3 +1,4 @@
 GDTEST_ANALYZER_ERROR
->> ERROR at line 3: [Reginleif] Static function "make" cannot use class-level generic parameter "T". Use a function-level generic instead.
->> ERROR at line 3: [Reginleif] Static function "make" cannot use class-level generic parameter "T" in parameter "value". Use a function-level generic instead.
+>> ERROR at line 3: [Reginleif] Static context cannot use class-level generic parameter in declaration of "value". Use a function-level generic instead.
+>> ERROR at line 3: [Reginleif] Static function "make" cannot use class-level generic parameter in its return type. Use a function-level generic instead.
+>> ERROR at line 3: [Reginleif] Static function "make" cannot use class-level generic parameter in parameter "value". Use a function-level generic instead.
