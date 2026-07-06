@@ -964,6 +964,61 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 		result = base;
 	}
 
+	/// bind explicit generics from `extends Ass[T, ...]` against Ass's
+	/// declared generics
+	/// WARNING!!! Direct-inheritance only for now!!! no multi-level chasing yet!!!
+	if (!p_class->extends_generic_args.is_empty()) {
+
+		if (result.class_type == nullptr || !result.class_type->has_generic_parameters()) {
+			push_error(vformat(R"([Reginleif] "%s" is not generic, so it cannot be extended with type arguments.)", result.to_string()), p_class);
+			return ERR_PARSE_ERROR;
+		}
+
+		int expected_arg_count = result.class_type->generic_parameters.size();
+		int got = p_class->extends_generic_args.size();
+
+		if (got != expected_arg_count) {
+			push_error(vformat(R"([Reginleif] "%s" is generic over %d argument(s), but %d were provided in "extends".)", result.to_string(), expected_arg_count, got), p_class);
+			return ERR_PARSE_ERROR;
+		}
+
+		for (int i = 0; i < got; i++) {
+			GDScriptParser::TypeNode* contained_type = p_class->extends_generic_args[i];
+			GDScriptParser::DataType arg_type = type_from_metatype(resolve_datatype(contained_type));
+			GDScriptParser::IdentifierNode* generic_param = result.class_type->generic_parameters[i];
+			StringName param_name = generic_param->name;
+
+			if (generic_param->generic_upper_bound == nullptr) {
+				result.generic_type_bindings[param_name] = arg_type;
+				continue;
+			}
+
+			GDScriptParser::DataType upper_bound_type = type_from_metatype(resolve_datatype(generic_param->generic_upper_bound));
+			if (upper_bound_type.is_variant() || is_type_compatible(upper_bound_type, arg_type, true, contained_type)) {
+				result.generic_type_bindings[param_name] = arg_type;
+				continue;
+			}
+
+			if (arg_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+				GDScriptParser::IdentifierNode* decl = find_generic_param_decl(arg_type.generic_param);
+				if (decl != nullptr && decl->generic_upper_bound != nullptr) {
+					GDScriptParser::DataType arg_upper = type_from_metatype(resolve_datatype(decl->generic_upper_bound));
+					if (is_type_compatible(upper_bound_type, arg_upper, true, contained_type)) {
+						result.generic_type_bindings[param_name] = arg_type;
+						continue;
+					}
+				}
+			}
+			push_error(vformat(R"([Reginleif] Type argument "%s" for generic parameter "%s" in "extends %s" does not satisfy upper bound "%s".)", arg_type.to_string(), param_name, result.to_string(), upper_bound_type.to_string()), contained_type);
+			return ERR_PARSE_ERROR;
+		}
+
+
+	} else if (result.kind == GDScriptParser::DataType::CLASS && result.class_type != nullptr && result.class_type->has_generic_parameters()) {
+		push_error(vformat(R"([Reginleif] "%s" is generic and requires type arguments in "extends %s".)", result.to_string(), result.to_string()), p_class);
+		return ERR_PARSE_ERROR;
+	}
+
 	if (!result.is_set() || result.has_no_type()) {
 		// TODO: More specific error messages.
 		push_error(vformat(R"(Could not resolve inheritance for class "%s".)", p_class->identifier == nullptr ? "<main>" : p_class->identifier->name), p_class);
