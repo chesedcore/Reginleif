@@ -3648,36 +3648,61 @@ void GDScriptAnalyzer::update_dictionary_literal_element_type(GDScriptParser::Di
 	// expected_value_type.container_element_types.clear();
 
 	for (int i = 0; i < p_dictionary->elements.size(); i++) {
-		GDScriptParser::ExpressionNode *key_element_node = p_dictionary->elements[i].key;
+		GDScriptParser::ExpressionNode* key_element_node = p_dictionary->elements[i].key;
+		GDScriptParser::ExpressionNode* value_element_node = p_dictionary->elements[i].value;
+
+		///keys first
 		if (key_element_node->is_constant) {
 			update_const_expression_builtin_type(key_element_node, expected_key_type, "include");
 		}
+		if (key_element_node->type == GDScriptParser::Node::ARRAY && expected_key_type.builtin_type == Variant::ARRAY && expected_key_type.has_container_element_type(0)) {
+			update_array_literal_element_type(static_cast<GDScriptParser::ArrayNode*>(key_element_node), expected_key_type.get_container_element_type(0));
+		}
+		if (key_element_node->type == GDScriptParser::Node::DICTIONARY && expected_key_type.builtin_type == Variant::DICTIONARY && expected_key_type.has_container_element_types()) {
+			update_dictionary_literal_element_type(static_cast<GDScriptParser::DictionaryNode*>(key_element_node), expected_key_type.get_container_element_type_or_variant(0), expected_key_type.get_container_element_type_or_variant(1));
+		}
+
 		const GDScriptParser::DataType &actual_key_type = key_element_node->get_datatype();
 		if (actual_key_type.has_no_type() || actual_key_type.is_variant() || !actual_key_type.is_hard_type()) {
 			mark_node_unsafe(key_element_node);
 		} else if (!is_type_compatible(expected_key_type, actual_key_type, true, p_dictionary)) {
 			if (is_type_compatible(actual_key_type, expected_key_type)) {
+				///supertype, unsafe but recoverable
 				mark_node_unsafe(key_element_node);
 			} else {
 				push_error(vformat(R"(Cannot have a key of type "%s" in a dictionary of type "Dictionary[%s, %s]".)", actual_key_type.to_string(), expected_key_type.to_string(), expected_value_type.to_string()), key_element_node);
 				return;
 			}
+		} else if ((expected_key_type.has_container_element_type(0) && !actual_key_type.has_container_element_type(0)) || (expected_key_type.has_container_element_type(1) && !actual_key_type.has_container_element_type(1))) {
+			///typed container key but untyped actual, unsafe!
+			mark_node_unsafe(key_element_node);
 		}
 
-		GDScriptParser::ExpressionNode *value_element_node = p_dictionary->elements[i].value;
+		///now verify values
 		if (value_element_node->is_constant) {
 			update_const_expression_builtin_type(value_element_node, expected_value_type, "include");
 		}
+		if (value_element_node->type == GDScriptParser::Node::ARRAY && expected_value_type.builtin_type == Variant::ARRAY && expected_value_type.has_container_element_type(0)) {
+			update_array_literal_element_type(static_cast<GDScriptParser::ArrayNode*>(value_element_node), expected_value_type.get_container_element_type(0));
+		}
+		if (value_element_node->type == GDScriptParser::Node::DICTIONARY && expected_value_type.builtin_type == Variant::DICTIONARY && expected_value_type.has_container_element_types()) {
+			update_dictionary_literal_element_type(static_cast<GDScriptParser::DictionaryNode*>(value_element_node), expected_value_type.get_container_element_type_or_variant(0), expected_value_type.get_container_element_type_or_variant(1));
+		}
+
 		const GDScriptParser::DataType &actual_value_type = value_element_node->get_datatype();
 		if (actual_value_type.has_no_type() || actual_value_type.is_variant() || !actual_value_type.is_hard_type()) {
 			mark_node_unsafe(value_element_node);
 		} else if (!is_type_compatible(expected_value_type, actual_value_type, true, p_dictionary)) {
 			if (is_type_compatible(actual_value_type, expected_value_type)) {
+				///supertype, unsafe but recoverable
 				mark_node_unsafe(value_element_node);
 			} else {
 				push_error(vformat(R"(Cannot have a value of type "%s" in a dictionary of type "Dictionary[%s, %s]".)", actual_value_type.to_string(), expected_key_type.to_string(), expected_value_type.to_string()), value_element_node);
 				return;
 			}
+		} else if ((expected_value_type.has_container_element_type(0) && !actual_value_type.has_container_element_type(0)) || (expected_value_type.has_container_element_type(1) && !actual_value_type.has_container_element_type(1))) {
+			///typed container value but untyped actual, unsafe!
+			mark_node_unsafe(value_element_node);
 		}
 	}
 
