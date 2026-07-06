@@ -964,9 +964,7 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 		result = base;
 	}
 
-	/// bind explicit generics from `extends Ass[T, ...]` against Ass's
-	/// declared generics
-	/// WARNING!!! Direct-inheritance only for now!!! no multi-level chasing yet!!!
+	/// bind explicit generics from `extends Ass[T, ...]` against Ass's declared generics
 	if (!p_class->extends_generic_args.is_empty()) {
 
 		if (result.class_type == nullptr || !result.class_type->has_generic_parameters()) {
@@ -5305,6 +5303,16 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 
 	bool is_constructor = base.is_meta_type && p_identifier->name == SNAME("new");
 
+	/// as we walk up from `base_class` up ahead the inheritance tree, `base.generic_type_bindings`
+	/// only covers `base_class`'s own params. if a member is found further up the chain, we'll need
+	/// bindings stuffed into some record 'per hop' (iteratively) somehow so they can be properly used for static analysis :>
+	/// each ancestor's own `base_type.generic_type_bindings` (which may reference the *previous* class's open generics!!) 
+	/// gets resolved through the accumulated map so far, so the final map is always expressed in terms of concrete types 
+	/// (or the original call-site's open generics, if still unresolved at that level)
+
+	HashMap<StringName, GDScriptParser::DataType> accumulated_bindings;
+	accumulated_bindings = base.generic_type_bindings;
+
 	for (GDScriptParser::ClassNode *script_class : script_classes) {
 		if (p_base == nullptr && script_class->identifier && script_class->identifier->name == name) {
 			reduce_identifier_from_base_set_class(p_identifier, script_class->get_datatype());
@@ -5355,11 +5363,12 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 						p_identifier->variable_source = member.variable;
 						member.variable->usages += 1;
 
-						/// [Monarch] Inject generic params with resolved concrete types.
-						if (!base.generic_type_bindings.is_empty()) {
+						/// [Monarch] Inject generic params with resolved concrete types, stuffed
+						/// across the full inheritance chain walked so far
+						if (!accumulated_bindings.is_empty()) {
 							p_identifier->set_datatype(resolve_generic_type(
 								p_identifier->get_datatype(), 
-								base.generic_type_bindings
+								accumulated_bindings
 							));
 						}
 
@@ -5385,10 +5394,10 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 						p_identifier->function_source_is_static = member.function->is_static;
 
 						/// [Monarch] Inject generic params with resolved concrete types.
-						if (!base.generic_type_bindings.is_empty()) {
+						if (!accumulated_bindings.is_empty()) {
 							p_identifier->set_datatype(resolve_generic_type(
 								p_identifier->get_datatype(), 
-								base.generic_type_bindings
+								accumulated_bindings
 							));
 						}
 						
@@ -5413,6 +5422,21 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 			if (!is_base && p_base != nullptr) {
 				break;
 			}
+
+			/// move up ahead one hop! fold `script_class`'s own base_type bindings (superclass's param -> expression, 
+			/// possibly containing script_class's open generics) through what we've accumulated so far, so the result 
+			/// is always in terms of the ORIGINAL base.
+
+			if (is_base && !script_class->base_type.generic_type_bindings.is_empty()) {
+				HashMap<StringName, GDScriptParser::DataType> next_level_bindings;
+				for (const KeyValue<StringName, GDScriptParser::DataType>& E : script_class->base_type.generic_type_bindings) {
+					next_level_bindings[E.key] = accumulated_bindings.is_empty() ? 
+												E.value : 
+												resolve_generic_type(E.value, accumulated_bindings);
+				}
+				accumulated_bindings = next_level_bindings;
+			}
+
 		}
 	}
 
