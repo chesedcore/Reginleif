@@ -1205,6 +1205,30 @@ void GDScriptParser::parse_extends() {
 		current_class->extends.push_back(parse_identifier());
 	}
 
+	/// parses generics on the superclass, like Shit[T] extends Ass[T]
+	if (check(GDScriptTokenizer::Token::BRACKET_OPEN)) {
+		push_multiline(true);
+		advance();
+
+		do {
+
+			if (check(GDScriptTokenizer::Token::BRACKET_CLOSE)) {
+				break;
+			}
+
+			TypeNode* arg_type = parse_type(false);
+			if (arg_type == nullptr) {
+				push_error(R"([Reginleif] Expected type in superclass generic argument list.)");
+				break;
+			}
+			current_class->extends_generic_args.push_back(arg_type);
+		
+		} while (match(GDScriptTokenizer::Token::COMMA));
+
+		pop_multiline();
+		consume(GDScriptTokenizer::Token::BRACKET_CLOSE, R"([Reginleif] Expected ']' after superclass generic arguments.)");
+	}
+
 	current_class->extends_end_line = previous.end_line;
 	current_class->extends_end_column = previous.end_column;
 }
