@@ -2183,7 +2183,7 @@ GDScriptParser::SuiteNode *GDScriptParser::parse_suite(const String &p_context, 
 					
 					depth -= 1;
 					if (depth == 0) {
-        				opened_implicit_indent = false; // Only reset when we've closed ALL indents
+        				opened_implicit_indent = false; /// only reset when we've closed ALL indents
     				}
 					continue;
 				}
