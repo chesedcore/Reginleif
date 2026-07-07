@@ -2931,22 +2931,61 @@ static bool _guess_method_return_type_from_base(GDScriptParser::CompletionContex
 		r_type.type.is_constant = false;
 
 		HashMap<StringName, GDScriptParser::DataType> bindings(base_type.generic_type_bindings);
-		const GDScriptParser::ClassNode* current = base_type.class_type;
+		const GDScriptParser::ClassNode* declaring_class = base_type.class_type;
+		const GDScriptParser::ClassNode* current = declaring_class;
 
 		while (current != nullptr) {
 			if (current->has_member("_init")) {
 
-				/// because for some reason i decided _init constructors must also need generics... bah
 				const GDScriptParser::ClassNode::Member& member = current->get_member("_init");
 
 				if (member.type == GDScriptParser::ClassNode::Member::FUNCTION) {
+
+					/// what a fucking nightmare that the completion agent and the analyser have to use different type guessing paths.
+					/// i'd LOVE to keep this DRY, but holy fuck, here we are, rewriting the generic param repopulation logic
+
+					HashMap<StringName, GDScriptParser::DataType> inferred_here;
 					for (int i = 0; i < p_call->arguments.size() && i < member.function->parameters.size(); i++) {
 						const GDScriptParser::DataType param_type = member.function->parameters[i]->get_datatype();
 						GDScriptCompletionIdentifier arg_type;
 						if (_guess_expression_type(p_context, p_call->arguments[i], arg_type)) {
-							_completion_infer_generic_bindings(param_type, arg_type.type, bindings);
+							_completion_infer_generic_bindings(param_type, arg_type.type, inferred_here);
 						} else {
-							_completion_infer_generic_bindings(param_type, p_call->arguments[i]->get_datatype(), bindings);
+							_completion_infer_generic_bindings(param_type, p_call->arguments[i]->get_datatype(), inferred_here);
+						}
+					}
+
+					if (current == declaring_class) {
+						/// no translation needed!
+						for (const KeyValue<StringName, GDScriptParser::DataType>& E : inferred_here) {
+							bindings[E.key] = E.value;
+						}
+
+					} else {
+
+						Vector<const GDScriptParser::ClassNode*> chain;
+						for (const GDScriptParser::ClassNode* c = declaring_class; c != current; c = c->base_type.class_type) {
+							chain.push_back(c);
+						}
+						/// chain is now [declaring_class, ..., parent_of(current)], each entry's
+						/// base_type.generic_type_bindings jots current-side params up to that entry's own params
+						/// but of course you knew this, you read the analyser, right? ...right?
+						HashMap<StringName, GDScriptParser::DataType> translated;
+						translated = inferred_here;
+						for (int i = chain.size() - 1; i >= 0; i--) {
+							const HashMap<StringName, GDScriptParser::DataType>& step_bindings = chain[i]->base_type.generic_type_bindings;
+							HashMap<StringName, GDScriptParser::DataType> next_step;
+							for (const KeyValue<StringName, GDScriptParser::DataType>& E : step_bindings) {
+								/// E.key is the ancestral param name, E.value is chain[i];s own params
+								const GDScriptParser::DataType* found = translated.getptr(E.key);
+								if (found != nullptr) {
+									next_step[E.value.generic_param] = *found;
+								}
+							}
+							translated = next_step;
+						}
+						for (const KeyValue<StringName, GDScriptParser::DataType>& E : translated) {
+							bindings[E.key] = E.value;
 						}
 					}
 				}
@@ -2955,7 +2994,6 @@ static bool _guess_method_return_type_from_base(GDScriptParser::CompletionContex
 			}
 
 			current = current->base_type.class_type;
-
 		}
 
 		for (const KeyValue<StringName, GDScriptParser::DataType>& E : bindings) {
@@ -2964,16 +3002,36 @@ static bool _guess_method_return_type_from_base(GDScriptParser::CompletionContex
 		return true;
 	}
 
+	HashMap<StringName, GDScriptParser::DataType> accumulated_bindings;
+	accumulated_bindings = base_type.generic_type_bindings;
+
 	while (base_type.is_set() && !base_type.is_variant()) {
 		switch (base_type.kind) {
-			case GDScriptParser::DataType::CLASS:
+case GDScriptParser::DataType::CLASS:
 				if (base_type.class_type->has_function(p_method)) {
 					GDScriptParser::FunctionNode *method = base_type.class_type->get_member(p_method).function;
 					if (!is_static || method->is_static) {
 						if (method->get_datatype().is_set() && !method->get_datatype().is_variant()) {
 							r_type.type = method->get_datatype();
-							if (!base_type.generic_type_bindings.is_empty()) {
-								r_type.type = _completion_resolve_generic_type(r_type.type, base_type.generic_type_bindings);
+
+							HashMap<StringName, GDScriptParser::DataType> call_bindings;
+							call_bindings = accumulated_bindings;
+
+							///do the same shit here all over again... what a fucking pain
+							if (method->has_generic_parameters()) {
+								for (int i = 0; i < p_call->arguments.size() && i < method->parameters.size(); i++) {
+									const GDScriptParser::DataType param_type = method->parameters[i]->get_datatype();
+									GDScriptCompletionIdentifier arg_type;
+									if (_guess_expression_type(p_context, p_call->arguments[i], arg_type)) {
+										_completion_infer_generic_bindings(param_type, arg_type.type, call_bindings);
+									} else {
+										_completion_infer_generic_bindings(param_type, p_call->arguments[i]->get_datatype(), call_bindings);
+									}
+								}
+							}
+
+							if (!call_bindings.is_empty()) {
+								r_type.type = _completion_resolve_generic_type(r_type.type, call_bindings);
 							}
 							return true;
 						}
@@ -2994,6 +3052,17 @@ static bool _guess_method_return_type_from_base(GDScriptParser::CompletionContex
 						}
 					}
 				}
+
+				if (!base_type.class_type->base_type.generic_type_bindings.is_empty()) {
+					HashMap<StringName, GDScriptParser::DataType> next_level_bindings;
+					for (const KeyValue<StringName, GDScriptParser::DataType>& E : base_type.class_type->base_type.generic_type_bindings) {
+						next_level_bindings[E.key] = accumulated_bindings.is_empty() ?
+								E.value :
+								_completion_resolve_generic_type(E.value, accumulated_bindings);
+					}
+					accumulated_bindings = next_level_bindings;
+				}
+
 				base_type = base_type.class_type->base_type;
 				break;
 			case GDScriptParser::DataType::SCRIPT: {
@@ -3705,7 +3774,6 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 				if (!found_type && !_guess_expression_type(completion_context, attr->base, base)) {
 					break;
 				}
-
 				_find_identifiers_in_base(base, is_function, false, !_guess_expecting_callable(completion_context), options, 0);
 			}
 		} break;
