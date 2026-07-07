@@ -2803,21 +2803,21 @@ void GDScriptAnalyzer::resolve_assignable(GDScriptParser::AssignableNode *p_assi
 			} else if (!is_type_compatible(specified_type, initializer_type, true, p_assignable->initializer)) {
 				if (!is_constant && is_type_compatible(initializer_type, specified_type)) {
 
-					//if the specified type is a generic class (or subclass of one) with fixed bindings,
-					//and the initializer is the same base class but with different bindings, error out the ass!!
-					//no silent unsafe coercion allowed, generics are invariant!
+					///if the specified type is a generic class (or subclass of one) with fixed bindings,
+					///and the initializer is the same base class but with different bindings, error out the ass!!
+					///no silent unsafe coercion allowed, generics are invariant!
 
 					bool generic_mismatch = false;
 					if (specified_type.kind == GDScriptParser::DataType::CLASS && initializer_type.kind == GDScriptParser::DataType::CLASS) {
 
-						//walk up specified's chain to find the shared generic ancestor
+						///walk up specified's chain to find the shared generic ancestor
 						const GDScriptParser::ClassNode* spec_walk = specified_type.class_type;
 						HashMap<StringName, GDScriptParser::DataType> spec_bindings(specified_type.generic_type_bindings);
 
 						while (spec_walk != nullptr) {
 							if (spec_walk == initializer_type.class_type) {
 
-								//found shared ancestor!! now compare bindings
+								///found shared ancestor!! now compare bindings
 								if (!initializer_type.generic_type_bindings.is_empty() && !spec_bindings.is_empty()) {
 									for (const KeyValue<StringName, GDScriptParser::DataType>& E : initializer_type.generic_type_bindings) {
 										const GDScriptParser::DataType* spec_bound = spec_bindings.getptr(E.key);
@@ -7862,25 +7862,37 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 				src_script = src_script->get_base_script();
 			}
 			return false;
-		case GDScriptParser::DataType::CLASS:
+		case GDScriptParser::DataType::CLASS: {
 			if (p_target.is_meta_type) {
 				return ClassDB::is_parent_class(src_native, GDScript::get_class_static());
 			}
+			HashMap<StringName, GDScriptParser::DataType> src_accumulated_bindings;
+			src_accumulated_bindings = p_source.generic_type_bindings;
 			while (src_class != nullptr) {
 				if (src_class == p_target.class_type || src_class->fqcn == p_target.class_type->fqcn) {
 
 					/// [Monarch] if assigning to something that has generic parameters...
 					if(p_target.class_type->has_generic_parameters()) {
 
-						/// if one side is unbound, reject that shit
-						if(p_target.generic_type_bindings.is_empty() || p_source.generic_type_bindings.is_empty()) {
+						///impossible to check, just let it through and pray it doesn't explode on my face later
+						if(p_target.generic_type_bindings.is_empty()) {
 							return true;
 						}
 
-						/// if both sides are bound, then cool, check binding matches, then have another go
+						///source has no bindings of its own, try to pull them from its base_type directly
+						HashMap<StringName, GDScriptParser::DataType> effective_source_bindings(src_accumulated_bindings);
+						if (effective_source_bindings.is_empty() && src_class->base_type.class_type != nullptr) {
+							effective_source_bindings = src_class->base_type.generic_type_bindings;
+						}
+
+						///if still unbound even at this point, reject that shit
+						if (effective_source_bindings.is_empty()) {
+							return false;
+						}
+
 						for(const GDScriptParser::IdentifierNode* param : p_target.class_type->generic_parameters) {
 							const GDScriptParser::DataType* target_bound = p_target.generic_type_bindings.getptr(param->name);
-							const GDScriptParser::DataType* source_bound = p_source.generic_type_bindings.getptr(param->name);
+							const GDScriptParser::DataType* source_bound = effective_source_bindings.getptr(param->name);
 							if(target_bound == nullptr || source_bound == nullptr) {
 								return false;
 							}
@@ -7893,9 +7905,19 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 
 					return true;
 				}
+
+				///same hack from the identifier reducer, eventually i'll have to refactor this shit
+				if (!src_class->base_type.generic_type_bindings.is_empty()) {
+					HashMap<StringName, GDScriptParser::DataType> next;
+					for (const KeyValue<StringName, GDScriptParser::DataType>& E : src_class->base_type.generic_type_bindings) {
+						next[E.key] = src_accumulated_bindings.is_empty() ? E.value : resolve_generic_type(E.value, src_accumulated_bindings);
+					}
+					src_accumulated_bindings = next;
+				}
+
 				src_class = src_class->base_type.class_type;
 			}
-			return false;
+		} return false;
 		case GDScriptParser::DataType::VARIANT:
 		/// [Monarch]
 		case GDScriptParser::DataType::GENERIC_TYPE:
