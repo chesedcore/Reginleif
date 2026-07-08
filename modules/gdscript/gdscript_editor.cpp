@@ -4392,7 +4392,7 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 			} break;
 
 			case GDScriptParser::DataType::GENERIC_TYPE: {
-				r_result.type = ScriptLanguage::LOOKUP_RESULT_SCRIPT_LOCATION;
+				r_result.type = EditorLanguage::LookupResult::Type::SCRIPT_LOCATION;
 				r_result.class_name = "Generic";
 				r_result.class_member = base_type.generic_param;
 				return OK;
