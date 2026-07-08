@@ -2838,8 +2838,30 @@ void GDScriptAnalyzer::resolve_assignable(GDScriptParser::AssignableNode *p_assi
 					if (generic_mismatch) {
 						push_error(vformat(R"(Cannot assign a value of type %s to %s "%s" with specified type %s.)", initializer_type.to_string(), p_kind, p_assignable->identifier->name, specified_type.to_string()), p_assignable->initializer);
 					} else {
-						mark_node_unsafe(p_assignable->initializer);
-						p_assignable->use_conversion_assign = true;
+
+						///check if the intiialiser is an ancestor, and if so, that breaks variance! reject!!
+						bool is_strict_ancestor = false;
+						if (specified_type.kind == GDScriptParser::DataType::CLASS && initializer_type.kind == GDScriptParser::DataType::CLASS) {
+							const GDScriptParser::ClassNode* walk = specified_type.class_type;
+							if (walk != nullptr) {
+								walk = walk->base_type.class_type; ///start at parent, not self
+							}
+							while (walk != nullptr) {
+								if (walk == initializer_type.class_type) {
+									is_strict_ancestor = true;
+									break;
+								}
+								walk = walk->base_type.class_type;
+							}
+						}
+
+						if (is_strict_ancestor) {
+							push_error(vformat(R"([Reginleif] Cannot assign a value of type '%s' to '%s'. Note: '%s' is a base class of '%s', not a subtype. Did you mean to use '%s.new()' instead?)", initializer_type.to_string(), p_assignable->identifier->name, initializer_type.to_string(), specified_type.to_string(), specified_type.to_string()), p_assignable->initializer);
+						} else {
+							mark_node_unsafe(p_assignable->initializer);
+							p_assignable->use_conversion_assign = true;
+						}
+						
 					}
 				} else {
 					push_error(vformat(R"(Cannot assign a value of type %s to %s "%s" with specified type %s.)", initializer_type.to_string(), p_kind, p_assignable->identifier->name, specified_type.to_string()), p_assignable->initializer);
