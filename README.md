@@ -197,13 +197,11 @@ have fuuun with that!
 
 ### Some more caveats
 - Godot's `core` is rotten. Generics can LIE to you at runtime because static analysis is turned off for Variant-typed variables!!! (I didn't add this, this is Godot's default behaviour) Use static typing everywhere lest you want to run into undefined behaviour with generics.
-- Do not inherit from a generic class, that behaviour is currently UNDEFINED because I haven't added it in yet lol sorry about that
-- Static analysis for Dictionaries right now is not as good as Arrays, so that needs some work.
 - I'm not fucking omniscient bro. There might be bugs, and I ask you to REPORT THEM!! catch my ass on discord at monarch_zero or open an issue here.
 
 
 ## Backwards compat breaks
-There are known none so far that have not been fixed. Yay!
+There are none known so far that have not been fixed. Yay!
 
 
 ## Motivation
