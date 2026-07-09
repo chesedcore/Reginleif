@@ -1935,17 +1935,17 @@ void GDScriptAnalyzer::resolve_class_body(GDScriptParser::ClassNode *p_class, co
 
 	resolve_class_interface(p_class, p_source);
 
-	///check impls and trait resolution here
-	for (GDScriptParser::ImplNode* impl : p_class->impls) {
-		trait_analyzer->resolve_impl(impl);
-	}
-	trait_analyzer->check_trait_satisfaction(p_class);
-
 	GDScriptParser::DataType base_type = p_class->base_type;
 	if (base_type.kind == GDScriptParser::DataType::CLASS) {
 		GDScriptParser::ClassNode *base_class = base_type.class_type;
 		resolve_class_body(base_class, p_class);
 	}
+	
+	///check impls and trait resolution here
+	for (GDScriptParser::ImplNode* impl : p_class->impls) {
+		trait_analyzer->resolve_impl(impl);
+	}
+	trait_analyzer->check_trait_satisfaction(p_class);
 
 	// Do functions, properties, and groups now.
 	for (int i = 0; i < p_class->members.size(); i++) {
