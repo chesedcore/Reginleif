@@ -98,6 +98,10 @@ public:
 	struct VariableNode;
 	struct WhileNode;
 
+	///
+	struct TraitNode;
+	struct ImplNode;
+
 	class DataType {
 	public:
 		Vector<DataType> container_element_types;
@@ -112,7 +116,7 @@ public:
 			RESOLVING, // Currently resolving.
 			UNRESOLVED,
 
-			/// [Monarch] Reginleif addition. Allows us to tell Godot that this type is 
+			/// allows us to tell Godot that this type is 
 			/// generic and links against a specified generic parameter.
 			GENERIC_TYPE,
 		};
@@ -378,6 +382,10 @@ public:
 			UNARY_OPERATOR,
 			VARIABLE,
 			WHILE,
+			
+			///
+			TRAIT,
+			IMPL,
 		};
 
 		Type type = NONE;
@@ -810,6 +818,8 @@ public:
 		DataType base_type;
 		String fqcn; // Fully-qualified class name. Identifies uniquely any class in the project.
 
+		Vector<ImplNode*> impls; ///impl blocks declared inside this class body
+
 		// Range for a class's "extends <CLASS_NAME>" line.
 		// Used as range for some warnings/errors.
 		int extends_start_line = -1;
@@ -938,7 +948,7 @@ public:
 		bool is_abstract = false;
 		bool is_static = false; // For lambdas it's determined in the analyzer.
 		bool is_coroutine = false;
-		bool has_explicit_body = false; ///[Monarch] Set to true if the parser saw { or : followed by a real suite
+		bool has_explicit_body = false;
 		Variant rpc_config;
 		MethodInfo info;
 		LambdaNode *source_lambda = nullptr;
@@ -1166,6 +1176,28 @@ public:
 
 		SignalNode() {
 			type = SIGNAL;
+		}
+	};
+
+	struct TraitNode : public Node {
+		IdentifierNode* identifier = nullptr;        ///name of this trait
+		Vector<FunctionNode*> methods;               ///required method signatures
+		Vector<FunctionNode*> default_methods;       ///methods with default bodies
+		Vector<IdentifierNode*> generic_parameters;  ///trait-level generics, for later, for later!
+
+		TraitNode() {
+			type = TRAIT;
+		}
+	};
+
+	struct ImplNode : public Node {
+		IdentifierNode* trait_name = nullptr;      ///name of the trait being implemented
+		TypeNode* impl_target_type = nullptr;      ///which type we're implementing this trait for (null if it's 'in-class' impl)
+		Vector<FunctionNode*> methods;             ///the provided method implementations
+		bool trait_owns_this_impl = false;         ///true if this is `impl Trait for Type` in the trait file itself
+
+		ImplNode() {
+			type = IMPL;
 		}
 	};
 
@@ -1432,6 +1464,8 @@ public:
 private:
 	friend class GDScriptAnalyzer;
 	friend class GDScriptParserRef;
+	///
+	friend class GDScriptTraitAnalyzer;
 
 	bool _is_tool = false;
 	String script_path;
@@ -1446,6 +1480,9 @@ private:
 	ClassNode *head = nullptr;
 	Node *list = nullptr;
 	List<ParserError> errors;
+
+	///
+	TraitNode* trait_head = nullptr;
 
 #ifdef DEBUG_ENABLED
 public:
@@ -1641,7 +1678,7 @@ private:
 	ClassNode *parse_class(bool p_is_static);
 	void parse_class_name();
 
-	/// [Monarch] Reginleif addition. Grants ability to parse generic parameter lists.
+	///generics
 	void parse_generic_parameters(Vector<IdentifierNode*>& p_generic_params);
 	TypeNode* parse_type_hint(bool p_allow_void = false);
 
@@ -1657,6 +1694,11 @@ private:
 	FunctionNode *parse_function(bool p_is_static);
 	bool parse_function_signature(FunctionNode *p_function, SuiteNode *p_body, const String &p_type, int p_signature_start);
 	SuiteNode *parse_suite(const String &p_context, SuiteNode *p_suite = nullptr, bool p_for_lambda = false);
+
+	///traits
+	TraitNode* parse_trait();
+	ImplNode* parse_impl();
+
 	// Annotations
 	AnnotationNode *parse_annotation(uint32_t p_valid_targets);
 	static bool register_annotation(const MethodInfo &p_info, uint32_t p_target_kinds, AnnotationAction p_apply, const Vector<Variant> &p_default_arguments = Vector<Variant>(), bool p_is_vararg = false);
@@ -1738,6 +1780,11 @@ public:
 	Error parse(const String &p_source_code, const String &p_script_path, bool p_for_completion, bool p_parse_body = true);
 	Error parse_binary(const Vector<uint8_t> &p_binary, const String &p_script_path);
 	ClassNode *get_tree() const { return head; }
+
+	///
+	TraitNode* get_trait_tree() const { return trait_head; }
+	bool is_trait_script() const { return trait_head != nullptr; }
+
 	bool is_tool() const { return _is_tool; }
 	Ref<GDScriptParserRef> get_depended_parser_for(const String &p_path);
 	const HashMap<String, Ref<GDScriptParserRef>> &get_depended_parsers();

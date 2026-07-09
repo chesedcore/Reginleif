@@ -31,6 +31,7 @@
 #include "gdscript_analyzer.h"
 
 #include "gdscript.h"
+#include "gdscript_trait_analyzer.h"
 #include "gdscript_utility_callable.h"
 #include "gdscript_utility_functions.h"
 
@@ -1933,6 +1934,12 @@ void GDScriptAnalyzer::resolve_class_body(GDScriptParser::ClassNode *p_class, co
 	parser->current_class = p_class;
 
 	resolve_class_interface(p_class, p_source);
+
+	///check impls and trait resolution here
+	for (GDScriptParser::ImplNode* impl : p_class->impls) {
+		trait_analyzer->resolve_impl(impl);
+	}
+	trait_analyzer->check_trait_satisfaction(p_class);
 
 	GDScriptParser::DataType base_type = p_class->base_type;
 	if (base_type.kind == GDScriptParser::DataType::CLASS) {
@@ -8102,6 +8109,11 @@ Error GDScriptAnalyzer::resolve_dependencies() {
 Error GDScriptAnalyzer::analyze() {
 	parser->errors.clear();
 
+	///
+	if (parser->is_trait_script()) {
+        return trait_analyzer->resolve_trait(parser->get_trait_tree());
+    }
+
 	Error err = resolve_inheritance();
 	if (err) {
 		return err;
@@ -8118,4 +8130,12 @@ Error GDScriptAnalyzer::analyze() {
 
 GDScriptAnalyzer::GDScriptAnalyzer(GDScriptParser *p_parser) {
 	parser = p_parser;
+	trait_analyzer = memnew(GDScriptTraitAnalyzer(parser, this));
+}
+
+///
+GDScriptAnalyzer::~GDScriptAnalyzer() {
+    if (trait_analyzer != nullptr) {
+        memdelete(trait_analyzer);
+    }
 }

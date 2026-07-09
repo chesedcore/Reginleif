@@ -788,6 +788,22 @@ void GDScriptParser::parse_program() {
 		}
 	}
 
+	///if the first meaningful token is `trait`, this is a trait file entirely
+	///get your ass out of the class path and go down this trait path instead
+	if (current.type == GDScriptTokenizer::Token::TRAIT) {
+		advance();
+		head = nullptr;             ///trait files don't have a class head!
+		current_class = nullptr;    ///nor a 'class' context, obvciously, duh
+		trait_head = parse_trait();
+
+		if (!check(GDScriptTokenizer::Token::TK_EOF)) {
+			push_error(R"([Reginleif] Unexpected item after trait declaration. A trait file must contain only one trait.)");
+		}
+		
+		clear_unused_annotations();
+		return;
+	}
+
 	if (current.type == GDScriptTokenizer::Token::CLASS_NAME || current.type == GDScriptTokenizer::Token::EXTENDS) {
 		// Set range of the class to only start at extends or class_name if present.
 		reset_extents(head, current);
@@ -4318,6 +4334,158 @@ GDScriptParser::TypeNode *GDScriptParser::parse_type(bool p_allow_void) {
 	return type;
 }
 
+///traits stuff goes here
+
+GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
+	TraitNode* trait = alloc_node<TraitNode>();
+
+	if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected identifier for the trait name after "trait".)")) {
+		complete_extents(trait);
+		return nullptr;
+	}
+
+	trait->identifier = parse_identifier();
+
+	///trait-level generics, same shit as class level stuff
+	parse_generic_parameters(trait->generic_parameters);
+
+	bool use_braces = check(GDScriptTokenizer::Token::BRACE_OPEN);
+	if (!use_braces) {
+		consume(GDScriptTokenizer::Token::COLON, R"([Reginleif] Expected ":" or "{" after trait declaration.)");
+	}
+
+	bool multiline = !use_braces && match(GDScriptTokenizer::Token::NEWLINE);
+
+	if (use_braces) {
+		advance();
+		consume_indents_and_newlines();
+	} else if (multiline && !consume(GDScriptTokenizer::Token::INDENT, R"([Reginleif] Expected indented block after trait declaration.)")) {
+		complete_extents(trait);
+		return trait;
+	}
+
+	///actual trait body parsed here. only funcs allowed! either signatures or default bodies
+	while (true) {
+		if (use_braces) {
+			consume_indents_and_newlines();
+			if (check(GDScriptTokenizer::Token::BRACE_CLOSE) || is_at_end()) { break; }
+		} else {
+			if (check(GDScriptTokenizer::Token::DEDENT) || is_at_end()) { break; }
+		}
+
+		if (match(GDScriptTokenizer::Token::NEWLINE)) { continue; }
+		if (match(GDScriptTokenizer::Token::PASS)) {
+			end_statement(R"("pass")");
+			continue;
+		}
+
+		if (match(GDScriptTokenizer::Token::FUNC)) {
+			FunctionNode* method = parse_function(false);
+			if (method == nullptr) { continue; }
+
+			if (method->body != nullptr && !method->body->statements.is_empty()) {
+				///has a body, it's a default method
+				trait->default_methods.push_back(method);
+			} else {
+				///no body, it's a required signature
+				trait->methods.push_back(method);
+			}
+		} else {
+			push_error(vformat(R"([Reginleif] Unexpected "%s" in trait body. Only "func" declarations are allowed.)", current.get_name()));
+			advance();
+		}
+
+		if (panic_mode) { synchronize(); }
+	}
+
+	if (use_braces) {
+		consume_indents_and_newlines();
+		consume(GDScriptTokenizer::Token::BRACE_CLOSE, R"([Reginleif] Expected "}" after trait body.)");
+	} else if (multiline) {
+		consume(GDScriptTokenizer::Token::DEDENT, R"([Reginleif] Expected end of indented block after trait body.)");
+	}
+
+	complete_extents(trait);
+	return trait;
+}
+
+GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
+	ImplNode* impl = alloc_node<ImplNode>();
+
+	///grab the trait name
+	if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected trait name after "impl".)")) {
+		complete_extents(impl);
+		return nullptr;
+	}
+
+	impl->trait_name = parse_identifier();
+
+	if (match(GDScriptTokenizer::Token::FOR)) {
+		///`impl Trait for Type` form, it's only legal in the trait file itself
+		impl->trait_owns_this_impl = true;
+		impl->impl_target_type = parse_type();
+		if (impl->impl_target_type == nullptr) {
+			push_error(vformat(R"([Reginleif] Expected type after "for" in "impl %s for Type" syntax.)", impl->trait_name->name));
+			complete_extents(impl);
+			return nullptr;
+		}
+	}
+	///otherwise it must be `impl Trait` form, in-class, and thus impl_target_type stays null 
+	///(because it targets the type this is happening on itself)
+
+	bool use_braces = check(GDScriptTokenizer::Token::BRACE_OPEN);
+	if (!use_braces) {
+		consume(GDScriptTokenizer::Token::COLON, R"([Reginleif] Expected ":" or "{" after impl declaration.)");
+	}
+	bool multiline = !use_braces && match(GDScriptTokenizer::Token::NEWLINE);
+
+	if (use_braces) {
+		advance();
+		consume_indents_and_newlines();
+	} else if (multiline && !consume(GDScriptTokenizer::Token::INDENT, R"([Reginleif] Expected indented block after impl declaration.)")) {
+		complete_extents(impl);
+		return impl;
+	}
+
+	///parse impl body, must have only funcs, and those functions MUST have bodies
+	while (true) {
+		if (use_braces) {
+			consume_indents_and_newlines();
+			if (check(GDScriptTokenizer::Token::BRACE_CLOSE) || is_at_end()) { break; }
+		} else {
+			if (check(GDScriptTokenizer::Token::DEDENT) || is_at_end()) { break; }
+		}
+
+		if (match(GDScriptTokenizer::Token::NEWLINE)) { continue; }
+		if (match(GDScriptTokenizer::Token::PASS)) {
+			end_statement(R"("pass")");
+			continue;
+		}
+
+		if (match(GDScriptTokenizer::Token::FUNC)) {
+			FunctionNode *method = parse_function(false);
+			if (method != nullptr) {
+				impl->methods.push_back(method);
+			}
+		} else {
+			push_error(vformat(R"([Reginleif] Unexpected "%s" in impl body. Only "func" declarations are allowed.)", current.get_name()));
+			advance();
+		}
+
+		if (panic_mode) { synchronize(); }
+	}
+
+	if (use_braces) {
+		consume_indents_and_newlines();
+		consume(GDScriptTokenizer::Token::BRACE_CLOSE, R"([Reginleif] Expected "}" after impl body.)");
+	} else if (multiline) {
+		consume(GDScriptTokenizer::Token::DEDENT, R"([Reginleif] Expected end of indented block after impl body.)");
+	}
+
+	complete_extents(impl);
+	return impl;
+}
+
 #ifdef TOOLS_ENABLED
 enum DocLineState {
 	DOC_LINE_NORMAL,
@@ -4718,6 +4886,7 @@ GDScriptParser::ParseRule *GDScriptParser::get_rule(GDScriptTokenizer::Token::Ty
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // STATIC,
 		{ &GDScriptParser::parse_call,						nullptr,                                        PREC_NONE }, // SUPER,
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // TRAIT,
+		{ nullptr,                                          nullptr,                                         PREC_NONE}, /// IMPL,
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // VAR,
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // TK_VOID,
 		{ &GDScriptParser::parse_yield,                     nullptr,                                        PREC_NONE }, // YIELD,

@@ -32,11 +32,14 @@
 
 #include "gdscript_cache.h"
 #include "gdscript_parser.h"
+#include "gdscript_trait_analyzer.h" ///
 
 #include "core/object/ref_counted.h"
 
 class GDScriptAnalyzer {
 	GDScriptParser *parser = nullptr;
+	///
+	GDScriptTraitAnalyzer* trait_analyzer = nullptr;
 
 	template <typename Fn>
 	class Finally {
@@ -181,4 +184,5 @@ public:
 	static bool class_exists(const StringName &p_class);
 
 	GDScriptAnalyzer(GDScriptParser *p_parser);
+	~GDScriptAnalyzer();
 };
