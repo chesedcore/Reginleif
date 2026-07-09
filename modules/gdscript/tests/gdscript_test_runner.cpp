@@ -415,7 +415,7 @@ static bool verify_utils_global_class_static_methods(const String& p_source_dir)
 	Ref<GDScript> utils_script = GDScriptCache::get_full_script(utils_path, err);
 	ERR_FAIL_COND_V_MSG(err != OK, false, "Could not compile global class Utils from " + utils_path + ". Error code: " + itos(err) + ".");
 	ERR_FAIL_COND_V_MSG(utils_script.is_null(), false, "Compiled global class Utils from " + utils_path + " is null.");
-	ERR_FAIL_COND_V_MSG(!utils_script->is_valid(), false, "Compiled global class Utils from " + utils_path + " is not valid.");
+	ERR_FAIL_COND_V_MSG(!utils_script->is_script_valid(), false, "Compiled global class Utils from " + utils_path + " is not valid.");
 
 	static const StringName static_methods[] = {
 		SNAME("check"),
