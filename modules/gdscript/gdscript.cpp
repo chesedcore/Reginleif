@@ -2746,6 +2746,23 @@ String GDScriptLanguage::_get_global_class_name(const String &p_path, String *r_
 	GDScriptParser parser;
 	err = parser.parse(source, p_path, false, false);
 
+	///trait files are registered into GDScriptCache's own trait table (see
+	///_register_global_trait below), !!!NOT:!!! ScriptServer's global class table, so trait names
+	///can never collide with class names. i know this should've been very ideally been done in 
+	///scriptlanguage, but for ease of access, and much more importantly, locality within the gdscript module,
+	///it has been implemented here instead. an even more important consideration was that if this wasn't done,
+	///then i'd have to force-pass the entire filesystem a second time just to parse traits. this architecture
+	///allows us to fold this scouring into one pass. yay :>
+
+	if (parser.is_trait_script()) {
+		GDScriptCache::remove_global_trait_by_path(p_path);
+		const GDScriptParser::TraitNode* t = parser.get_trait_tree();
+		if (t != nullptr && t->identifier != nullptr) {
+			GDScriptCache::add_global_trait(t->identifier->name, p_path);
+		}
+		return String();
+	}
+
 	const GDScriptParser::ClassNode *c = parser.get_tree();
 	if (!c) {
 		return String(); // No class parsed.

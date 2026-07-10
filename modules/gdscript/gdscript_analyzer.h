@@ -179,6 +179,9 @@ public:
 	Error resolve_dependencies();
 	Error analyze();
 
+	///(see GDScriptCache::get_cached_trait)
+	_FORCE_INLINE_ GDScriptTraitAnalyzer* get_trait_analyzer() { return trait_analyzer; }
+
 	Variant make_variable_default_value(GDScriptParser::VariableNode *p_variable);
 
 	static bool check_type_compatibility(const GDScriptParser::DataType &p_target, const GDScriptParser::DataType &p_source, bool p_allow_implicit_conversion = false, const GDScriptParser::Node *p_source_node = nullptr, const GDScriptParser::ClassNode* p_class = nullptr, const GDScriptParser::FunctionNode* p_func = nullptr);

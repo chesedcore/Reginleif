@@ -34,6 +34,7 @@
 #include "gdscript_analyzer.h"
 #include "gdscript_compiler.h"
 #include "gdscript_parser.h"
+#include "gdscript_trait.h"
 
 #include "core/io/file_access.h"
 #include "core/io/resource_loader.h"
@@ -42,6 +43,11 @@
 
 GDScriptParserRef::Status GDScriptParserRef::get_status() const {
 	return status;
+}
+
+///
+GDScriptParserRef::TraitStatus GDScriptParserRef::get_trait_status() const {
+	return trait_status;
 }
 
 String GDScriptParserRef::get_path() const {
@@ -113,6 +119,37 @@ Error GDScriptParserRef::raise_status(Status p_new_status) {
 	return result;
 }
 
+Error GDScriptParserRef::raise_trait_status(TraitStatus p_new_status) {
+	ERR_FAIL_COND_V(clearing, ERR_BUG);
+	ERR_FAIL_COND_V(parser == nullptr && trait_status != TRAIT_EMPTY, ERR_BUG);
+
+	if (p_new_status < trait_status) {
+		return OK;
+	}
+
+	while (result == OK && p_new_status > trait_status) {
+		switch (trait_status) {
+			case TRAIT_EMPTY: {
+				get_parser()->clear();
+				trait_status = TRAIT_PARSED;
+				String remapped_path = ResourceLoader::path_remap(path);
+				String source = GDScriptCache::get_source_code(remapped_path);
+				source_hash = source.hash();
+				result = get_parser()->parse(source, path, false);
+			} break;
+			case TRAIT_PARSED: {
+				trait_status = TRAIT_SOLVED;
+				result = get_analyzer()->analyze();
+			} break;
+			case TRAIT_SOLVED: {
+				return result;
+			}
+		}
+	}
+
+	return result;
+}
+
 void GDScriptParserRef::clear() {
 	if (clearing) {
 		return;
@@ -125,6 +162,7 @@ void GDScriptParserRef::clear() {
 	parser = nullptr;
 	analyzer = nullptr;
 	status = EMPTY;
+	trait_status = TRAIT_EMPTY;
 	result = OK;
 	source_hash = 0;
 
@@ -215,6 +253,41 @@ void GDScriptCache::remove_script(const String &p_path) {
 	singleton->full_gdscript_cache.erase(p_path);
 }
 
+///gdscript trait stuff
+
+void GDScriptCache::add_global_trait(const StringName& p_trait_name, const String& p_path) {
+	MutexLock lock(singleton->mutex);
+	singleton->global_traits[p_trait_name] = p_path;
+}
+
+void GDScriptCache::remove_global_trait(const StringName& p_trait_name) {
+	MutexLock lock(singleton->mutex);
+	singleton->global_traits.erase(p_trait_name);
+}
+
+void GDScriptCache::remove_global_trait_by_path(const String& p_path) {
+	MutexLock lock(singleton->mutex);
+	for (HashMap<StringName, String>::Iterator E = singleton->global_traits.begin(); E;) {
+		HashMap<StringName, String>::Iterator next = E;
+		++next;
+		if (E->value == p_path) {
+			singleton->global_traits.remove(E);
+		}
+		E = next;
+	}
+}
+
+bool GDScriptCache::is_global_trait(const StringName& p_trait_name) {
+	MutexLock lock(singleton->mutex);
+	return singleton->global_traits.has(p_trait_name);
+}
+
+String GDScriptCache::get_global_trait_path(const StringName& p_trait_name) {
+	MutexLock lock(singleton->mutex);
+	const String *path = singleton->global_traits.getptr(p_trait_name);
+	return path != nullptr ? *path : String();
+}
+
 Ref<GDScriptParserRef> GDScriptCache::get_parser(const String &p_path, GDScriptParserRef::Status p_status, Error &r_error, const String &p_owner) {
 	MutexLock lock(singleton->mutex);
 	Ref<GDScriptParserRef> ref;
@@ -241,6 +314,48 @@ Ref<GDScriptParserRef> GDScriptCache::get_parser(const String &p_path, GDScriptP
 	r_error = ref->raise_status(p_status);
 
 	return ref;
+}
+
+Ref<GDScriptTrait> GDScriptCache::get_cached_trait(const String &p_path, const StringName &p_trait_name, Error &r_error, const String &p_owner) {
+	MutexLock lock(singleton->mutex);
+	Ref<GDScriptParserRef> ref;
+	if (!p_owner.is_empty() && p_path != p_owner) {
+		singleton->dependencies[p_owner].insert(p_path);
+		singleton->parser_inverse_dependencies[p_path].insert(p_owner);
+	}
+	if (singleton->parser_map.has(p_path)) {
+		ref = Ref<GDScriptParserRef>(singleton->parser_map[p_path]);
+		if (ref.is_null()) {
+			r_error = ERR_INVALID_DATA;
+			return Ref<GDScriptTrait>();
+		}
+	} else {
+		String remapped_path = ResourceLoader::path_remap(p_path);
+		if (!FileAccess::exists(remapped_path)) {
+			r_error = ERR_FILE_NOT_FOUND;
+			return Ref<GDScriptTrait>();
+		}
+		ref.instantiate();
+		ref->path = p_path;
+		singleton->parser_map[p_path] = ref.ptr();
+	}
+
+	r_error = ref->raise_trait_status(GDScriptParserRef::TRAIT_SOLVED);
+	if (r_error != OK) {
+		return Ref<GDScriptTrait>();
+	}
+
+	GDScriptParser* trait_parser = ref->get_parser();
+	if (trait_parser == nullptr || !trait_parser->is_trait_script()) {
+		r_error = ERR_INVALID_DATA;
+		return Ref<GDScriptTrait>();
+	}
+
+	Ref<GDScriptTrait> found = ref->get_analyzer()->get_trait_analyzer()->get_local_trait(p_trait_name);
+	if (found.is_null()) {
+		r_error = ERR_DOES_NOT_EXIST;
+	}
+	return found;
 }
 
 bool GDScriptCache::has_parser(const String &p_path) {
@@ -499,6 +614,7 @@ void GDScriptCache::clear() {
 	singleton->shallow_gdscript_cache.clear();
 	singleton->full_gdscript_cache.clear();
 	singleton->static_gdscript_cache.clear();
+	singleton->global_traits.clear();
 }
 
 GDScriptCache::GDScriptCache() {
