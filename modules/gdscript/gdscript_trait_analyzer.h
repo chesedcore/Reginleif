@@ -54,6 +54,15 @@ class GDScriptTraitAnalyzer {
 private:
     void push_error(const String& p_message, const GDScriptParser::Node* p_source = nullptr);
 
+    /// true iff p_provided's signature (params + return type) satisfies p_required
+    /// p_required is the trait's method signature, p_provided is what an impl/class actually gives us
+    bool _signatures_match(GDScriptParser::FunctionNode* p_required, GDScriptParser::FunctionNode* p_provided);
+
+    /// walks a NATIVE/CLASS/SCRIPT p_type's ancestor chain looking for a match against p_target_type
+    /// used by check_orphan_rule (see implementation for more about this) and type_satisfies_trait (ask yourself, 
+	/// "does the concrete type inherit from whatever an impl block targeted?")
+    bool _type_is_or_inherits(const GDScriptParser::DataType& p_type, const GDScriptParser::DataType& p_target_type) const;
+
 public:
 	Error resolve_trait(GDScriptParser::TraitNode* p_trait);
 	Error resolve_impl(GDScriptParser::ImplNode* p_impl);

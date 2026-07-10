@@ -41,6 +41,8 @@ class GDScriptAnalyzer {
 	///
 	GDScriptTraitAnalyzer* trait_analyzer = nullptr;
 
+	friend class GDScriptTraitAnalyzer;
+
 	template <typename Fn>
 	class Finally {
 		Fn fn;

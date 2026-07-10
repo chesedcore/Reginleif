@@ -1184,6 +1184,7 @@ public:
 		Vector<FunctionNode*> methods;               ///required method signatures
 		Vector<FunctionNode*> default_methods;       ///methods with default bodies
 		Vector<IdentifierNode*> generic_parameters;  ///trait-level generics, for later, for later!
+		Vector<ImplNode*> impls;                     ///`impl <this trait> for Type` blocks declared in this same trait file
 
 		TraitNode() {
 			type = TRAIT;
@@ -1786,6 +1787,8 @@ public:
 	bool is_trait_script() const { return trait_head != nullptr; }
 
 	bool is_tool() const { return _is_tool; }
+	///
+	const String &get_script_path() const { return script_path; }
 	Ref<GDScriptParserRef> get_depended_parser_for(const String &p_path);
 	const HashMap<String, Ref<GDScriptParserRef>> &get_depended_parsers();
 	ClassNode *find_class(const String &p_qualified_name) const;

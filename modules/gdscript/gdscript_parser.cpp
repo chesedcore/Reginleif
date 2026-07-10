@@ -796,8 +796,24 @@ void GDScriptParser::parse_program() {
 		// current_class = nullptr;    ///nor a 'class' context, obvciously, duh
 		trait_head = parse_trait();
 
+		///a trait file may be followed by `impl <this trait> for Type` blocks (including the
+		///`impl for Type` shorthand) riiiiight here
+		while (trait_head != nullptr) {
+			consume_indents_and_newlines();
+
+			if (current.type != GDScriptTokenizer::Token::IMPL) {
+				break;
+			}
+
+			advance();
+			ImplNode* impl = parse_impl();
+			if (impl != nullptr) {
+				trait_head->impls.push_back(impl);
+			}
+		}
+
 		if (!check(GDScriptTokenizer::Token::TK_EOF)) {
-			push_error(R"([Reginleif] Unexpected item after trait declaration. A trait file must contain only one trait.)");
+			push_error(R"([Reginleif] Unexpected item after trait declaration. A trait file must contain only its trait and, optionally, "impl" blocks for it.)");
 		}
 		
 		clear_unused_annotations();
@@ -1400,6 +1416,14 @@ void GDScriptParser::parse_class_body(bool p_is_multiline) {
 					end_statement("superclass");
 				}
 				break;
+			///
+			case GDScriptTokenizer::Token::IMPL: {
+				advance();
+				ImplNode* impl = parse_impl();
+				if (impl != nullptr) {
+					current_class->impls.push_back(impl);
+				}
+			} break;
 			case GDScriptTokenizer::Token::LITERAL:
 				if (current.literal.get_type() == Variant::STRING) {
 					// Allow strings in class body as multiline comments.
@@ -4349,29 +4373,12 @@ GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
 	///trait-level generics, same shit as class level stuff
 	parse_generic_parameters(trait->generic_parameters);
 
-	bool use_braces = check(GDScriptTokenizer::Token::BRACE_OPEN);
-	if (!use_braces) {
-		consume(GDScriptTokenizer::Token::COLON, R"([Reginleif] Expected ":" or "{" after trait declaration.)");
-	}
-
-	bool multiline = !use_braces && match(GDScriptTokenizer::Token::NEWLINE);
-
-	if (use_braces) {
-		advance();
-		consume_indents_and_newlines();
-	} else if (multiline && !consume(GDScriptTokenizer::Token::INDENT, R"([Reginleif] Expected indented block after trait declaration.)")) {
-		complete_extents(trait);
-		return trait;
-	}
+	end_statement(R"("trait" statement)");
 
 	///actual trait body parsed here. only funcs allowed! either signatures or default bodies
+	///additionally, you can also impl traits in this file itself
 	while (true) {
-		if (use_braces) {
-			consume_indents_and_newlines();
-			if (check(GDScriptTokenizer::Token::BRACE_CLOSE) || is_at_end()) { break; }
-		} else {
-			if (check(GDScriptTokenizer::Token::DEDENT) || is_at_end()) { break; }
-		}
+		if (is_at_end() || check(GDScriptTokenizer::Token::IMPL)) { break; }
 
 		if (match(GDScriptTokenizer::Token::NEWLINE)) { continue; }
 		if (match(GDScriptTokenizer::Token::PASS)) {
@@ -4383,11 +4390,11 @@ GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
 			FunctionNode* method = parse_function(false);
 			if (method == nullptr) { continue; }
 
-			if (method->body != nullptr && !method->body->statements.is_empty()) {
-				///has a body, it's a default method
+			if (method->has_explicit_body) {
+				///has a real body, even if it's empty, so it's a default method
 				trait->default_methods.push_back(method);
 			} else {
-				///no body, it's a required signature
+				///no body at all, so it's a function signature contract thingy
 				trait->methods.push_back(method);
 			}
 		} else {
@@ -4398,13 +4405,6 @@ GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
 		if (panic_mode) { synchronize(); }
 	}
 
-	if (use_braces) {
-		consume_indents_and_newlines();
-		consume(GDScriptTokenizer::Token::BRACE_CLOSE, R"([Reginleif] Expected "}" after trait body.)");
-	} else if (multiline) {
-		consume(GDScriptTokenizer::Token::DEDENT, R"([Reginleif] Expected end of indented block after trait body.)");
-	}
-
 	complete_extents(trait);
 	return trait;
 }
@@ -4412,13 +4412,16 @@ GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
 GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
 	ImplNode* impl = alloc_node<ImplNode>();
 
-	///grab the trait name
-	if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected trait name after "impl".)")) {
-		complete_extents(impl);
-		return nullptr;
-	}
+	///`impl for Type` shorthand: no trait name means "the trait declared in this file".
+	///only legal inside a trait file itself, checked later by the trait analyzer.
+	if (!check(GDScriptTokenizer::Token::FOR)) {
+		if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected trait name after "impl".)")) {
+			complete_extents(impl);
+			return nullptr;
+		}
 
-	impl->trait_name = parse_identifier();
+		impl->trait_name = parse_identifier();
+	}
 
 	if (match(GDScriptTokenizer::Token::FOR)) {
 		///`impl Trait for Type` form, it's only legal in the trait file itself
@@ -4465,7 +4468,12 @@ GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
 		if (match(GDScriptTokenizer::Token::FUNC)) {
 			FunctionNode *method = parse_function(false);
 			if (method != nullptr) {
-				impl->methods.push_back(method);
+				///impl methods must actually implement something :>
+				if (!method->has_explicit_body) {
+					push_error(vformat(R"([Reginleif] "impl" method "%s" must have a body.)", method->identifier != nullptr ? String(method->identifier->name) : String()), method);
+				} else {
+					impl->methods.push_back(method);
+				}
 			}
 		} else {
 			push_error(vformat(R"([Reginleif] Unexpected "%s" in impl body. Only "func" declarations are allowed.)", current.get_name()));

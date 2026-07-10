@@ -3322,6 +3322,15 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 	error = "";
 	parser = p_parser;
 	main_script = p_script;
+
+	///traits are contracts only, we don't want to ever
+	///instantiate them, so nothing to compile
+	if (parser->is_trait_script()) {
+		p_script->valid = true;
+		return OK;
+	}
+
+
 	const GDScriptParser::ClassNode *root = parser->get_tree();
 
 	source = p_script->get_path();
