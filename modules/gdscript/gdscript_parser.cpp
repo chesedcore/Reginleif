@@ -792,8 +792,8 @@ void GDScriptParser::parse_program() {
 	///get your ass out of the class path and go down this trait path instead
 	if (current.type == GDScriptTokenizer::Token::TRAIT) {
 		advance();
-		head = nullptr;             ///trait files don't have a class head!
-		current_class = nullptr;    ///nor a 'class' context, obvciously, duh
+		// head = nullptr;             ///trait files don't have a class head!
+		// current_class = nullptr;    ///nor a 'class' context, obvciously, duh
 		trait_head = parse_trait();
 
 		if (!check(GDScriptTokenizer::Token::TK_EOF)) {
