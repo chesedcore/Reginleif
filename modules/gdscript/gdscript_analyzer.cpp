@@ -635,6 +635,27 @@ Error GDScriptAnalyzer::check_class_member_name_conflict(const GDScriptParser::C
 	return OK;
 }
 
+Error GDScriptAnalyzer::check_symbol_name_conflicts(const StringName& p_name, const GDScriptParser::Node* p_source, const String& p_script_path) {
+	if (GDScriptParser::get_builtin_type(p_name) < Variant::VARIANT_MAX) {
+		push_error(vformat(R"(Name "%s" hides a built-in type.)", p_name), p_source);
+		return ERR_PARSE_ERROR;
+	} else if (class_exists(p_name)) {
+		push_error(vformat(R"(Name "%s" hides a native class.)", p_name), p_source);
+		return ERR_PARSE_ERROR;
+	} else if (ProjectSettings::get_singleton()->has_autoload(p_name) && ProjectSettings::get_singleton()->get_autoload(p_name).is_singleton) {
+		push_error(vformat(R"(Name "%s" hides an autoload singleton.)", p_name), p_source);
+		return ERR_PARSE_ERROR;
+	}
+	
+	String existing_trait_path = GDScriptCache::get_global_trait_path(p_name);
+	if (!existing_trait_path.is_empty() && !GDScript::is_canonically_equal_paths(existing_trait_path, p_script_path)) {
+		push_error(vformat(R"(Name "%s" conflicts with a trait declared in "%s".)", p_name, existing_trait_path), p_source);
+		return ERR_PARSE_ERROR;
+	}
+	
+	return OK;
+}
+
 void GDScriptAnalyzer::get_class_node_current_scope_classes(GDScriptParser::ClassNode *p_node, List<GDScriptParser::ClassNode *> *p_list, GDScriptParser::Node *p_source) {
 	ERR_FAIL_NULL(p_node);
 	ERR_FAIL_NULL(p_list);
@@ -713,15 +734,7 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 
 	if (p_class->identifier) {
 		StringName class_name = p_class->identifier->name;
-		if (GDScriptParser::get_builtin_type(class_name) < Variant::VARIANT_MAX) {
-			push_error(vformat(R"(Class "%s" hides a built-in type.)", class_name), p_class->identifier);
-		} else if (class_exists(class_name)) {
-			push_error(vformat(R"(Class "%s" hides a native class.)", class_name), p_class->identifier);
-		} else if (ScriptServer::is_global_class(class_name) && (!GDScript::is_canonically_equal_paths(ScriptServer::get_global_class_path(class_name), parser->script_path) || p_class != parser->head)) {
-			push_error(vformat(R"(Class "%s" hides a global script class.)", class_name), p_class->identifier);
-		} else if (ProjectSettings::get_singleton()->has_autoload(class_name) && ProjectSettings::get_singleton()->get_autoload(class_name).is_singleton) {
-			push_error(vformat(R"(Class "%s" hides an autoload singleton.)", class_name), p_class->identifier);
-		}
+		check_symbol_name_conflicts(class_name, p_class->identifier, parser->script_path);
 	}
 
 	/// [Monarch] Generic param names are validated here. 

@@ -59,6 +59,16 @@ Error GDScriptTraitAnalyzer::resolve_trait(GDScriptParser::TraitNode* p_trait) {
 		return OK;
 	}
 
+	Error detected_symbol_conflicts = analyzer->check_symbol_name_conflicts(trait_name, p_trait->identifier, parser->script_path);
+	if (detected_symbol_conflicts != OK) {
+		return ERR_PARSE_ERROR;
+	}
+
+	if (ScriptServer::is_global_class(trait_name) && !GDScript::is_canonically_equal_paths(ScriptServer::get_global_class_path(trait_name), parser->script_path)) {
+		push_error(vformat(R"([Reginleif] Trait "%s" hides a global script class.)", trait_name), p_trait->identifier);
+		return ERR_PARSE_ERROR;
+	}
+
 	Ref<GDScriptTrait> gd_trait;
 	gd_trait.instantiate();
 	gd_trait->name = trait_name;
@@ -142,9 +152,26 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 		trait_name = parser->get_trait_tree()->identifier->name;
 	}
 
-	///!!TODO:!! fall back to cross-file lookup once that exists... maybe. 
-	///for now, only local traits are usable...
 	Ref<GDScriptTrait> trait = get_local_trait(trait_name);
+
+	if (trait.is_null()) {
+		///not found locally, fall back to global trait registry
+		String trait_path = GDScriptCache::get_global_trait_path(trait_name);
+
+		///reminder of a hard fought battle. this guard exists so that if get_local_trait
+		///some-fucking-how missed a trait actually declared in this same file, we don't accidentally
+		///call into ourselves via get_cached_trait and somehow potentially deadlock ourselves
+		///against the fucking cache mutex while this file's own `resolve_trait()` is still running
+		///i hate my life
+		if (!trait_path.is_empty() && trait_path != parser->get_script_path()) {
+			Error trait_err = OK;
+			trait = GDScriptCache::get_cached_trait(trait_path, trait_name, trait_err, parser->get_script_path());
+			if (trait_err != OK) {
+				trait = Ref<GDScriptTrait>();
+			}
+		}
+	}
+
 	if (trait.is_null()) {
 		push_error(vformat(R"([Reginleif] Could not find trait "%s".)", trait_name), p_impl);
 		return ERR_PARSE_ERROR;
@@ -209,6 +236,52 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 	for (const KeyValue<StringName, GDScriptParser::FunctionNode*>& E : trait->default_methods) {
 		if (!gd_impl->provided_methods.has(E.key)) {
 			gd_impl->provided_methods[E.key] = E.value;
+		}
+	}
+
+	//already got an impl for this trait+type combo? gtfo
+	for (const Ref<GDScriptImpl>& existing : resolved_impls) {
+		if (existing.is_valid() && existing->trait == trait && existing->impl_target_type == target_type) {
+			push_error(vformat(
+				R"([Reginleif] Duplicate "impl" of trait "%s" for the same type "%s".)", 
+				trait_name, target_type.to_string()),
+			p_impl);
+			return ERR_PARSE_ERROR;
+		}
+	}
+
+	///two different traits fighting over the same method name on the same type means that one silently
+	///clobbers the other in member_functions at runtime. FUCK. nope, catching it here instead
+	for (const Ref<GDScriptImpl>& existing : resolved_impls) {
+		if (existing.is_null() || existing->trait == trait) {
+			continue; ///same-trait re-impl already handled by the exact-duplicate check above^^^^
+		}
+
+		bool same_type = existing->impl_target_type == target_type;
+		bool existing_is_more_derived = !same_type && _type_is_or_inherits(existing->impl_target_type, target_type);
+
+		if (existing_is_more_derived) {
+			continue; ///case 1, existing impl targets a more specific type, it wins, no collision
+		}
+
+		bool target_is_more_derived = !same_type && _type_is_or_inherits(target_type, existing->impl_target_type);
+
+		if (!same_type && !target_is_more_derived) {
+			continue; ///case 2, unrelated types entirely, no collision possible
+		}
+
+		for (const KeyValue<StringName, GDScriptParser::FunctionNode*>& E : gd_impl->provided_methods) {
+			if (!existing->provided_methods.has(E.key)) {
+				continue;
+			}
+			if (target_is_more_derived) {
+				continue; ///case 3, we're the more specific type here, we override cleanly
+			}
+
+			///case 4, our actual collision
+			push_error(vformat(R"([Reginleif] Method "%s" is provided by both trait "%s" and trait "%s" for the same type, so trait dispatch is ambiguous. (Disambiguation is planned in the future, sorry^^'))",
+					E.key, trait_name, existing->trait->name), p_impl);
+			ok = false;
 		}
 	}
 
