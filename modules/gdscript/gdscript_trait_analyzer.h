@@ -62,6 +62,8 @@ private:
     /// used by check_orphan_rule (see implementation for more about this) and type_satisfies_trait (ask yourself, 
 	/// "does the concrete type inherit from whatever an impl block targeted?")
     bool _type_is_or_inherits(const GDScriptParser::DataType& p_type, const GDScriptParser::DataType& p_target_type) const;
+	StringName _impl_target_key(const GDScriptParser::DataType& p_type) const;
+	String _owning_path_for_type(const GDScriptParser::DataType& p_type) const;
 
 public:
 	Error resolve_trait(GDScriptParser::TraitNode* p_trait);

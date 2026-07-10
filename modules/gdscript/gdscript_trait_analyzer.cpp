@@ -38,6 +38,9 @@
 GDScriptTraitAnalyzer::GDScriptTraitAnalyzer(GDScriptParser* p_parser, GDScriptAnalyzer* p_analyzer) {
 	parser = p_parser;
 	analyzer = p_analyzer;
+	///wipe old claims before this pass adds fresh ones
+	///otherwise reanalysis just piles up duplicates forever :<
+	GDScriptCache::remove_global_impls_by_path(parser->get_script_path());
 }
 
 void GDScriptTraitAnalyzer::push_error(const String& p_message, const GDScriptParser::Node* p_source) {
@@ -285,7 +288,71 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 		}
 	}
 
+	///same deal, but in this case we're crossing file boundaries. walk the target's inheritance chain
+	///force-resolve any file, that claims something on that chain, 
+	///then check for name collisions against our own. simple enough? simple enough. probably. 
+	///if you don't get it, this just mirrors the pattern that already exists in the damned analyser.
+	GDScriptParser::DataType walk_type = target_type;
+	while (ok) {
+		StringName walk_key = _impl_target_key(walk_type);
+		if (walk_key != StringName()) {
+			String owning_path = _owning_path_for_type(walk_type);
+			if (!owning_path.is_empty() && !GDScript::is_canonically_equal_paths(owning_path, parser->get_script_path())) {
+				///force that file fully resolved so its own impls (and thus its own claims)
+				///actually exist before we go trusting the registry for its type key
+				Error dep_err = OK;
+				GDScriptCache::get_parser(owning_path, GDScriptParserRef::FULLY_SOLVED, dep_err, parser->get_script_path());
+			}
+
+			for (const GDScriptCache::GlobalImplClaim& claim : GDScriptCache::get_global_impl_claims(walk_key)) {
+				if (claim.trait_name == trait_name && GDScript::is_canonically_equal_paths(claim.owning_path, parser->get_script_path())) {
+					continue; /// case 1, that's just us, from a previous pass, not a real collision
+				}
+				if (claim.trait_name == trait_name) {
+					continue; /// case 2, same trait implemented for some random bumfuck ancestor elsewhere, not my problem
+				}
+				if (!gd_impl->provided_methods.has(claim.method_name)) {
+					continue;
+				}
+				///only the exact type we're impling on cares about the 'derivedness'(?) property , so if we're
+				///walking an ancestor, WE are always the more derived side by construction, so any
+				///name match here is us legitimately overriding, not colliding. side note i really need a better name than
+				///uhh. 'derivedness'.
+				if (walk_type != target_type) {
+					continue;
+				}
+				push_error(vformat(R"([Reginleif] Method "%s" is provided by both trait "%s" (in this file) and trait "%s" (in "%s") for the same type. Ambiguous dispatch.)",
+						claim.method_name, trait_name, claim.trait_name, claim.owning_path), p_impl);
+				ok = false;
+			}
+		}
+
+		if (walk_type.kind != GDScriptParser::DataType::CLASS || walk_type.class_type == nullptr) {
+			break; ///natives don't have a type chain lol
+		}
+		GDScriptParser::DataType next_walk = walk_type.class_type->base_type;
+		if (next_walk.kind == GDScriptParser::DataType::UNRESOLVED) {
+			break;
+		}
+		walk_type = next_walk;
+	}
+
 	resolved_impls.push_back(gd_impl);
+
+	///register our own claims globally so other files checking THEIR impls against us
+	///actually see what WE provided, not just what's local to their own file.
+	///makes sure the analyser doesn't fucking shit its pants when wanting to check a claim
+	///that doesnt belong to its own file
+	StringName our_key = _impl_target_key(target_type);
+	if (our_key != StringName()) {
+		Vector<StringName> method_names;
+		for (const KeyValue<StringName, GDScriptParser::FunctionNode*>& E : gd_impl->provided_methods) {
+			method_names.push_back(E.key);
+		}
+		GDScriptCache::add_global_impl_claims(our_key, trait_name, method_names, parser->get_script_path());
+	}
+
+	///how much longer must a man keep fighting for? :sob:
 
 	return ok ? OK : ERR_PARSE_ERROR;
 }
@@ -406,6 +473,23 @@ bool GDScriptTraitAnalyzer::_type_is_or_inherits(const GDScriptParser::DataType&
 	}
 
 	return false;
+}
+
+StringName GDScriptTraitAnalyzer::_impl_target_key(const GDScriptParser::DataType& p_type) const {
+	if (p_type.kind == GDScriptParser::DataType::NATIVE) {
+		return StringName("native::" + String(p_type.native_type));
+	}
+	if (p_type.kind == GDScriptParser::DataType::CLASS && p_type.class_type != nullptr) {
+		return StringName("class::" + p_type.class_type->fqcn);
+	}
+	return StringName(); //not a type we do cross-file impl tracking for
+}
+
+String GDScriptTraitAnalyzer::_owning_path_for_type(const GDScriptParser::DataType& p_type) const {
+	if (p_type.kind == GDScriptParser::DataType::CLASS && p_type.class_type != nullptr) {
+		return p_type.class_type->fqcn.get_slice("::", 0);
+	}
+	return String(); //natives don't live in any file, nothing to force-resolve
 }
 
 bool GDScriptTraitAnalyzer::type_satisfies_trait(const GDScriptParser::DataType& p_concrete_type, const Ref<GDScriptTrait>& p_trait) const {

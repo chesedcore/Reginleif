@@ -96,6 +96,14 @@ class TestGDScriptCacheAccessor;
 }
 
 class GDScriptCache {
+public:
+	struct GlobalImplClaim {
+		StringName trait_name;
+		StringName method_name;
+		String owning_path;
+	};
+
+private:
 	// String key is full path.
 	HashMap<String, GDScriptParserRef *> parser_map;
 	HashMap<String, Vector<ObjectID>> abandoned_parser_map;
@@ -107,6 +115,9 @@ class GDScriptCache {
 
 	///trait stuff
 	HashMap<StringName, String> global_traits;
+
+	///impl stuff, for cross-file collision detection
+	HashMap<StringName, Vector<GlobalImplClaim>> global_impls; ///target_type_key -> claims on that type
 
 	friend class GDScript;
 	friend class GDScriptParserRef;
@@ -153,6 +164,10 @@ public:
 	static void remove_global_trait_by_path(const String &p_path);
 	static bool is_global_trait(const StringName &p_trait_name);
 	static String get_global_trait_path(const StringName &p_trait_name);
+
+	static void add_global_impl_claims(const StringName& p_target_type_key, const StringName& p_trait_name, const Vector<StringName>& p_method_names, const String& p_path);
+	static void remove_global_impls_by_path(const String& p_path);
+	static Vector<GlobalImplClaim> get_global_impl_claims(const StringName &p_target_type_key);
 
 	static void clear();
 

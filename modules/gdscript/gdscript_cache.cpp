@@ -218,6 +218,26 @@ void GDScriptCache::move_script(const String &p_from, const String &p_to) {
 		singleton->full_gdscript_cache[p_to] = singleton->full_gdscript_cache[p_from];
 	}
 	singleton->full_gdscript_cache.erase(p_from);
+
+	///trait/impl global registries key by path too, gotta follow the move or they go stale
+	for (HashMap<StringName, String>::Iterator E = singleton->global_traits.begin(); E;) {
+		HashMap<StringName, String>::Iterator next = E;
+		++next;
+		if (E->value == p_from) {
+			singleton->global_traits[E->key] = p_to;
+		}
+		E = next;
+	}
+	for (HashMap<StringName, Vector<GlobalImplClaim>>::Iterator E = singleton->global_impls.begin(); E;) {
+		HashMap<StringName, Vector<GlobalImplClaim>>::Iterator next = E;
+		++next;
+		for (int i = 0; i < E->value.size(); i++) {
+			if (E->value[i].owning_path == p_from) {
+				E->value.write[i].owning_path = p_to;
+			}
+		}
+		E = next;
+	}
 }
 
 void GDScriptCache::remove_script(const String &p_path) {
@@ -251,6 +271,9 @@ void GDScriptCache::remove_script(const String &p_path) {
 	singleton->dependencies.erase(p_path);
 	singleton->shallow_gdscript_cache.erase(p_path);
 	singleton->full_gdscript_cache.erase(p_path);
+
+	remove_global_trait_by_path(p_path);
+	remove_global_impls_by_path(p_path);
 }
 
 ///gdscript trait stuff
@@ -286,6 +309,46 @@ String GDScriptCache::get_global_trait_path(const StringName& p_trait_name) {
 	MutexLock lock(singleton->mutex);
 	const String *path = singleton->global_traits.getptr(p_trait_name);
 	return path != nullptr ? *path : String();
+}
+
+void GDScriptCache::add_global_impl_claims(const StringName& p_target_type_key, const StringName& p_trait_name, const Vector<StringName>& p_method_names, const String& p_path) {
+	if (p_target_type_key == StringName()) {
+		return; ///no key? more like no cross-file collision checks for this type kind! hah! hah...
+				///...yeah, i should take breaks more often...
+	}
+	MutexLock lock(singleton->mutex);
+	Vector<GlobalImplClaim>& claims = singleton->global_impls[p_target_type_key];
+	for (const StringName& method_name : p_method_names) {
+		GlobalImplClaim claim;
+		claim.trait_name = p_trait_name;
+		claim.method_name = method_name;
+		claim.owning_path = p_path;
+		claims.push_back(claim);
+	}
+}
+
+void GDScriptCache::remove_global_impls_by_path(const String& p_path) {
+	MutexLock lock(singleton->mutex);
+	for (HashMap<StringName, Vector<GlobalImplClaim>>::Iterator E = singleton->global_impls.begin(); E;) {
+		HashMap<StringName, Vector<GlobalImplClaim>>::Iterator next = E;
+		++next;
+		Vector<GlobalImplClaim>& claims = E->value;
+		for (int i = claims.size() - 1; i >= 0; i--) {
+			if (claims[i].owning_path == p_path) {
+				claims.remove_at(i);
+			}
+		}
+		if (claims.is_empty()) {
+			singleton->global_impls.remove(E);
+		}
+		E = next;
+	}
+}
+
+Vector<GDScriptCache::GlobalImplClaim> GDScriptCache::get_global_impl_claims(const StringName& p_target_type_key) {
+	MutexLock lock(singleton->mutex);
+	const Vector<GlobalImplClaim>* claims = singleton->global_impls.getptr(p_target_type_key);
+	return claims != nullptr ? *claims : Vector<GlobalImplClaim>();
 }
 
 Ref<GDScriptParserRef> GDScriptCache::get_parser(const String &p_path, GDScriptParserRef::Status p_status, Error &r_error, const String &p_owner) {
