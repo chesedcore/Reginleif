@@ -115,6 +115,7 @@ private:
 
 	///trait stuff
 	HashMap<StringName, String> global_traits;
+	bool global_traits_project_scanned = false;
 
 	///impl stuff, for cross-file collision detection
 	HashMap<StringName, Vector<GlobalImplClaim>> global_impls; ///target_type_key -> claims on that type

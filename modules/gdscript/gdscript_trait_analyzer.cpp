@@ -160,7 +160,6 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 	if (trait.is_null()) {
 		///not found locally, fall back to global trait registry
 		String trait_path = GDScriptCache::get_global_trait_path(trait_name);
-		print_line(vformat("[Reginleif DEBUG] looking up trait '%s' in global registry, found path='%s'", trait_name, trait_path));
 
 		///reminder of a hard fought battle. this guard exists so that if get_local_trait
 		///some-fucking-how missed a trait actually declared in this same file, we don't accidentally
@@ -469,6 +468,14 @@ bool GDScriptTraitAnalyzer::_type_is_or_inherits(const GDScriptParser::DataType&
 		return true;
 	}
 
+	if (p_target_type.kind == GDScriptParser::DataType::BUILTIN) {
+		///value types like int/float/String have no inheritance chain, so this is just
+		///a straight builtin_type match, ignoring the bullshit that comes with the 
+		///DataType flags (hard/meta/etc/whatever the fuck) that would otherwise make
+		///the p_type == p_target_type check above too strict.
+		return p_type.kind == GDScriptParser::DataType::BUILTIN && p_type.builtin_type == p_target_type.builtin_type;
+	}
+
 	if (p_target_type.kind == GDScriptParser::DataType::CLASS) {
 		///walk up the CLASS inheritance chain looking for p_target_type's class...
 		GDScriptParser::ClassNode* current = p_type.kind == GDScriptParser::DataType::CLASS ? p_type.class_type : nullptr;
@@ -528,4 +535,23 @@ bool GDScriptTraitAnalyzer::type_satisfies_trait(const GDScriptParser::DataType&
 	}
 
 	return false;
+}
+
+GDScriptParser::FunctionNode* GDScriptTraitAnalyzer::find_impl_method(const GDScriptParser::DataType& p_base_type, const StringName& p_method_name) const {
+	Ref<GDScriptImpl> best_match;
+
+	for (const Ref<GDScriptImpl>& impl : resolved_impls) {
+		if (impl.is_null() || !impl->provided_methods.has(p_method_name)) {
+			continue;
+		}
+		if (!_type_is_or_inherits(p_base_type, impl->impl_target_type)) {
+			continue;
+		}
+		if (best_match.is_null() || _type_is_or_inherits(impl->impl_target_type, best_match->impl_target_type)) {
+			///impl's target is same-or-more-derived than what we've matched so far
+			best_match = impl;
+		}
+	}
+
+	return best_match.is_valid() ? best_match->provided_methods[p_method_name] : nullptr;
 }

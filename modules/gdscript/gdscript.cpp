@@ -2745,7 +2745,6 @@ String GDScriptLanguage::_get_global_class_name(const String &p_path, String *r_
 
 	GDScriptParser parser;
 	err = parser.parse(source, p_path, false, false);
-	print_line(vformat("[Reginleif DEBUG] _get_global_class_name called for '%s', parse err=%d, is_trait_script=%s", p_path, (int)err, parser.is_trait_script() ? "true" : "false"));
 
 	///trait files are registered into GDScriptCache's own trait table (see
 	///_register_global_trait below), !!!NOT:!!! ScriptServer's global class table, so trait names
@@ -2758,10 +2757,8 @@ String GDScriptLanguage::_get_global_class_name(const String &p_path, String *r_
 	if (parser.is_trait_script()) {
 		GDScriptCache::remove_global_trait_by_path(p_path);
 		const GDScriptParser::TraitNode* t = parser.get_trait_tree();
-		print_line(vformat("[Reginleif DEBUG] is_trait_script true for '%s', trait_tree=%s, identifier=%s", p_path, t != nullptr ? "valid" : "NULL", (t != nullptr && t->identifier != nullptr) ? String(t->identifier->name) : "NULL"));
 		if (t != nullptr && t->identifier != nullptr) {
 			GDScriptCache::add_global_trait(t->identifier->name, p_path);
-			print_line(vformat("[Reginleif DEBUG] registered trait '%s' -> '%s'", t->identifier->name, p_path));
 		}
 		return String();
 	}

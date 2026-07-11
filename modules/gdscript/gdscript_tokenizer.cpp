@@ -726,8 +726,10 @@ GDScriptTokenizer::Token GDScriptTokenizerText::number() {
 		_advance();
 	}
 
-	// It might be a ".." token (instead of decimal point) so we check if it's not.
-	if (_peek() == '.' && _peek(1) != '.') {
+	///It might be a ".." token, or a "." starting a method call/member access
+	///(`3.method_call()`), so we check it's not either of those before treating
+	///it as a decimal point
+	if (_peek() == '.' && _peek(1) != '.' && !is_unicode_identifier_start(_peek(1))) {
 		if (base == 10 && !has_decimal) {
 			has_decimal = true;
 		} else if (base == 10) {
@@ -819,7 +821,7 @@ GDScriptTokenizer::Token GDScriptTokenizerText::number() {
 	}
 
 	// Detect extra decimal point.
-	if (!has_error && has_decimal && _peek() == '.' && _peek(1) != '.') {
+	if (!has_error && has_decimal && _peek() == '.' && _peek(1) != '.' && !is_unicode_identifier_start(_peek(1))) {
 		Token error = make_error("Cannot use a decimal point twice in a number.");
 		error.start_column = column;
 		error.end_column = column + 1;

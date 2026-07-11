@@ -94,5 +94,7 @@ public:
 
 	const List<Ref<GDScriptImpl>>& get_resolved_impls() const { return resolved_impls; }
 
+	GDScriptParser::FunctionNode* find_impl_method(const GDScriptParser::DataType& p_base_type, const StringName& p_method_name) const;
+
 	GDScriptTraitAnalyzer(GDScriptParser* p_parser, GDScriptAnalyzer* p_analyzer);
 };

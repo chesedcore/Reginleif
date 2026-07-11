@@ -36,6 +36,7 @@
 #include "gdscript_parser.h"
 #include "gdscript_trait.h"
 
+#include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/io/resource_loader.h"
 #include "core/templates/rb_set.h"
@@ -278,6 +279,42 @@ void GDScriptCache::remove_script(const String &p_path) {
 
 ///gdscript trait stuff
 
+static void _scan_trait_scripts_in_dir(const String& p_dir) {
+	Error err = OK;
+	Ref<DirAccess> dir = DirAccess::open(p_dir, &err);
+	if (err != OK || dir.is_null()) {
+		return;
+	}
+
+	if (dir->file_exists(".gdignore")) {
+		return;
+	}
+
+	dir->list_dir_begin();
+	String file_name = dir->get_next();
+	while (!file_name.is_empty()) {
+		if (dir->current_is_dir()) {
+			if (file_name != "." && file_name != ".." && file_name != "./") {
+				_scan_trait_scripts_in_dir(p_dir.path_join(file_name));
+			}
+		} else if (file_name.ends_with(".gd")) {
+			String script_path = p_dir.path_join(file_name);
+			Ref<FileAccess> f = FileAccess::open(script_path, FileAccess::READ, &err);
+			if (err == OK && f.is_valid()) {
+				GDScriptParser parser;
+				err = parser.parse(f->get_as_utf8_string(), script_path, false, false);
+				if (err == OK && parser.is_trait_script()) {
+					const GDScriptParser::TraitNode* trait = parser.get_trait_tree();
+					if (trait != nullptr && trait->identifier != nullptr) {
+						GDScriptCache::add_global_trait(trait->identifier->name, script_path);
+					}
+				}
+			}
+		}
+		file_name = dir->get_next();
+	}
+}
+
 void GDScriptCache::add_global_trait(const StringName& p_trait_name, const String& p_path) {
 	MutexLock lock(singleton->mutex);
 	singleton->global_traits[p_trait_name] = p_path;
@@ -286,6 +323,7 @@ void GDScriptCache::add_global_trait(const StringName& p_trait_name, const Strin
 void GDScriptCache::remove_global_trait(const StringName& p_trait_name) {
 	MutexLock lock(singleton->mutex);
 	singleton->global_traits.erase(p_trait_name);
+	singleton->global_traits_project_scanned = false;
 }
 
 void GDScriptCache::remove_global_trait_by_path(const String& p_path) {
@@ -295,6 +333,7 @@ void GDScriptCache::remove_global_trait_by_path(const String& p_path) {
 		++next;
 		if (E->value == p_path) {
 			singleton->global_traits.remove(E);
+			singleton->global_traits_project_scanned = false;
 		}
 		E = next;
 	}
@@ -306,8 +345,27 @@ bool GDScriptCache::is_global_trait(const StringName& p_trait_name) {
 }
 
 String GDScriptCache::get_global_trait_path(const StringName& p_trait_name) {
+	{
+		MutexLock lock(singleton->mutex);
+		const String* path = singleton->global_traits.getptr(p_trait_name);
+		if (path != nullptr) {
+			return *path;
+		}
+
+		if (singleton->global_traits_project_scanned) {
+			return String();
+		}
+	}
+
+	///the fs normally populates this registry while the editor scans project
+	///files, but runtime parsing can hit this lookup before that has happened in this
+	///process. absolute cinema. do one lazy project scan on the first cache miss, 
+	///then subsequent misses stay O(1) instead of repeatedly walking the whole project
+	_scan_trait_scripts_in_dir("res://");
+
 	MutexLock lock(singleton->mutex);
-	const String *path = singleton->global_traits.getptr(p_trait_name);
+	singleton->global_traits_project_scanned = true;
+	const String* path = singleton->global_traits.getptr(p_trait_name);
 	return path != nullptr ? *path : String();
 }
 
@@ -678,6 +736,7 @@ void GDScriptCache::clear() {
 	singleton->full_gdscript_cache.clear();
 	singleton->static_gdscript_cache.clear();
 	singleton->global_traits.clear();
+	singleton->global_traits_project_scanned = false;
 }
 
 GDScriptCache::GDScriptCache() {
