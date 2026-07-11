@@ -2745,6 +2745,7 @@ String GDScriptLanguage::_get_global_class_name(const String &p_path, String *r_
 
 	GDScriptParser parser;
 	err = parser.parse(source, p_path, false, false);
+	print_line(vformat("[Reginleif DEBUG] _get_global_class_name called for '%s', parse err=%d, is_trait_script=%s", p_path, (int)err, parser.is_trait_script() ? "true" : "false"));
 
 	///trait files are registered into GDScriptCache's own trait table (see
 	///_register_global_trait below), !!!NOT:!!! ScriptServer's global class table, so trait names
@@ -2757,8 +2758,10 @@ String GDScriptLanguage::_get_global_class_name(const String &p_path, String *r_
 	if (parser.is_trait_script()) {
 		GDScriptCache::remove_global_trait_by_path(p_path);
 		const GDScriptParser::TraitNode* t = parser.get_trait_tree();
+		print_line(vformat("[Reginleif DEBUG] is_trait_script true for '%s', trait_tree=%s, identifier=%s", p_path, t != nullptr ? "valid" : "NULL", (t != nullptr && t->identifier != nullptr) ? String(t->identifier->name) : "NULL"));
 		if (t != nullptr && t->identifier != nullptr) {
 			GDScriptCache::add_global_trait(t->identifier->name, p_path);
+			print_line(vformat("[Reginleif DEBUG] registered trait '%s' -> '%s'", t->identifier->name, p_path));
 		}
 		return String();
 	}
@@ -2864,6 +2867,47 @@ String GDScriptLanguage::_get_global_class_name(const String &p_path, String *r_
 
 thread_local GDScriptLanguage::CallLevel *GDScriptLanguage::_call_stack = nullptr;
 thread_local uint32_t GDScriptLanguage::_call_stack_size = 0;
+
+void GDScriptLanguage::register_native_impl_method(Variant::Type p_type, const StringName& p_method_name, GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	native_impl_methods[p_type][p_method_name] = p_function;
+}
+
+void GDScriptLanguage::unregister_native_impl_methods_for_function(GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	for (HashMap<Variant::Type, HashMap<StringName, GDScriptFunction*>>::Iterator E = native_impl_methods.begin(); E;) {
+		HashMap<Variant::Type, HashMap<StringName, GDScriptFunction*>>::Iterator next = E;
+		++next;
+		HashMap<StringName, GDScriptFunction*>& methods = E->value;
+		for (HashMap<StringName, GDScriptFunction*>::Iterator M = methods.begin(); M;) {
+			HashMap<StringName, GDScriptFunction*>::Iterator next_m = M;
+			++next_m;
+			if (M->value == p_function) {
+				methods.remove(M);
+			}
+			M = next_m;
+		}
+		if (methods.is_empty()) {
+			native_impl_methods.remove(E);
+		}
+		E = next;
+	}
+}
+
+bool GDScriptLanguage::has_native_impl_methods(Variant::Type p_type) const {
+	MutexLock lock(mutex);
+	return native_impl_methods.has(p_type);
+}
+
+GDScriptFunction* GDScriptLanguage::get_native_impl_method(Variant::Type p_type, const StringName& p_method_name) const {
+	MutexLock lock(mutex);
+	HashMap<Variant::Type, HashMap<StringName, GDScriptFunction*>>::ConstIterator E = native_impl_methods.find(p_type);
+	if (!E) {
+		return nullptr;
+	}
+	HashMap<StringName, GDScriptFunction*>::ConstIterator M = E->value.find(p_method_name);
+	return M ? M->value : nullptr;
+}
 
 GDScriptLanguage::CallLevel *GDScriptLanguage::_get_stack_level(uint32_t p_level) {
 	ERR_FAIL_UNSIGNED_INDEX_V(p_level, _call_stack_size, nullptr);

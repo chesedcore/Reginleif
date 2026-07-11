@@ -377,6 +377,8 @@ private:
 	int _vararg_index = -1;
 	int _stack_size = 0;
 	int _instruction_args_size = 0;
+	///true if this function was compiled from an `impl for <builtin>` block
+	bool _is_native_impl_method = false;
 
 	SelfList<GDScriptFunction> function_list{ this };
 	mutable Variant nil;
@@ -500,7 +502,13 @@ public:
 	_FORCE_INLINE_ bool is_static() const { return _static; }
 	_FORCE_INLINE_ bool is_vararg() const { return _vararg_index >= 0; }
 	_FORCE_INLINE_ MethodInfo get_method_info() const { return method_info; }
-	_FORCE_INLINE_ int get_argument_count() const { return _argument_count; }
+
+	///reports the USER-VISIBLE argument count! if this is a native-impl method, the implicit
+	///leading self slot is hidden from anything asking, same idea as GDScriptLambdaCallable
+	///subtracting captures.size() off of get_argument_count() for lambdas if you know about that
+	_FORCE_INLINE_ int get_argument_count() const { return _is_native_impl_method ? _argument_count - 1 : _argument_count; }
+	_FORCE_INLINE_ bool is_native_impl_method() const { return _is_native_impl_method; }
+	_FORCE_INLINE_ void set_is_native_impl_method(bool p_value) { _is_native_impl_method = p_value; }
 	_FORCE_INLINE_ Variant get_rpc_config() const { return rpc_config; }
 	_FORCE_INLINE_ int get_max_stack_size() const { return _stack_size; }
 

@@ -597,6 +597,18 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 
 	r_err.error = Callable::CallError::CALL_OK;
 
+	///native-impl methods (`impl for <builtin>`) have no GDScriptInstance*. self piggyback-rides in
+	///as p_args[0] instead. i know. fucked up. if something calls one of these with a real p_instance somehow, 
+	///it's bypassing the only two blessed call paths (the VM's native-impl dispatch, or a future impl-callable
+	///wrapper) and treating this like an ordinary bound method, which it fundamentally isn't
+	if (unlikely(_is_native_impl_method && p_instance != nullptr)) {
+		r_err.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
+#ifdef DEBUG_ENABLED
+		ERR_PRINT(vformat("Reginleif bug (please report!): native-impl method '%s' called with a non-null GDScriptInstance*. This function expects self as an implicit leading argument, not an instance.", name));
+#endif
+		return _get_default_variant_for_data_type(return_type);
+	}
+
 	static thread_local int call_depth = 0;
 	if (unlikely(++call_depth > MAX_CALL_DEPTH)) {
 		call_depth--;
@@ -2168,15 +2180,34 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				if (GDScriptLanguage::get_singleton()->profiling) {
 					call_time = OS::get_singleton()->get_ticks_usec();
 				}
-				Variant::Type base_type = base->get_type();
 				Object *base_obj = nullptr;
 #endif
+				Variant::Type base_type = base->get_type();
+
+				GDScriptFunction* native_impl_function = nullptr;
+				if (base_type != Variant::OBJECT && !Variant::has_builtin_method(base_type, *methodname) && GDScriptLanguage::get_singleton()->has_native_impl_methods(base_type)) {
+					native_impl_function = GDScriptLanguage::get_singleton()->get_native_impl_method(base_type, *methodname);
+				}
 
 				Variant temp_ret;
 				Callable::CallError err;
 				if (call_ret) {
 					GET_INSTRUCTION_ARG(ret, argc + 1);
-					base->callp(*methodname, (const Variant **)argptrs, argc, temp_ret, err);
+					if (native_impl_function != nullptr) {
+						///self isn't a GDScriptInstance* for value types, so it rides in as
+						///an implicit leading argument instead, the same trick GDScriptLambdaCallable
+						///uses to prepend captures ahead of the real call arguments
+						///i love being unoriginal
+						const int total_argc = argc + 1;
+						const Variant** impl_argptrs = (const Variant**)alloca(sizeof(Variant*)* total_argc);
+						impl_argptrs[0] = base;
+						for (int i = 0; i < argc; i++) {
+							impl_argptrs[i + 1] = argptrs[i];
+						}
+						temp_ret = native_impl_function->call(nullptr, impl_argptrs, total_argc, err);
+					} else {
+						base->callp(*methodname, (const Variant**)argptrs, argc, temp_ret, err);
+					}
 					*ret = temp_ret;
 #ifdef DEBUG_ENABLED
 					if (ret->get_type() == Variant::NIL) {
@@ -2211,7 +2242,17 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 					}
 #endif
 				} else {
-					base->callp(*methodname, (const Variant **)argptrs, argc, temp_ret, err);
+					if (native_impl_function != nullptr) {
+						const int total_argc = argc + 1;
+						const Variant** impl_argptrs = (const Variant**)alloca(sizeof(Variant*)* total_argc);
+						impl_argptrs[0] = base;
+						for (int i = 0; i < argc; i++) {
+							impl_argptrs[i + 1] = argptrs[i];
+						}
+						temp_ret = native_impl_function->call(nullptr, impl_argptrs, total_argc, err);
+					} else {
+						base->callp(*methodname, (const Variant**)argptrs, argc, temp_ret, err);
+					}
 				}
 #ifdef DEBUG_ENABLED
 

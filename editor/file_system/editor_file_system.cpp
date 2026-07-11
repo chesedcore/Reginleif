@@ -379,9 +379,16 @@ void EditorFileSystem::_first_scan_process_scripts(const ScannedDirectory *p_sca
 				break;
 			}
 		}
+		if (scan_file.find("regin_trait") != -1) {
+			print_line(vformat("[Reginleif DEBUG] _first_scan_process_scripts saw '%s', is_script=%s", scan_file, is_script ? "true" : "false"));
+		}
 		if (is_script) {
 			const String path = p_scan_dir->full_path.path_join(scan_file);
 			const String type = ResourceLoader::get_resource_type(path);
+
+			if (scan_file.find("regin_trait") != -1) {
+				print_line(vformat("[Reginleif DEBUG] resource type for '%s' = '%s', is_parent_of_Script=%s", scan_file, type, ClassDB::is_parent_class(type, SNAME("Script")) ? "true" : "false"));
+			}
 
 			if (ClassDB::is_parent_class(type, SNAME("Script"))) {
 				const ScriptClassInfo &info = _get_global_script_class(type, path);

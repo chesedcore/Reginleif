@@ -160,6 +160,7 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 	if (trait.is_null()) {
 		///not found locally, fall back to global trait registry
 		String trait_path = GDScriptCache::get_global_trait_path(trait_name);
+		print_line(vformat("[Reginleif DEBUG] looking up trait '%s' in global registry, found path='%s'", trait_name, trait_path));
 
 		///reminder of a hard fought battle. this guard exists so that if get_local_trait
 		///some-fucking-how missed a trait actually declared in this same file, we don't accidentally
@@ -295,13 +296,24 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 	GDScriptParser::DataType walk_type = target_type;
 	while (ok) {
 		StringName walk_key = _impl_target_key(walk_type);
+
+		///if this walk step IS a class declared in the file we're currently analyzing, skip the
+		///path-based force-resolve entirely, because comparing derived paths as strings here risks a
+		///normalisation mismatch that force-resolves our own file MID FUCKING ANALYSIS, 
+		///which is exactly the reentrancy footgun the trait lookup code above already 
+		///learnt the hard fucking way
+		bool is_current_file_class = walk_type.kind == GDScriptParser::DataType::CLASS &&
+				walk_type.class_type != nullptr && parser->has_class(walk_type.class_type);
+
 		if (walk_key != StringName()) {
-			String owning_path = _owning_path_for_type(walk_type);
-			if (!owning_path.is_empty() && !GDScript::is_canonically_equal_paths(owning_path, parser->get_script_path())) {
-				///force that file fully resolved so its own impls (and thus its own claims)
-				///actually exist before we go trusting the registry for its type key
-				Error dep_err = OK;
-				GDScriptCache::get_parser(owning_path, GDScriptParserRef::FULLY_SOLVED, dep_err, parser->get_script_path());
+			if (!is_current_file_class) {
+				String owning_path = _owning_path_for_type(walk_type);
+				if (!owning_path.is_empty() && !GDScript::is_canonically_equal_paths(owning_path, parser->get_script_path())) {
+					///force that file fully resolved so its own impls (and thus its own claims)
+					///actually exist before we go trusting the registry for its type key
+					Error dep_err = OK;
+					GDScriptCache::get_parser(owning_path, GDScriptParserRef::FULLY_SOLVED, dep_err, parser->get_script_path());
+				}
 			}
 
 			for (const GDScriptCache::GlobalImplClaim& claim : GDScriptCache::get_global_impl_claims(walk_key)) {
@@ -338,6 +350,7 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 	}
 
 	resolved_impls.push_back(gd_impl);
+	p_impl->resolved_gd_impl = gd_impl; ///stash for the compiler, it has no analyzer access of its own
 
 	///register our own claims globally so other files checking THEIR impls against us
 	///actually see what WE provided, not just what's local to their own file.
@@ -476,7 +489,12 @@ bool GDScriptTraitAnalyzer::_type_is_or_inherits(const GDScriptParser::DataType&
 }
 
 StringName GDScriptTraitAnalyzer::_impl_target_key(const GDScriptParser::DataType& p_type) const {
+	if (p_type.kind == GDScriptParser::DataType::BUILTIN) {
+		///value types like int/String/Vector2. identified by the Variant::Type enum itself
+		return StringName("builtin::" + itos((int)p_type.builtin_type));
+	}
 	if (p_type.kind == GDScriptParser::DataType::NATIVE) {
+		//native Object-derived classes like Node, RefCounted. identified by name
 		return StringName("native::" + String(p_type.native_type));
 	}
 	if (p_type.kind == GDScriptParser::DataType::CLASS && p_type.class_type != nullptr) {

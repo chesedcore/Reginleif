@@ -30,6 +30,8 @@
 
 #include "gdscript_compiler.h"
 
+#include "gdscript_trait_analyzer.h"
+
 #include "gdscript.h"
 #include "gdscript_analyzer.h"
 #include "gdscript_byte_codegen.h"
@@ -502,6 +504,10 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				_set_error("'self' not present in static function.", p_expression);
 				r_error = ERR_COMPILATION_FAILED;
 				return GDScriptCodeGenerator::Address();
+			}
+			if (codegen.is_native_impl_method) {
+				///no GDScriptInstance* here! self is the implicit leading Variant parameter instead
+				return codegen.parameters[StringName("@impl_self")];
 			}
 			return GDScriptCodeGenerator::Address(GDScriptCodeGenerator::Address::SELF);
 		} break;
@@ -2306,7 +2312,7 @@ Error GDScriptCompiler::_parse_block(CodeGen &codegen, const GDScriptParser::Sui
 	return OK;
 }
 
-GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_script, const GDScriptParser::ClassNode *p_class, const GDScriptParser::FunctionNode *p_func, bool p_for_ready, bool p_for_lambda) {
+GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_script, const GDScriptParser::ClassNode *p_class, const GDScriptParser::FunctionNode *p_func, bool p_for_ready, bool p_for_lambda, bool p_func_is_native_impl_method) {
 	r_error = OK;
 	CodeGen codegen;
 	codegen.generator = memnew(GDScriptByteCodeGenerator);
@@ -2356,6 +2362,17 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 
 	int optional_parameters = 0;
 	GDScriptCodeGenerator::Address vararg_addr;
+
+	if (p_func_is_native_impl_method) {
+		///implicit leading `self` slot. untyped (Variant), no default, invisible to method_info
+		///so reflection/autocomplete/error/whatever_the_fuck messages never show this. 
+		///codegen.parameters gets an entry keyed by a name no GDScript identifier 
+		///can ever collide with.
+		GDScriptDataType self_type; ///VARIANT kind by default
+		uint32_t self_addr = codegen.generator->add_parameter("@impl_self", false, self_type);
+		codegen.parameters[StringName("@impl_self")] = GDScriptCodeGenerator::Address(GDScriptCodeGenerator::Address::FUNCTION_PARAMETER, self_addr, self_type);
+		codegen.is_native_impl_method = true;
+	}
 
 	if (p_func) {
 		for (int i = 0; i < p_func->parameters.size(); i++) {
@@ -3070,6 +3087,33 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 					}
 				}
 			}
+		}
+	}
+
+	///compile impl-provided methods!  these are funcs from `impl Trait for X` blocks, stashed by
+	///the trait analyzer onto the ImplNode itself since we've got no analyzer handle of our own :sob:
+	///what the fuck is this architecture
+	for (const GDScriptParser::ImplNode* impl_node : p_class->impls) {
+		if (impl_node == nullptr || impl_node->resolved_gd_impl.is_null()) {
+			continue; ///impl failed analysis earlier, nothing valid to compile
+		}
+
+		const GDScriptParser::DataType& impl_target = impl_node->resolved_gd_impl->impl_target_type;
+
+		bool is_builtin_target = impl_target.kind == GDScriptParser::DataType::BUILTIN;
+		for (const KeyValue<StringName, GDScriptParser::FunctionNode*>& E : impl_node->resolved_gd_impl->provided_methods) {
+			Error err = OK;
+			GDScriptFunction* impl_function = _parse_function(err, p_script, p_class, E.value, false, false, is_builtin_target);
+			if (err) {
+				return err;
+			}
+
+			if (is_builtin_target) {
+				impl_function->set_is_native_impl_method(true);
+				GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
+			}
+			///CLASS-target impls need nothing extra here -- _parse_function() already did
+			///`p_script->member_functions[func_name] = gd_function;` same as any ordinary method
 		}
 	}
 

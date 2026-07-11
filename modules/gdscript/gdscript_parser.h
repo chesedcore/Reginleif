@@ -51,6 +51,9 @@
 #include "core/string/string_builder.h"
 #endif
 
+
+class GDScriptImpl;
+
 class GDScriptParser {
 	struct AnnotationInfo;
 
@@ -1196,6 +1199,11 @@ public:
 		TypeNode* impl_target_type = nullptr;      ///which type we're implementing this trait for (null if it's 'in-class' impl)
 		Vector<FunctionNode*> methods;             ///the provided method implementations
 		bool trait_owns_this_impl = false;         ///true if this is `impl Trait for Type` in the trait file itself
+
+		///stashed here by GDScriptTraitAnalyzer::resolve_impl() once it's done, so the compiler
+		///can come back later and actually compile+register provided_methods without needing
+		///its own handle to the analyzer at all
+		Ref<GDScriptImpl> resolved_gd_impl;
 
 		ImplNode() {
 			type = IMPL;
