@@ -467,6 +467,8 @@ class GDScriptLanguage : public ScriptLanguage {
 
 	HashMap<StringName, HashMap<StringName, GDScriptFunction*>> native_class_impl_methods;
 
+	HashMap<StringName, HashMap<StringName, GDScriptFunction*>> script_class_impl_methods;
+
 	///"dont rewalk the entire type tree just to find an impl" cache
 	mutable HashMap<StringName, HashMap<StringName, GDScriptFunction*>> native_class_impl_method_cache;
 
@@ -487,6 +489,10 @@ public:
 	void unregister_native_class_impl_methods_for_function(GDScriptFunction* p_function);
 	bool has_native_class_impl_methods(const StringName& p_native_class) const;
 	GDScriptFunction* get_native_class_impl_method(const StringName& p_native_class, const StringName& p_method_name) const;
+
+	void register_script_class_impl_method(const StringName& p_script_class, const StringName& p_method_name, GDScriptFunction* p_function);
+	void unregister_script_class_impl_methods_for_function(GDScriptFunction* p_function);
+	GDScriptFunction* get_script_class_impl_method(const StringName& p_script_class, const StringName& p_method_name) const;
 
 	GDScriptFunction* find_native_class_impl_method_cached(const StringName& p_concrete_class, const StringName& p_method_name) const;
 

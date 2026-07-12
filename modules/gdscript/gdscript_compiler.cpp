@@ -364,6 +364,15 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 							gen->write_get_named(temp, identifier, self);
 							return temp;
 						}
+
+						if (in->get_datatype().kind == GDScriptParser::DataType::BUILTIN && in->get_datatype().builtin_type == Variant::CALLABLE) {
+							///the analyser resolved this as a trait impl method callable. remember to fetch it through
+							///GET_NAMED so the VM can build the right GDScriptImplCallable for self
+							GDScriptCodeGenerator::Address temp = codegen.add_temporary();
+							GDScriptCodeGenerator::Address self(GDScriptCodeGenerator::Address::SELF);
+							gen->write_get_named(temp, identifier, self);
+							return temp;
+						}
 					}
 				} break;
 				case GDScriptParser::IdentifierNode::MEMBER_CONSTANT:
@@ -3108,9 +3117,11 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 		const GDScriptParser::DataType& impl_target = impl_node->resolved_gd_impl->impl_target_type;
 
 		bool is_builtin_target = impl_target.kind == GDScriptParser::DataType::BUILTIN;
+		bool is_native_class_target = impl_target.kind == GDScriptParser::DataType::NATIVE;
+		bool is_native_impl_target = is_builtin_target || is_native_class_target;
 		for (const KeyValue<StringName, GDScriptParser::FunctionNode*>& E : impl_node->resolved_gd_impl->provided_methods) {
 			Error err = OK;
-			GDScriptFunction* impl_function = _parse_function(err, p_script, p_class, E.value, false, false, is_builtin_target);
+			GDScriptFunction* impl_function = _parse_function(err, p_script, p_class, E.value, false, false, is_native_impl_target);
 			if (err) {
 				return err;
 			}
@@ -3118,6 +3129,9 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 			if (is_builtin_target) {
 				impl_function->set_is_native_impl_method(true);
 				GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
+			} else if (is_native_class_target) {
+				impl_function->set_is_native_impl_method(true);
+				GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, E.key, impl_function);
 			}
 			///CLASS-target impls need nothing extra here, _parse_function() already did
 			///`p_script->member_functions[func_name] = gd_function;` same as any ordinary method
@@ -3377,8 +3391,8 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 	const GDScriptParser::ClassNode* root = parser->get_tree();
 
 	///traits are contracts only, yeah, i know, so they don't get ordinary script classes,
-	///but their builtin-target impl methods still need bytecode registered
-	///before another script can call 3.yap() at runtime. make sure that happens in here
+	///but their builtin/native/script-class-target impl methods still need bytecode registered
+	///before another script can call 3.yap(), node.yap(), or demo.yap() at runtime. make sure that happens in here
 	if (parser->is_trait_script()) {
 		const GDScriptParser::TraitNode* trait = parser->get_trait_tree();
 		if (trait != nullptr && root != nullptr) {
@@ -3388,7 +3402,10 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 				}
 
 				const GDScriptParser::DataType& impl_target = impl_node->resolved_gd_impl->impl_target_type;
-				if (impl_target.kind != GDScriptParser::DataType::BUILTIN) {
+				bool is_builtin_target = impl_target.kind == GDScriptParser::DataType::BUILTIN;
+				bool is_native_class_target = impl_target.kind == GDScriptParser::DataType::NATIVE;
+				bool is_script_class_target = impl_target.kind == GDScriptParser::DataType::CLASS && impl_target.class_type != nullptr;
+				if (!is_builtin_target && !is_native_class_target && !is_script_class_target) {
 					continue;
 				}
 
@@ -3399,7 +3416,13 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 						return err;
 					}
 					impl_function->set_is_native_impl_method(true);
-					GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
+					if (is_builtin_target) {
+						GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
+					} else if (is_native_class_target) {
+						GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, E.key, impl_function);
+					} else {
+						GDScriptLanguage::get_singleton()->register_script_class_impl_method(impl_target.class_type->fqcn, E.key, impl_function);
+					}
 				}
 			}
 		}

@@ -1979,6 +1979,22 @@ Variant GDScriptInstance::callp(const StringName &p_method, const Variant **p_ar
 		sptr = sptr->base.ptr();
 	}
 
+	sptr = script.ptr();
+	while (sptr) {
+		GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->get_script_class_impl_method(sptr->get_fully_qualified_name(), p_method);
+		if (impl_function != nullptr) {
+			const int total_argc = p_argcount + 1;
+			const Variant** impl_argptrs = (const Variant**)alloca(sizeof(Variant*) * total_argc);
+			Variant self = owner;
+			impl_argptrs[0] = &self;
+			for (int i = 0; i < p_argcount; i++) {
+				impl_argptrs[i + 1] = p_args[i];
+			}
+			return impl_function->call(nullptr, impl_argptrs, total_argc, r_error);
+		}
+		sptr = sptr->base.ptr();
+	}
+
 	r_error.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
 	return Variant();
 }
@@ -2932,6 +2948,43 @@ void GDScriptLanguage::unregister_native_class_impl_methods_for_function(GDScrip
 	}
 	///clear cache onteardown
 	native_class_impl_method_cache.clear();
+}
+
+
+void GDScriptLanguage::register_script_class_impl_method(const StringName& p_script_class, const StringName& p_method_name, GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	script_class_impl_methods[p_script_class][p_method_name] = p_function;
+}
+
+void GDScriptLanguage::unregister_script_class_impl_methods_for_function(GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	for (HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::Iterator E = script_class_impl_methods.begin(); E;) {
+		HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::Iterator next = E;
+		++next;
+		HashMap<StringName, GDScriptFunction*>& methods = E->value;
+		for (HashMap<StringName, GDScriptFunction*>::Iterator M = methods.begin(); M;) {
+			HashMap<StringName, GDScriptFunction*>::Iterator next_m = M;
+			++next_m;
+			if (M->value == p_function) {
+				methods.remove(M);
+			}
+			M = next_m;
+		}
+		if (methods.is_empty()) {
+			script_class_impl_methods.remove(E);
+		}
+		E = next;
+	}
+}
+
+GDScriptFunction* GDScriptLanguage::get_script_class_impl_method(const StringName& p_script_class, const StringName& p_method_name) const {
+	MutexLock lock(mutex);
+	HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::ConstIterator E = script_class_impl_methods.find(p_script_class);
+	if (!E) {
+		return nullptr;
+	}
+	HashMap<StringName, GDScriptFunction*>::ConstIterator M = E->value.find(p_method_name);
+	return M ? M->value : nullptr;
 }
 
 GDScriptFunction* GDScriptLanguage::find_native_class_impl_method_cached(const StringName& p_concrete_class, const StringName& p_method_name) const {

@@ -1374,20 +1374,39 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				*dst = src->get_named(*index, valid);
 #endif
 				if (!valid) {
-					///not a real property, mirrors the native_impl_function fallback already used 
+					///not a real property, mirrors the native_impl_function fallback already used
 					///by OPCODE_CALL
 					Variant::Type base_type = src->get_type();
+					GDScriptFunction* impl_function = nullptr;
 					if (base_type != Variant::OBJECT && GDScriptLanguage::get_singleton()->has_native_impl_methods(base_type)) {
-						GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->get_native_impl_method(base_type, *index);
-						if (impl_function != nullptr) {
-							GDScriptImplCallable* callable = memnew(GDScriptImplCallable(*src, impl_function));
-#ifdef DEBUG_ENABLED
-							ret = Callable(callable);
-#else
-							*dst = Callable(callable);
-#endif
-							valid = true;
+						impl_function = GDScriptLanguage::get_singleton()->get_native_impl_method(base_type, *index);
+					} else if (base_type == Variant::OBJECT) {
+						bool was_freed = false;
+						Object* obj = src->get_validated_object_with_check(was_freed);
+						if (obj != nullptr && !was_freed) {
+							impl_function = GDScriptLanguage::get_singleton()->find_native_class_impl_method_cached(obj->get_class_name(), *index);
+							if (impl_function == nullptr && obj->get_script_instance() != nullptr) {
+								Ref<Script> script = obj->get_script_instance()->get_script();
+								GDScript* gdscript = Object::cast_to<GDScript>(script.ptr());
+								while (gdscript != nullptr) {
+									impl_function = GDScriptLanguage::get_singleton()->get_script_class_impl_method(gdscript->get_fully_qualified_name(), *index);
+									if (impl_function != nullptr) {
+										break;
+									}
+				///genuinely sorry for the crazy indents, i'll fix it soon i swear :sob:
+									gdscript = gdscript->base.ptr();
+								}
+							}
 						}
+					}
+					if (impl_function != nullptr) {
+						GDScriptImplCallable* callable = memnew(GDScriptImplCallable(*src, impl_function));
+#ifdef DEBUG_ENABLED
+						ret = Callable(callable);
+#else
+						*dst = Callable(callable);
+#endif
+						valid = true;
 					}
 				}
 #ifdef DEBUG_ENABLED

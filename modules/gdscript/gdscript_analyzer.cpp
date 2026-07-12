@@ -249,22 +249,40 @@ static StringName impl_target_key_from_datatype(const GDScriptParser::DataType& 
 ///of its native ancestors (`impl for Node`, reachable since Bumfuck extends Node2D extends
 /// ... extends Node). yippee. impl_target_key_from_datatype() only ever produces one or the other
 ///key, so this checks every key a CLASS type could plausibly match against
+static bool has_global_impl_method_claim_for_native_chain(StringName p_native_type, const StringName& p_method_name) {
+	while (p_native_type != StringName()) {
+		StringName native_key = StringName("native::" + String(p_native_type));
+		if (GDScriptCache::has_global_impl_method_claim(native_key, p_method_name)) {
+			return true;
+		}
+		p_native_type = ClassDB::get_parent_class(p_native_type);
+	}
+	return false;
+}
+
 static bool has_global_impl_method_claim_for_type(const GDScriptParser::DataType& p_type, const StringName& p_method_name) {
 	StringName direct_key = impl_target_key_from_datatype(p_type);
 	if (direct_key != StringName() && GDScriptCache::has_global_impl_method_claim(direct_key, p_method_name)) {
 		return true;
 	}
 
+	if (p_type.kind == GDScriptParser::DataType::NATIVE) {
+		return has_global_impl_method_claim_for_native_chain(ClassDB::get_parent_class(p_type.native_type), p_method_name);
+	}
+
 	if (p_type.kind == GDScriptParser::DataType::CLASS) {
 		GDScriptParser::ClassNode* current = p_type.class_type;
 		while (current != nullptr && current->base_type.kind == GDScriptParser::DataType::CLASS) {
 			current = current->base_type.class_type;
+			if (current != nullptr) {
+				StringName script_key = StringName("class::" + current->fqcn);
+				if (GDScriptCache::has_global_impl_method_claim(script_key, p_method_name)) {
+					return true;
+				}
+			}
 		}
 		if (current != nullptr && current->base_type.kind == GDScriptParser::DataType::NATIVE) {
-			StringName native_key = StringName("native::" + String(current->base_type.native_type));
-			if (GDScriptCache::has_global_impl_method_claim(native_key, p_method_name)) {
-				return true;
-			}
+			return has_global_impl_method_claim_for_native_chain(current->base_type.native_type, p_method_name);
 		}
 	}
 
@@ -5738,6 +5756,21 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 			p_identifier->source = GDScriptParser::IdentifierNode::MEMBER_CONSTANT;
 			return;
 		}
+	}
+
+	GDScriptParser::FunctionNode* impl_method = trait_analyzer != nullptr ? trait_analyzer->find_impl_method(base, name) : nullptr;
+	if (impl_method != nullptr) {
+		p_identifier->set_datatype(make_callable_type(impl_method->info));
+		p_identifier->source = GDScriptParser::IdentifierNode::INHERITED_VARIABLE;
+		return;
+	}
+
+	if (has_global_impl_method_claim_for_type(base, name)) {
+		MethodInfo method_info;
+		method_info.name = name;
+		p_identifier->set_datatype(make_callable_type(method_info));
+		p_identifier->source = GDScriptParser::IdentifierNode::INHERITED_VARIABLE;
+		return;
 	}
 
 	// Check native members. No need for native class recursion because Node exposes all Object's properties.

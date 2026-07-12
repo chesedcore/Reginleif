@@ -73,7 +73,7 @@ CallableCustom::CompareLessFunc GDScriptImplCallable::get_compare_less_func() co
 }
 
 ObjectID GDScriptImplCallable::get_object() const {
-	// No backing Object for a builtin-type impl method; nothing to return.
+	/// TODO: Maybe think if we could return the implicit captured base here?
 	return ObjectID();
 }
 
