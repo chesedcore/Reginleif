@@ -488,8 +488,28 @@ bool GDScriptTraitAnalyzer::_type_is_or_inherits(const GDScriptParser::DataType&
 		return false;
 	}
 
-	if (p_target_type.kind == GDScriptParser::DataType::NATIVE && p_type.native_type != StringName()) {
-		return ClassDB::is_parent_class(p_type.native_type, p_target_type.native_type);
+	if (p_target_type.kind == GDScriptParser::DataType::NATIVE) {
+		StringName native_ancestor = p_type.native_type;
+
+		if (native_ancestor == StringName() && p_type.kind == GDScriptParser::DataType::CLASS) {
+			///a script class doesn't carry its own, native_type directly, 
+			///so walk up its CLASS chain until we bottom out at the first NATIVE ancestor, 
+			///then compare from there. this is what lets `impl for <builtin>` 
+			///be reachable via implicit self on a Node-or-whatever-derived script
+			GDScriptParser::ClassNode* current = p_type.class_type;
+			while (current != nullptr && current->base_type.kind == GDScriptParser::DataType::CLASS) {
+				current = current->base_type.class_type;
+			}
+			if (current != nullptr && current->base_type.kind == GDScriptParser::DataType::NATIVE) {
+				native_ancestor = current->base_type.native_type;
+			}
+		}
+
+		if (native_ancestor == StringName()) {
+			return false;
+		}
+
+		return ClassDB::is_parent_class(native_ancestor, p_target_type.native_type);
 	}
 
 	return false;
@@ -507,14 +527,14 @@ StringName GDScriptTraitAnalyzer::_impl_target_key(const GDScriptParser::DataTyp
 	if (p_type.kind == GDScriptParser::DataType::CLASS && p_type.class_type != nullptr) {
 		return StringName("class::" + p_type.class_type->fqcn);
 	}
-	return StringName(); //not a type we do cross-file impl tracking for
+	return StringName(); ///not a type we do cross-file impl tracking for
 }
 
 String GDScriptTraitAnalyzer::_owning_path_for_type(const GDScriptParser::DataType& p_type) const {
 	if (p_type.kind == GDScriptParser::DataType::CLASS && p_type.class_type != nullptr) {
 		return p_type.class_type->fqcn.get_slice("::", 0);
 	}
-	return String(); //natives don't live in any file, nothing to force-resolve
+	return String(); ///natives don't live in any file, nothing to force-resolve
 }
 
 bool GDScriptTraitAnalyzer::type_satisfies_trait(const GDScriptParser::DataType& p_concrete_type, const Ref<GDScriptTrait>& p_trait) const {

@@ -409,6 +409,63 @@ Vector<GDScriptCache::GlobalImplClaim> GDScriptCache::get_global_impl_claims(con
 	return claims != nullptr ? *claims : Vector<GlobalImplClaim>();
 }
 
+bool GDScriptCache::has_global_impl_method_claim(const StringName& p_target_type_key, const StringName& p_method_name) {
+	{
+		MutexLock lock(singleton->mutex);
+		const Vector<GlobalImplClaim>* claims = singleton->global_impls.getptr(p_target_type_key);
+		if (claims != nullptr) {
+			for (const GlobalImplClaim& claim : *claims) {
+				if (claim.method_name == p_method_name) {
+					return true;
+				}
+			}
+		}
+	}
+
+	ensure_global_impls_scanned();
+
+	MutexLock lock(singleton->mutex);
+	const Vector<GlobalImplClaim>* claims = singleton->global_impls.getptr(p_target_type_key);
+	if (claims == nullptr) {
+		return false;
+	}
+	for (const GlobalImplClaim& claim : *claims) {
+		if (claim.method_name == p_method_name) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void GDScriptCache::ensure_global_impls_scanned() {
+	{
+		MutexLock lock(singleton->mutex);
+		if (singleton->global_impls_project_scanned || singleton->global_impls_project_scanning) {
+			return;
+		}
+		singleton->global_impls_project_scanning = true;
+	}
+
+	_scan_trait_scripts_in_dir("res://");
+
+	Vector<String> trait_paths;
+	{
+		MutexLock lock(singleton->mutex);
+		for (const KeyValue<StringName, String>& E : singleton->global_traits) {
+			trait_paths.push_back(E.value);
+		}
+	}
+
+	for (const String& path : trait_paths) {
+		Error err = OK;
+		get_full_script(path, err);
+	}
+
+	MutexLock lock(singleton->mutex);
+	singleton->global_impls_project_scanned = true;
+	singleton->global_impls_project_scanning = false;
+}
+
 Ref<GDScriptParserRef> GDScriptCache::get_parser(const String &p_path, GDScriptParserRef::Status p_status, Error &r_error, const String &p_owner) {
 	MutexLock lock(singleton->mutex);
 	Ref<GDScriptParserRef> ref;
@@ -737,6 +794,9 @@ void GDScriptCache::clear() {
 	singleton->static_gdscript_cache.clear();
 	singleton->global_traits.clear();
 	singleton->global_traits_project_scanned = false;
+	singleton->global_impls.clear();
+	singleton->global_impls_project_scanned = false;
+	singleton->global_impls_project_scanning = false;
 }
 
 GDScriptCache::GDScriptCache() {

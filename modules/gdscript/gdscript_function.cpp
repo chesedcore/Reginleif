@@ -229,6 +229,7 @@ GDScriptFunction::GDScriptFunction() {
 	{
 		MutexLock lock(GDScriptLanguage::get_singleton()->mutex);
 		GDScriptLanguage::get_singleton()->function_list.add(&function_list);
+		GDScriptLanguage::get_singleton()->unregister_native_class_impl_methods_for_function(this);
 	}
 #endif
 }

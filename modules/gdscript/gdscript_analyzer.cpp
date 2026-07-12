@@ -31,6 +31,7 @@
 #include "gdscript_analyzer.h"
 
 #include "gdscript.h"
+#include "gdscript_cache.h"
 #include "gdscript_trait_analyzer.h"
 #include "gdscript_utility_callable.h"
 #include "gdscript_utility_functions.h"
@@ -228,6 +229,46 @@ static GDScriptParser::DataType make_builtin_meta_type(Variant::Type p_type) {
 	type.is_constant = true;
 	type.is_meta_type = true;
 	return type;
+}
+
+static StringName impl_target_key_from_datatype(const GDScriptParser::DataType& p_type) {
+	if (p_type.kind == GDScriptParser::DataType::BUILTIN) {
+		return StringName("builtin::" + itos((int)p_type.builtin_type));
+	}
+	if (p_type.kind == GDScriptParser::DataType::NATIVE) {
+		return StringName("native::" + String(p_type.native_type));
+	}
+	if (p_type.kind == GDScriptParser::DataType::CLASS && p_type.class_type != nullptr) {
+		return StringName("class::" + p_type.class_type->fqcn);
+	}
+	return StringName();
+}
+
+///a CLASS-kind base (a user script) can match a global impl claim two different ways...
+///case 1, an impl targeting the script class itself (`impl for Bumfuck`), or an impl targeting one
+///of its native ancestors (`impl for Node`, reachable since Bumfuck extends Node2D extends
+/// ... extends Node). yippee. impl_target_key_from_datatype() only ever produces one or the other
+///key, so this checks every key a CLASS type could plausibly match against
+static bool has_global_impl_method_claim_for_type(const GDScriptParser::DataType& p_type, const StringName& p_method_name) {
+	StringName direct_key = impl_target_key_from_datatype(p_type);
+	if (direct_key != StringName() && GDScriptCache::has_global_impl_method_claim(direct_key, p_method_name)) {
+		return true;
+	}
+
+	if (p_type.kind == GDScriptParser::DataType::CLASS) {
+		GDScriptParser::ClassNode* current = p_type.class_type;
+		while (current != nullptr && current->base_type.kind == GDScriptParser::DataType::CLASS) {
+			current = current->base_type.class_type;
+		}
+		if (current != nullptr && current->base_type.kind == GDScriptParser::DataType::NATIVE) {
+			StringName native_key = StringName("native::" + String(current->base_type.native_type));
+			if (GDScriptCache::has_global_impl_method_claim(native_key, p_method_name)) {
+				return true;
+			}
+		}
+	}
+
+	return false;
 }
 
 /// [Monarch] Reginleif addition. Substitutes GENERIC_TYPE placeholders with concrete types wherever possible 
@@ -5035,8 +5076,14 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				reduce_identifier_from_base(callee_id, &base_type);
 				GDScriptParser::DataType callee_datatype = callee_id->get_datatype();
 				if (callee_datatype.is_set() && !callee_datatype.is_variant()) {
+					bool is_impl_callable = callee_datatype.builtin_type == Variant::CALLABLE && (
+							(trait_analyzer != nullptr && trait_analyzer->find_impl_method(base_type, p_call->function_name) != nullptr) ||
+							has_global_impl_method_claim_for_type(base_type, p_call->function_name));
 					found = true;
-					if (callee_datatype.builtin_type == Variant::CALLABLE) {
+					if (is_impl_callable) {
+						///the subscript reducer thingy exposes impl methods as Callables so member lookup succeeds
+						///but direct method-call syntax should still be accepted for type-safe dispatch
+					} else if (callee_datatype.builtin_type == Variant::CALLABLE) {
 						push_error(vformat(R"*(Name "%s" is a Callable. You can call it with "%s.call()" instead.)*", p_call->function_name, p_call->function_name), p_call->callee);
 					} else {
 						push_error(vformat(R"*(Name "%s" called as a function but is a "%s".)*", p_call->function_name, callee_datatype.to_string()), p_call->callee);
@@ -5049,6 +5096,16 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				}
 			}
 		}
+		if (!found) {
+			if (trait_analyzer != nullptr && trait_analyzer->find_impl_method(base_type, p_call->function_name) != nullptr) {
+				found = true;
+			} else {
+				if (has_global_impl_method_claim_for_type(base_type, p_call->function_name)) {
+					found = true;
+				}
+			}
+		}
+
 		if (!found && (is_self || (base_type.is_hard_type() && base_type.kind == GDScriptParser::DataType::BUILTIN))) {
 			String base_name = is_self && !p_call->is_super ? "self" : base_type.to_string();
 #ifdef SUGGEST_GODOT4_RENAMES
@@ -5447,6 +5504,20 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 						p_identifier->set_datatype(make_callable_type(Variant::get_builtin_method_info(base.builtin_type, name)));
 						return;
 					}
+
+					GDScriptParser::FunctionNode* impl_method = trait_analyzer != nullptr ? trait_analyzer->find_impl_method(base, name) : nullptr;
+					if (impl_method != nullptr) {
+						p_identifier->set_datatype(make_callable_type(impl_method->info));
+						return;
+					}
+
+					if (has_global_impl_method_claim_for_type(base, name)) {
+						MethodInfo method_info;
+						method_info.name = name;
+						p_identifier->set_datatype(make_callable_type(method_info));
+						return;
+					}
+
 					if (base.is_hard_type()) {
 #ifdef SUGGEST_GODOT4_RENAMES
 						String rename_hint;
@@ -6226,14 +6297,25 @@ void GDScriptAnalyzer::reduce_subscript(GDScriptParser::SubscriptNode *p_subscri
 					p_subscript->reduced_value = p_subscript->attribute->reduced_value;
 				}
 			} else if (!base_type.is_meta_type || !base_type.is_constant) {
-				valid = base_type.kind != GDScriptParser::DataType::BUILTIN;
+				GDScriptParser::FunctionNode* impl_method = (trait_analyzer != nullptr && base_type.kind == GDScriptParser::DataType::BUILTIN) ?
+						trait_analyzer->find_impl_method(base_type, p_subscript->attribute->name) :
+						nullptr;
+
+				if (impl_method != nullptr) {
+					valid = true;
+					result_type.kind = GDScriptParser::DataType::BUILTIN;
+					result_type.builtin_type = Variant::CALLABLE;
+					result_type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+				} else {
+					valid = base_type.kind != GDScriptParser::DataType::BUILTIN;
 #ifdef DEBUG_ENABLED
-				if (valid) {
-					parser->push_warning(p_subscript, GDScriptWarning::UNSAFE_PROPERTY_ACCESS, p_subscript->attribute->name, base_type.to_string());
-				}
+					if (valid) {
+						parser->push_warning(p_subscript, GDScriptWarning::UNSAFE_PROPERTY_ACCESS, p_subscript->attribute->name, base_type.to_string());
+					}
 #endif // DEBUG_ENABLED
-				result_type.kind = GDScriptParser::DataType::VARIANT;
-				mark_node_unsafe(p_subscript);
+					result_type.kind = GDScriptParser::DataType::VARIANT;
+					mark_node_unsafe(p_subscript);
+				}
 			}
 		}
 

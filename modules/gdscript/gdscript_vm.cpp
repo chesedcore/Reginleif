@@ -31,6 +31,7 @@
 #include "gdscript.h"
 #include "gdscript_function.h"
 #include "gdscript_lambda_callable.h"
+#include "gdscript_impl_callable.h"
 
 #include "core/object/class_db.h"
 #include "core/os/os.h"
@@ -1369,10 +1370,26 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 #ifdef DEBUG_ENABLED
 				//allow better error message in cases where src and dst are the same stack position
 				Variant ret = src->get_named(*index, valid);
-
 #else
 				*dst = src->get_named(*index, valid);
 #endif
+				if (!valid) {
+					///not a real property, mirrors the native_impl_function fallback already used 
+					///by OPCODE_CALL
+					Variant::Type base_type = src->get_type();
+					if (base_type != Variant::OBJECT && GDScriptLanguage::get_singleton()->has_native_impl_methods(base_type)) {
+						GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->get_native_impl_method(base_type, *index);
+						if (impl_function != nullptr) {
+							GDScriptImplCallable* callable = memnew(GDScriptImplCallable(*src, impl_function));
+#ifdef DEBUG_ENABLED
+							ret = Callable(callable);
+#else
+							*dst = Callable(callable);
+#endif
+							valid = true;
+						}
+					}
+				}
 #ifdef DEBUG_ENABLED
 				if (!valid) {
 					err_text = "Invalid access to property or key '" + index->string() + "' on a base object of type '" + _get_var_type(src) + "'.";
@@ -2187,6 +2204,15 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				GDScriptFunction* native_impl_function = nullptr;
 				if (base_type != Variant::OBJECT && !Variant::has_builtin_method(base_type, *methodname) && GDScriptLanguage::get_singleton()->has_native_impl_methods(base_type)) {
 					native_impl_function = GDScriptLanguage::get_singleton()->get_native_impl_method(base_type, *methodname);
+				} else if (base_type == Variant::OBJECT) {
+					bool was_freed = false;
+					Object* obj = base->get_validated_object_with_check(was_freed);
+					if (obj != nullptr && !was_freed && !ClassDB::has_method(obj->get_class_name(), *methodname, false)) {
+						///check whether some `impl for native` up the inheritance chain provides it...
+						///the walk itself is memoised per (class, method), so repeated calls don't rewalk the entire fucking
+						///ClassDB::get_parent_class type tree every time you need to peek into an impl method 
+						native_impl_function = GDScriptLanguage::get_singleton()->find_native_class_impl_method_cached(obj->get_class_name(), *methodname);
+					}
 				}
 
 				Variant temp_ret;

@@ -729,7 +729,14 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 										gen->write_call(result, base, call->function_name, arguments);
 									}
 								} else if (base.type.kind == GDScriptDataType::BUILTIN) {
-									gen->write_call_builtin_type(result, base, base.type.builtin_type, call->function_name, arguments);
+									if (Variant::has_builtin_method(base.type.builtin_type, call->function_name)) {
+										gen->write_call_builtin_type(result, base, base.type.builtin_type, call->function_name, arguments);
+									} else {
+										///not a real Variant builtin method, likely an `impl` method on a builtin type
+										///fallback to dynamic dispatch, which knows how to fuck with native impl methods
+										///via GDScriptLanguage::get_native_impl_method() at runtime
+										gen->write_call(result, base, call->function_name, arguments);
+									}
 								} else {
 									gen->write_call(result, base, call->function_name, arguments);
 								}
@@ -3112,7 +3119,7 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 				impl_function->set_is_native_impl_method(true);
 				GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
 			}
-			///CLASS-target impls need nothing extra here -- _parse_function() already did
+			///CLASS-target impls need nothing extra here, _parse_function() already did
 			///`p_script->member_functions[func_name] = gd_function;` same as any ordinary method
 		}
 	}
@@ -3367,15 +3374,39 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 	parser = p_parser;
 	main_script = p_script;
 
-	///traits are contracts only, we don't want to ever
-	///instantiate them, so nothing to compile
+	const GDScriptParser::ClassNode* root = parser->get_tree();
+
+	///traits are contracts only, yeah, i know, so they don't get ordinary script classes,
+	///but their builtin-target impl methods still need bytecode registered
+	///before another script can call 3.yap() at runtime. make sure that happens in here
 	if (parser->is_trait_script()) {
+		const GDScriptParser::TraitNode* trait = parser->get_trait_tree();
+		if (trait != nullptr && root != nullptr) {
+			for (const GDScriptParser::ImplNode* impl_node : trait->impls) {
+				if (impl_node == nullptr || impl_node->resolved_gd_impl.is_null()) {
+					continue;
+				}
+
+				const GDScriptParser::DataType& impl_target = impl_node->resolved_gd_impl->impl_target_type;
+				if (impl_target.kind != GDScriptParser::DataType::BUILTIN) {
+					continue;
+				}
+
+				for (const KeyValue<StringName, GDScriptParser::FunctionNode*>& E : impl_node->resolved_gd_impl->provided_methods) {
+					Error err = OK;
+					GDScriptFunction* impl_function = _parse_function(err, p_script, root, E.value, false, false, true);
+					if (err) {
+						return err;
+					}
+					impl_function->set_is_native_impl_method(true);
+					GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
+				}
+			}
+		}
 		p_script->valid = true;
 		return OK;
 	}
 
-
-	const GDScriptParser::ClassNode *root = parser->get_tree();
 
 	source = p_script->get_path();
 

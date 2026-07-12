@@ -2906,6 +2906,78 @@ GDScriptFunction* GDScriptLanguage::get_native_impl_method(Variant::Type p_type,
 	return M ? M->value : nullptr;
 }
 
+void GDScriptLanguage::register_native_class_impl_method(const StringName& p_native_class, const StringName& p_method_name, GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	native_class_impl_methods[p_native_class][p_method_name] = p_function;
+}
+
+void GDScriptLanguage::unregister_native_class_impl_methods_for_function(GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	for (HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::Iterator E = native_class_impl_methods.begin(); E;) {
+		HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::Iterator next = E;
+		++next;
+		HashMap<StringName, GDScriptFunction*>& methods = E->value;
+		for (HashMap<StringName, GDScriptFunction*>::Iterator M = methods.begin(); M;) {
+			HashMap<StringName, GDScriptFunction*>::Iterator next_m = M;
+			++next_m;
+			if (M->value == p_function) {
+				methods.remove(M);
+			}
+			M = next_m;
+		}
+		if (methods.is_empty()) {
+			native_class_impl_methods.remove(E);
+		}
+		E = next;
+	}
+	///clear cache onteardown
+	native_class_impl_method_cache.clear();
+}
+
+GDScriptFunction* GDScriptLanguage::find_native_class_impl_method_cached(const StringName& p_concrete_class, const StringName& p_method_name) const {
+	{
+		MutexLock lock(mutex);
+		HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::ConstIterator cached_class = native_class_impl_method_cache.find(p_concrete_class);
+		if (cached_class) {
+			HashMap<StringName, GDScriptFunction*>::ConstIterator cached_method = cached_class->value.find(p_method_name);
+			if (cached_method) {
+				return cached_method->value;
+			}
+		}
+	}
+
+	StringName walk_class = p_concrete_class;
+	GDScriptFunction* found = nullptr;
+	while (walk_class != StringName()) {
+		if (has_native_class_impl_methods(walk_class)) {
+			found = get_native_class_impl_method(walk_class, p_method_name);
+			if (found != nullptr) {
+				break;
+			}
+		}
+		walk_class = ClassDB::get_parent_class(walk_class);
+	}
+
+	MutexLock lock(mutex);
+	native_class_impl_method_cache[p_concrete_class][p_method_name] = found;
+	return found;
+}
+
+bool GDScriptLanguage::has_native_class_impl_methods(const StringName& p_native_class) const {
+	MutexLock lock(mutex);
+	return native_class_impl_methods.has(p_native_class);
+}
+
+GDScriptFunction* GDScriptLanguage::get_native_class_impl_method(const StringName& p_native_class, const StringName& p_method_name) const {
+	MutexLock lock(mutex);
+	HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::ConstIterator E = native_class_impl_methods.find(p_native_class);
+	if (!E) {
+		return nullptr;
+	}
+	HashMap<StringName, GDScriptFunction*>::ConstIterator M = E->value.find(p_method_name);
+	return M ? M->value : nullptr;
+}
+
 GDScriptLanguage::CallLevel *GDScriptLanguage::_get_stack_level(uint32_t p_level) {
 	ERR_FAIL_UNSIGNED_INDEX_V(p_level, _call_stack_size, nullptr);
 	CallLevel *level = _call_stack; // Start from top

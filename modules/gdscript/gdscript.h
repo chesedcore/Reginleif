@@ -464,6 +464,12 @@ class GDScriptLanguage : public ScriptLanguage {
 	///
 	HashMap<Variant::Type, HashMap<StringName, GDScriptFunction*>> native_impl_methods;
 
+
+	HashMap<StringName, HashMap<StringName, GDScriptFunction*>> native_class_impl_methods;
+
+	///"dont rewalk the entire type tree just to find an impl" cache
+	mutable HashMap<StringName, HashMap<StringName, GDScriptFunction*>> native_class_impl_method_cache;
+
 #ifdef TOOLS_ENABLED
 	void _extension_loaded(const Ref<GDExtension> &p_extension);
 	void _extension_unloading(const Ref<GDExtension> &p_extension);
@@ -475,6 +481,14 @@ public:
 	void unregister_native_impl_methods_for_function(GDScriptFunction* p_function);
 	bool has_native_impl_methods(Variant::Type p_type) const;
 	GDScriptFunction* get_native_impl_method(Variant::Type p_type, const StringName& p_method_name) const;
+
+
+	void register_native_class_impl_method(const StringName& p_native_class, const StringName& p_method_name, GDScriptFunction* p_function);
+	void unregister_native_class_impl_methods_for_function(GDScriptFunction* p_function);
+	bool has_native_class_impl_methods(const StringName& p_native_class) const;
+	GDScriptFunction* get_native_class_impl_method(const StringName& p_native_class, const StringName& p_method_name) const;
+
+	GDScriptFunction* find_native_class_impl_method_cached(const StringName& p_concrete_class, const StringName& p_method_name) const;
 
 	bool debug_break(const String &p_error, bool p_allow_continue = true);
 	bool debug_break_parse(const String &p_file, int p_line, const String &p_error);

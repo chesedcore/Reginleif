@@ -119,6 +119,8 @@ private:
 
 	///impl stuff, for cross-file collision detection
 	HashMap<StringName, Vector<GlobalImplClaim>> global_impls; ///target_type_key -> claims on that type
+	bool global_impls_project_scanned = false;
+	bool global_impls_project_scanning = false;
 
 	friend class GDScript;
 	friend class GDScriptParserRef;
@@ -169,6 +171,8 @@ public:
 	static void add_global_impl_claims(const StringName& p_target_type_key, const StringName& p_trait_name, const Vector<StringName>& p_method_names, const String& p_path);
 	static void remove_global_impls_by_path(const String& p_path);
 	static Vector<GlobalImplClaim> get_global_impl_claims(const StringName &p_target_type_key);
+	static bool has_global_impl_method_claim(const StringName& p_target_type_key, const StringName& p_method_name);
+	static void ensure_global_impls_scanned();
 
 	static void clear();
 
