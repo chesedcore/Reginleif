@@ -1108,6 +1108,22 @@ static void _find_global_enums(HashMap<String, ScriptLanguage::CodeCompletionOpt
 	}
 }
 
+static void _list_available_traits(GDScriptParser::CompletionContext& p_context, HashMap<String, ScriptLanguage::CodeCompletionOption>& r_result) {
+	///only provide 'for', because 'impl for Trait'
+	if (p_context.parser && p_context.parser->get_trait_tree()) {
+		ScriptLanguage::CodeCompletionOption option("for", ScriptLanguage::CODE_COMPLETION_KIND_KEYWORD);
+		r_result.insert(option.display, option);
+		return;
+	}
+
+	List<StringName> global_traits;
+	GDScriptCache::get_global_trait_list(&global_traits);
+	for (const StringName& trait_name : global_traits) {
+		ScriptLanguage::CodeCompletionOption option(trait_name, ScriptLanguage::CODE_COMPLETION_KIND_CLASS, ScriptLanguage::LOCATION_OTHER_USER_CODE);
+		r_result.insert(option.display, option);
+	}
+}
+
 static void _list_available_types(bool p_inherit_only, GDScriptParser::CompletionContext &p_context, HashMap<String, ScriptLanguage::CodeCompletionOption> &r_result) {
 	// Built-in Variant Types
 	_find_built_in_variants(r_result);
@@ -1640,6 +1656,7 @@ static void _find_identifiers(const GDScriptParser::CompletionContext &p_context
 	static const char *_keywords_with_space[] = {
 		"and", "not", "or", "in", "as", "class", "class_name", "extends", "is", "func", "signal", "await",
 		"const", "enum", "static", "var", "if", "elif", "else", "for", "match", "when", "while",
+		"trait", "impl",
 		nullptr
 	};
 
@@ -3691,6 +3708,15 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 					}
 				}
 			}
+		} break;
+		case GDScriptParser::COMPLETION_TRAIT_NAME: {
+			_list_available_traits(completion_context, options);
+		} break;
+		case GDScriptParser::COMPLETION_TRAIT_BODY: {
+			ScriptLanguage::CodeCompletionOption func_option("func", ScriptLanguage::CODE_COMPLETION_KIND_KEYWORD);
+			options.insert(func_option.display, func_option);
+			ScriptLanguage::CodeCompletionOption impl_option("impl", ScriptLanguage::CODE_COMPLETION_KIND_KEYWORD);
+			options.insert(impl_option.display, impl_option);
 		} break;
 		case GDScriptParser::COMPLETION_INHERIT_TYPE: {
 			_list_available_types(true, completion_context, options);

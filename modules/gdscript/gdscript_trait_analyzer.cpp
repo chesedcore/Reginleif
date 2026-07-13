@@ -138,6 +138,7 @@ Error GDScriptTraitAnalyzer::resolve_trait(GDScriptParser::TraitNode* p_trait) {
 }
 
 Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
+	print_line(vformat("[TRAIT DEBUG] === resolve_impl ENTRY, p_impl ptr=%s ===", String::num_uint64((uint64_t)p_impl)));
 	ERR_FAIL_NULL_V(p_impl, ERR_INVALID_PARAMETER);
 
 	StringName trait_name;
@@ -206,15 +207,20 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 
 	bool ok = true;
 
+	print_line(vformat("[TRAIT DEBUG] resolve_impl called for trait=%s, p_impl->methods.size()=%d", trait_name, p_impl->methods.size()));
 	for (GDScriptParser::FunctionNode* provided : p_impl->methods) {
+		print_line(vformat("[TRAIT DEBUG] loop iteration, provided ptr=%s", String::num_uint64((uint64_t)provided)));
 		if (provided == nullptr || provided->identifier == nullptr) {
+			print_line("[TRAIT DEBUG]   skip: null provided or null identifier");
 			continue;
 		}
 
 		const StringName method_name = provided->identifier->name;
+		print_line(vformat("[TRAIT DEBUG]   method_name=%s", method_name));
 		analyzer->resolve_function_signature(provided, p_impl);
 
 		if (!trait->has_method(method_name)) {
+			print_line("[TRAIT DEBUG]   trait->has_method returned false");
 			push_error(vformat(R"([Reginleif] Trait "%s" has no method "%s" to implement.)", trait_name, method_name), provided);
 			ok = false;
 			continue;
@@ -224,7 +230,11 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 				trait->required_methods[method_name] :
 				trait->default_methods[method_name];
 
-		if (!_signatures_match(required, provided)) {
+		print_line(vformat("[TRAIT DEBUG]   about to call _signatures_match, required ptr=%s provided ptr=%s", String::num_uint64((uint64_t)required), String::num_uint64((uint64_t)provided)));
+		bool sig_match_result = _signatures_match(required, provided);
+		print_line(vformat("[TRAIT DEBUG]   _signatures_match returned %s", sig_match_result ? "true" : "false"));
+
+		if (!sig_match_result) {
 			push_error(vformat(R"([Reginleif] Method "%s" does not match the signature required by trait "%s".)", method_name, trait_name), provided);
 			ok = false;
 			continue;
@@ -426,11 +436,16 @@ Ref<GDScriptTrait> GDScriptTraitAnalyzer::get_local_trait(const StringName& p_na
 }
 
 bool GDScriptTraitAnalyzer::_signatures_match(GDScriptParser::FunctionNode* p_required, GDScriptParser::FunctionNode* p_provided) {
+	print_line("[TRAIT DEBUG] _signatures_match ENTRY");
 	if (p_required == nullptr || p_provided == nullptr) {
+		print_line("[TRAIT DEBUG] _signatures_match EARLY EXIT: null required or provided");
 		return false;
 	}
 
+	print_line(vformat("[TRAIT DEBUG] required->parameters.size()=%d provided->parameters.size()=%d",
+			p_required->parameters.size(), p_provided->parameters.size()));
 	if (p_required->parameters.size() != p_provided->parameters.size()) {
+		print_line("[TRAIT DEBUG] EARLY EXIT: parameter count mismatch");
 		return false;
 	}
 
@@ -438,11 +453,17 @@ bool GDScriptTraitAnalyzer::_signatures_match(GDScriptParser::FunctionNode* p_re
 		GDScriptParser::DataType required_param_type = p_required->parameters[i]->get_datatype();
 		GDScriptParser::DataType provided_param_type = p_provided->parameters[i]->get_datatype();
 
+		print_line(vformat("[TRAIT DEBUG] param %d: required=%s (set=%d) provided=%s (set=%d)",
+				i,
+				required_param_type.to_string(), (int)required_param_type.is_set(),
+				provided_param_type.to_string(), (int)provided_param_type.is_set()));
+
 		///parameters are contravariant in general, but gdscript doesn't do variance gymnastics
 		///anywhere else either, so we just require them to line up both ways (effectively equal)
 		///if you find this fucky, so do i, congrats!
 		if (!analyzer->is_type_compatible(required_param_type, provided_param_type, false) ||
 				!analyzer->is_type_compatible(provided_param_type, required_param_type, false)) {
+			print_line(vformat("[TRAIT DEBUG] param %d FAILED compatibility check", i));
 			return false;
 		}
 	}
@@ -450,13 +471,19 @@ bool GDScriptTraitAnalyzer::_signatures_match(GDScriptParser::FunctionNode* p_re
 	GDScriptParser::DataType required_return = p_required->get_datatype();
 	GDScriptParser::DataType provided_return = p_provided->get_datatype();
 
+	print_line(vformat("[TRAIT DEBUG] return: required=%s (variant=%d) provided=%s (variant=%d)",
+			required_return.to_string(), (int)required_return.is_variant(),
+			provided_return.to_string(), (int)provided_return.is_variant()));
+
 	///don't allow a Variant return to slip through when a required return is specified
 	if (!required_return.is_variant() && provided_return.is_variant()) {
+		print_line("[TRAIT DEBUG] return FAILED variant check");
 		return false;
 	}
 
 	///return type IS allowed to be covariant! providing something more specific than required is fine.
 	if (!analyzer->is_type_compatible(required_return, provided_return, true)) {
+		print_line("[TRAIT DEBUG] return FAILED compatibility check");
 		return false;
 	}
 

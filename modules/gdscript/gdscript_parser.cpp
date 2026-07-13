@@ -4386,6 +4386,8 @@ GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
 			continue;
 		}
 
+		make_completion_context(COMPLETION_TRAIT_BODY, trait);
+
 		if (match(GDScriptTokenizer::Token::FUNC)) {
 			FunctionNode* method = parse_function(false);
 			if (method == nullptr) { continue; }
@@ -4398,7 +4400,8 @@ GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
 				trait->methods.push_back(method);
 			}
 		} else {
-			push_error(vformat(R"([Reginleif] Unexpected "%s" in trait body. Only "func" declarations are allowed.)", current.get_name()));
+			make_completion_context(COMPLETION_TRAIT_BODY, trait);
+			push_error(vformat(R"([Reginleif] Unexpected "%s" in trait body. Only "func" declarations and "impl for" implementations are allowed.)", current.get_name()));
 			advance();
 		}
 
@@ -4414,6 +4417,8 @@ GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
 
 	///`impl for Type` shorthand: no trait name means "the trait declared in this file".
 	///only legal inside a trait file itself, checked later by the trait analyzer.
+	make_completion_context(COMPLETION_TRAIT_NAME, impl);
+
 	if (!check(GDScriptTokenizer::Token::FOR)) {
 		if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected trait name after "impl".)")) {
 			complete_extents(impl);
@@ -4428,7 +4433,11 @@ GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
 		impl->trait_owns_this_impl = true;
 		impl->impl_target_type = parse_type();
 		if (impl->impl_target_type == nullptr) {
-			push_error(vformat(R"([Reginleif] Expected type after "for" in "impl %s for Type" syntax.)", impl->trait_name->name));
+			if (impl->trait_name != nullptr) {
+				push_error(vformat(R"([Reginleif] Expected type after "for" in "impl %s for Type" syntax.)", impl->trait_name->name));
+			} else {
+				push_error(R"([Reginleif] Expected type after "for" in "impl for Type" syntax.)");
+			}
 			complete_extents(impl);
 			return nullptr;
 		}

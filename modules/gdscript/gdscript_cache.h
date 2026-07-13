@@ -167,6 +167,7 @@ public:
 	static void remove_global_trait_by_path(const String &p_path);
 	static bool is_global_trait(const StringName &p_trait_name);
 	static String get_global_trait_path(const StringName &p_trait_name);
+	static void get_global_trait_list(List<StringName>* r_traits);
 
 	static void add_global_impl_claims(const StringName& p_target_type_key, const StringName& p_trait_name, const Vector<StringName>& p_method_names, const String& p_path);
 	static void remove_global_impls_by_path(const String& p_path);

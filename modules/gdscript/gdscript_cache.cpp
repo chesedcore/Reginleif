@@ -344,6 +344,13 @@ bool GDScriptCache::is_global_trait(const StringName& p_trait_name) {
 	return singleton->global_traits.has(p_trait_name);
 }
 
+void GDScriptCache::get_global_trait_list(List<StringName>* r_traits) {
+	MutexLock lock(singleton->mutex);
+	for (const KeyValue<StringName, String>& E : singleton->global_traits) {
+		r_traits->push_back(E.key);
+	}
+}
+
 String GDScriptCache::get_global_trait_path(const StringName& p_trait_name) {
 	{
 		MutexLock lock(singleton->mutex);
@@ -532,6 +539,10 @@ Ref<GDScriptTrait> GDScriptCache::get_cached_trait(const String &p_path, const S
 	Ref<GDScriptTrait> found = ref->get_analyzer()->get_trait_analyzer()->get_local_trait(p_trait_name);
 	if (found.is_null()) {
 		r_error = ERR_DOES_NOT_EXIST;
+	} else {
+		///pin the parser ref so the AST nodes (FunctionNode*) stay alive
+		///as long as this trait object does
+		found->parser_ref = ref;
 	}
 	return found;
 }
