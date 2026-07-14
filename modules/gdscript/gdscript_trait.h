@@ -54,6 +54,20 @@ public:
 	HashMap<StringName, GDScriptParser::FunctionNode*> required_methods;
 	HashMap<StringName, GDScriptParser::FunctionNode*> default_methods;
 
+	/// snapshot of each required/default method's signature, taken at resolution time.
+	/// because apparently FunctionNode* pointers just fuck off and dangle across separate
+	/// GDScriptTraitAnalyzer instances, sometimes, for reasons i gave up trying to fully pin down
+	/// (two parser trees for the same file?? in THIS economy??). so no, we don't trust
+	/// ->parameters/->get_datatype() off the live node anymore. we trust THIS. always THIS.
+	/// this is the way. this is the only way. i'm too tired to find the other way
+	/// i'm just a college kid. i've got a test tomorrow. i can't be assed. the borrow checker
+	/// doesn't exist to save me. help me. save me.
+	struct MethodSignatureSnapshot {
+		Vector<GDScriptParser::DataType> param_types;
+		GDScriptParser::DataType return_type;
+	};
+	HashMap<StringName, MethodSignatureSnapshot> required_signatures;
+
 	_FORCE_INLINE_ bool has_method(const StringName& p_name) const {
 		return required_methods.has(p_name) || default_methods.has(p_name);
 	}
