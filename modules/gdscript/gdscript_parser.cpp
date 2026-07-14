@@ -4429,7 +4429,7 @@ GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
 	}
 
 	if (match(GDScriptTokenizer::Token::FOR)) {
-		///`impl Trait for Type` form, it's only legal in the trait file itself
+		///`impl for Type` form, it's only legal in the trait file itself
 		impl->trait_owns_this_impl = true;
 		impl->impl_target_type = parse_type();
 		if (impl->impl_target_type == nullptr) {

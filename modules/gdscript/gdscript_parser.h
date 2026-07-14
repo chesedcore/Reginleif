@@ -1198,7 +1198,7 @@ public:
 		IdentifierNode* trait_name = nullptr;      ///name of the trait being implemented
 		TypeNode* impl_target_type = nullptr;      ///which type we're implementing this trait for (null if it's 'in-class' impl)
 		Vector<FunctionNode*> methods;             ///the provided method implementations
-		bool trait_owns_this_impl = false;         ///true if this is `impl Trait for Type` in the trait file itself
+		bool trait_owns_this_impl = false;         ///true if this is `impl for Type` in the trait file itself
 
 		///stashed here by GDScriptTraitAnalyzer::resolve_impl() once it's done, so the compiler
 		///can come back later and actually compile+register provided_methods without needing

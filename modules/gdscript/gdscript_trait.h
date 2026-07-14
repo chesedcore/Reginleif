@@ -78,7 +78,7 @@ public:
 };
 
 
-/// compiler-internal representation of a single resolved `impl Trait for Type`
+/// compiler-internal representation of a single resolved `impl for Type`
 /// or in-class `impl Trait` block.
 /// do note that only one instance of this is generated per impl block encountered
 class GDScriptImpl : public RefCounted {
