@@ -4474,9 +4474,12 @@ GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
 			continue;
 		}
 
+		make_completion_context(COMPLETION_IMPL_BODY, impl, -1, true);
+
 		if (match(GDScriptTokenizer::Token::FUNC)) {
-			FunctionNode *method = parse_function(false);
+			FunctionNode* method = parse_function(false);
 			if (method != nullptr) {
+				override_completion_context(method, COMPLETION_IMPL_BODY, impl);
 				///impl methods must actually implement something :>
 				if (!method->has_explicit_body) {
 					push_error(vformat(R"([Reginleif] "impl" method "%s" must have a body.)", method->identifier != nullptr ? String(method->identifier->name) : String()), method);

@@ -93,6 +93,7 @@ Error GDScriptTraitAnalyzer::resolve_trait(GDScriptParser::TraitNode* p_trait) {
 		GDScriptTrait::MethodSignatureSnapshot snapshot;
 		for (int i = 0; i < method->parameters.size(); i++) {
 			snapshot.param_types.push_back(method->parameters[i]->get_datatype());
+			snapshot.param_names.push_back(method->parameters[i]->identifier != nullptr ? method->parameters[i]->identifier->name : StringName());
 		}
 		snapshot.return_type = method->get_datatype();
 		gd_trait->required_signatures[method->identifier->name] = snapshot;

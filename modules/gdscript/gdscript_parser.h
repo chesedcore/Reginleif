@@ -1437,6 +1437,7 @@ public:
 		COMPLETION_METHOD, // List available methods in scope.
 		COMPLETION_TRAIT_NAME, ///trait name after "impl"
 		COMPLETION_TRAIT_BODY, ///statement start inside a trait body, only "func" and "impl" are legal
+		COMPLETION_IMPL_BODY, ///statement start inside an "impl" body, fetches unimplemented trait methods
 		COMPLETION_OVERRIDE_METHOD, // Override implementation, also for native virtuals.
 		COMPLETION_PROPERTY_DECLARATION, // Property declaration (get, set).
 		COMPLETION_PROPERTY_DECLARATION_OR_TYPE, // Property declaration (get, set) or a type hint.

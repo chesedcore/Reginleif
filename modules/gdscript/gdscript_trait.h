@@ -64,6 +64,7 @@ public:
 	/// doesn't exist to save me. help me. save me.
 	struct MethodSignatureSnapshot {
 		Vector<GDScriptParser::DataType> param_types;
+		Vector<StringName> param_names;
 		GDScriptParser::DataType return_type;
 	};
 	HashMap<StringName, MethodSignatureSnapshot> required_signatures;

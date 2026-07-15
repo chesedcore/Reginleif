@@ -1124,6 +1124,124 @@ static void _list_available_traits(GDScriptParser::CompletionContext& p_context,
 	}
 }
 
+///find if the impl block already provides a method with this name
+static bool _impl_already_provides(const GDScriptParser::ImplNode* p_impl, const StringName& p_method_name) {
+	for (const GDScriptParser::FunctionNode* existing : p_impl->methods) {
+		if (existing->identifier != nullptr && existing->identifier->name == p_method_name) {
+			return true;
+		}
+	}
+	return false;
+}
+
+///adds a completion option for a single trait method using its live FunctionNode* 
+///!!!NOTE:!!! this is only safe when the node belongs to the parser 
+///currently servicing this completion request (impl for Type)
+///formatted the same as an override-method stub: `name(args) -> ReturnType:`.
+static void _add_trait_method_completion_from_node(const GDScriptParser::FunctionNode* p_method, const GDScriptParser::ImplNode* p_impl, bool p_type_hints, HashMap<String, ScriptLanguage::CodeCompletionOption>& r_result) {
+	if (p_method->identifier == nullptr) {
+		return;
+	}
+	const StringName& method_name = p_method->identifier->name;
+	if (_impl_already_provides(p_impl, method_name) || r_result.has(method_name)) {
+		return;
+	}
+
+	String method_hint = method_name;
+	method_hint += "(";
+	for (int i = 0; i < p_method->parameters.size(); i++) {
+		if (i > 0) {
+			method_hint += ", ";
+		}
+		const GDScriptParser::ParameterNode* param = p_method->parameters[i];
+		method_hint += param->identifier->name;
+		if (p_type_hints && param->get_datatype().is_hard_type()) {
+			method_hint += ": " + param->get_datatype().to_string();
+		}
+	}
+	if (p_method->is_vararg()) {
+		if (!p_method->parameters.is_empty()) {
+			method_hint += ", ";
+		}
+		method_hint += "...args";
+		if (p_type_hints) {
+			method_hint += ": Array";
+		}
+	}
+	method_hint += ")";
+	if (p_type_hints && p_method->get_datatype().is_hard_type()) {
+		const GDScriptParser::DataType& ret_type = p_method->get_datatype();
+		if (ret_type.kind == GDScriptParser::DataType::BUILTIN && ret_type.builtin_type == Variant::NIL) {
+			method_hint += " -> void";
+		} else {
+			method_hint += " -> " + ret_type.to_string();
+		}
+	}
+	method_hint += ":";
+
+	ScriptLanguage::CodeCompletionOption option(method_hint, ScriptLanguage::CODE_COMPLETION_KIND_FUNCTION);
+	r_result.insert(method_name.string(), option);
+}
+
+///adds a completion option for a single required trait method, built from the method signature
+///like the above method, but is safe for the cross file case (impl Trait)
+static void _add_trait_method_completion_from_snapshot(const StringName& p_method_name, const GDScriptTrait::MethodSignatureSnapshot& p_snapshot, const GDScriptParser::ImplNode* p_impl, bool p_type_hints, HashMap<String, ScriptLanguage::CodeCompletionOption>& r_result) {
+	if (_impl_already_provides(p_impl, p_method_name) || r_result.has(p_method_name)) {
+		return;
+	}
+
+	String method_hint = p_method_name;
+	method_hint += "(";
+	for (int i = 0; i < p_snapshot.param_types.size(); i++) {
+		if (i > 0) {
+			method_hint += ", ";
+		}
+		if (i < p_snapshot.param_names.size() && p_snapshot.param_names[i] != StringName()) {
+			method_hint += p_snapshot.param_names[i];
+		} else {
+			method_hint += "arg" + itos(i);
+		}
+		if (p_type_hints && p_snapshot.param_types[i].is_hard_type()) {
+			method_hint += ": " + p_snapshot.param_types[i].to_string();
+		}
+	}
+	method_hint += ")";
+	if (p_type_hints && p_snapshot.return_type.is_hard_type()) {
+		if (p_snapshot.return_type.kind == GDScriptParser::DataType::BUILTIN && p_snapshot.return_type.builtin_type == Variant::NIL) {
+			method_hint += " -> void";
+		} else {
+			method_hint += " -> " + p_snapshot.return_type.to_string();
+		}
+	}
+	method_hint += ":";
+
+	ScriptLanguage::CodeCompletionOption option(method_hint, ScriptLanguage::CODE_COMPLETION_KIND_FUNCTION);
+	r_result.insert(p_method_name.string(), option);
+}
+
+///used to list the trait methods WHEN WORKING ON THE SAME FILE CASE
+static void _list_impl_body_methods_from_trait_node(const GDScriptParser::ImplNode* p_impl, const GDScriptParser::TraitNode* p_trait_node, HashMap<String, ScriptLanguage::CodeCompletionOption>& r_result) {
+	const bool type_hints = EditorSettings::get_singleton()->get_setting("text_editor/completion/add_type_hints");
+
+	for (const GDScriptParser::FunctionNode* mi : p_trait_node->methods) {
+		_add_trait_method_completion_from_node(mi, p_impl, type_hints, r_result);
+	}
+	for (const GDScriptParser::FunctionNode* mi : p_trait_node->default_methods) {
+		_add_trait_method_completion_from_node(mi, p_impl, type_hints, r_result);
+	}
+}
+
+///see above, but the cross file case instead
+static void _list_impl_body_methods_from_cached_trait(const GDScriptParser::ImplNode *p_impl, const Ref<GDScriptTrait> &p_trait, HashMap<String, ScriptLanguage::CodeCompletionOption> &r_result) {
+	const bool type_hints = EditorSettings::get_singleton()->get_setting("text_editor/completion/add_type_hints");
+
+	for (const KeyValue<StringName, GDScriptTrait::MethodSignatureSnapshot> &E : p_trait->required_signatures) {
+		_add_trait_method_completion_from_snapshot(E.key, E.value, p_impl, type_hints, r_result);
+	}
+	///!!!NOTE:!!! default_methods have no signature snapshot, so they're intentionally not completed
+	///here to avoid touching a potentially dangling FunctionNode* from another parser instance
+}
+
 static void _list_available_types(bool p_inherit_only, GDScriptParser::CompletionContext &p_context, HashMap<String, ScriptLanguage::CodeCompletionOption> &r_result) {
 	// Built-in Variant Types
 	_find_built_in_variants(r_result);
@@ -3717,6 +3835,39 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 			options.insert(func_option.display, func_option);
 			ScriptLanguage::CodeCompletionOption impl_option("impl", ScriptLanguage::CODE_COMPLETION_KIND_KEYWORD);
 			options.insert(impl_option.display, impl_option);
+		} break;
+		case GDScriptParser::COMPLETION_IMPL_BODY: {
+			if (completion_context.node == nullptr || completion_context.node->type != GDScriptParser::Node::IMPL) {
+				break;
+			}
+
+			///this is what you get when you indiscriminately ban `auto`, thanks godot!
+			const GDScriptParser::ImplNode* impl = static_cast<const GDScriptParser::ImplNode*>(completion_context.node);
+
+			if (impl->trait_owns_this_impl && impl->trait_name == nullptr) {
+				///branch for the impl for Type case
+				const GDScriptParser::TraitNode* trait_node = completion_context.parser->get_trait_tree();
+				if (trait_node != nullptr) {
+					_list_impl_body_methods_from_trait_node(impl, trait_node, options);
+				}
+			} else if (impl->trait_name != nullptr) {
+				///impl TraitName case (cross file) resolve via the global trait registry first
+				///!!!NOTE:!!! `get_global_trait_path` performs a lazy project scan on first miss
+				///do NOT gate this behind `is_global_trait`, since that never triggers the scan
+				///and will incorrectly report false on a trait that hasn't been touched yet
+				String trait_path = GDScriptCache::get_global_trait_path(impl->trait_name->name);
+				if (!trait_path.is_empty()) {
+					Error err = OK;
+					Ref<GDScriptTrait> resolved_trait = GDScriptCache::get_cached_trait(trait_path, impl->trait_name->name, err);
+					if (err == OK && resolved_trait.is_valid()) {
+						_list_impl_body_methods_from_cached_trait(impl, resolved_trait, options);
+					}
+				}
+			}
+
+			ScriptLanguage::CodeCompletionOption func_option("func", ScriptLanguage::CODE_COMPLETION_KIND_KEYWORD);
+			options.insert(func_option.display, func_option);
+			r_forced = true;
 		} break;
 		case GDScriptParser::COMPLETION_INHERIT_TYPE: {
 			_list_available_types(true, completion_context, options);
