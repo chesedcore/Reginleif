@@ -161,17 +161,17 @@ public:
 	///trait stuff.
 	
 	///resolves (and caches) the trait declared in a given file, for cross-file `impl` lookups :>
-	static Ref<GDScriptTrait> get_cached_trait(const String &p_path, const StringName &p_trait_name, Error &r_error, const String &p_owner = String());
-	static void add_global_trait(const StringName &p_trait_name, const String &p_path);
-	static void remove_global_trait(const StringName &p_trait_name);
-	static void remove_global_trait_by_path(const String &p_path);
-	static bool is_global_trait(const StringName &p_trait_name);
-	static String get_global_trait_path(const StringName &p_trait_name);
+	static Ref<GDScriptTrait> get_cached_trait(const String& p_path, const StringName& p_trait_name, Error& r_error, const String& p_owner = String());
+	static void add_global_trait(const StringName& p_trait_name, const String& p_path);
+	static void remove_global_trait(const StringName& p_trait_name);
+	static void remove_global_trait_by_path(const String& p_path);
+	static bool is_global_trait(const StringName& p_trait_name);
+	static String get_global_trait_path(const StringName& p_trait_name);
 	static void get_global_trait_list(List<StringName>* r_traits);
 
 	static void add_global_impl_claims(const StringName& p_target_type_key, const StringName& p_trait_name, const Vector<StringName>& p_method_names, const String& p_path);
 	static void remove_global_impls_by_path(const String& p_path);
-	static Vector<GlobalImplClaim> get_global_impl_claims(const StringName &p_target_type_key);
+	static Vector<GlobalImplClaim> get_global_impl_claims(const StringName& p_target_type_key);
 	static bool has_global_impl_method_claim(const StringName& p_target_type_key, const StringName& p_method_name);
 	static void ensure_global_impls_scanned();
 

@@ -4304,6 +4304,25 @@ GDScriptParser::ExpressionNode *GDScriptParser::parse_invalid_token(ExpressionNo
 GDScriptParser::TypeNode *GDScriptParser::parse_type(bool p_allow_void) {
 	TypeNode *type = alloc_node<TypeNode>();
 	make_completion_context(p_allow_void ? COMPLETION_TYPE_NAME_OR_VOID : COMPLETION_TYPE_NAME, type);
+
+	if (match(GDScriptTokenizer::Token::IMPL)) {
+		if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected trait name after "impl".)")) {
+			complete_extents(type);
+			return type;
+		}
+		type->trait_bounds.push_back(parse_identifier());
+
+		while (match(GDScriptTokenizer::Token::PLUS)) {
+			if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected trait name after "+" in trait bound.)")) {
+				break;
+			}
+			type->trait_bounds.push_back(parse_identifier());
+		}
+
+		complete_extents(type);
+		return type;
+	}
+
 	if (!match(GDScriptTokenizer::Token::IDENTIFIER)) {
 		if (match(GDScriptTokenizer::Token::TK_VOID)) {
 			if (p_allow_void) {
@@ -6124,6 +6143,16 @@ String GDScriptParser::DataType::to_string() const {
 
 		///
 		case GENERIC_TYPE: {
+			if (!trait_bound_names.is_empty()) {
+				String result = "impl ";
+				for (int i = 0; i < trait_bound_names.size(); i++) {
+					if (i > 0) {
+						result += "+";
+					}
+					result += trait_bound_names[i];
+				}
+				return result;
+			}
 			return generic_param.string();
 		}
 

@@ -149,6 +149,9 @@ public:
 		MethodInfo method_info; // For callable/signals.
 		HashMap<StringName, int64_t> enum_values; // For enums.
 
+		///trait names this type must satisfy
+		Vector<StringName> trait_bound_names;
+
 		/// [Monarch] Reginleif addition. Holds the class node that declared the generic params.
 		ClassNode* generic_owner_class = nullptr;
 		/// [Monarch] I was new to the codebase when I wrote the generic owner class stuff. Man I wish I had the same level of enthusiasm
@@ -291,6 +294,7 @@ public:
 			method_info = p_other.method_info;
 			enum_values = p_other.enum_values;
 			container_element_types = p_other.container_element_types;
+			trait_bound_names = p_other.trait_bound_names;
 			generic_owner_class = p_other.generic_owner_class;
 			generic_param = p_other.generic_param;
 			generic_type_bindings = p_other.generic_type_bindings;
@@ -1344,6 +1348,8 @@ public:
 		Vector<IdentifierNode *> type_chain;
 		Vector<TypeNode *> container_types;
 
+		Vector<IdentifierNode*> trait_bounds;
+
 		TypeNode *get_container_type_or_null(int p_index) const {
 			return p_index >= 0 && p_index < container_types.size() ? container_types[p_index] : nullptr;
 		}
@@ -1566,6 +1572,9 @@ private:
 	};
 	static HashMap<StringName, AnnotationInfo> valid_annotations;
 	List<AnnotationNode *> annotation_stack;
+
+	///counter for synthesising unique names for "impl Trait" anonymous generics
+	int impl_trait_synth_counter = 0;
 
 	typedef ExpressionNode *(GDScriptParser::*ParseFunction)(ExpressionNode *p_previous_operand, bool p_can_assign);
 	// Higher value means higher precedence (i.e. is evaluated first).
@@ -1805,6 +1814,17 @@ public:
 	ClassNode *find_class(const String &p_qualified_name) const;
 	bool has_class(const GDScriptParser::ClassNode *p_class) const;
 	static Variant::Type get_builtin_type(const StringName &p_type); // Excluding `Variant::NIL` and `Variant::OBJECT`.
+
+	String make_impl_trait_synth_name(const TypeNode* p_impl_trait_type) {
+		String label;
+		for (int i = 0; i < p_impl_trait_type->trait_bounds.size(); i++) {
+			if (i > 0) {
+				label += "+";
+			}
+			label += p_impl_trait_type->trait_bounds[i]->name;
+		}
+		return vformat("__impl_%s_%d", label, impl_trait_synth_counter++);
+	}
 
 	CompletionContext get_completion_context() const { return completion_context; }
 	void get_annotation_list(List<MethodInfo> *r_annotations) const;

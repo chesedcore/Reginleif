@@ -106,6 +106,14 @@ Error GDScriptTraitAnalyzer::resolve_trait(GDScriptParser::TraitNode* p_trait) {
 		analyzer->resolve_function_signature(method, p_trait);
 		analyzer->resolve_function_body(method);
 		gd_trait->default_methods[method->identifier->name] = method;
+
+		GDScriptTrait::MethodSignatureSnapshot default_snapshot;
+		for (int i = 0; i < method->parameters.size(); i++) {
+			default_snapshot.param_types.push_back(method->parameters[i]->get_datatype());
+			default_snapshot.param_names.push_back(method->parameters[i]->identifier != nullptr ? method->parameters[i]->identifier->name : StringName());
+		}
+		default_snapshot.return_type = method->get_datatype();
+		gd_trait->required_signatures[method->identifier->name] = default_snapshot;
 	}
 
 	///resolve `impl <this trait> for Type` (and `impl for Type` shorthand) blocks that
@@ -233,15 +241,8 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 		if (is_required && trait->required_signatures.has(method_name)) {
 			required_snapshot = trait->required_signatures[method_name];
 		} else {
-			///default method being overridden - snapshot straight off its live node,
-			///since default methods aren't cached across instances the same way (they have bodies,
-			///not just stub signatures, so they aren't subject to the same reuse pattern)
-			GDScriptParser::FunctionNode* default_method = trait->default_methods.has(method_name) ? trait->default_methods[method_name] : nullptr;
-			if (default_method != nullptr) {
-				for (int i = 0; i < default_method->parameters.size(); i++) {
-					required_snapshot.param_types.push_back(default_method->parameters[i]->get_datatype());
-				}
-				required_snapshot.return_type = default_method->get_datatype();
+			if (trait->required_signatures.has(method_name)) {
+				required_snapshot = trait->required_signatures[method_name];
 			}
 		}
 
@@ -565,8 +566,6 @@ bool GDScriptTraitAnalyzer::type_satisfies_trait(const GDScriptParser::DataType&
 		return false;
 	}
 
-	///!!!NOTE:!!! cross-file impls not yet considered, per the 9000 billion comments
-	///i've already made :>
 	for (const Ref<GDScriptImpl>& impl : resolved_impls) {
 		if (impl.is_null() || impl->trait != p_trait) {
 			continue;
@@ -575,6 +574,49 @@ bool GDScriptTraitAnalyzer::type_satisfies_trait(const GDScriptParser::DataType&
 		if (_type_is_or_inherits(p_concrete_type, impl->impl_target_type)) {
 			return true;
 		}
+	}
+
+	///not satisfied locally, check the global impl-claim registry for cross-file impls!
+	return global_claims_satisfy_trait(p_concrete_type, p_trait->name);
+}
+
+bool GDScriptTraitAnalyzer::global_claims_satisfy_trait(const GDScriptParser::DataType& p_concrete_type, const StringName& p_trait_name) const {
+	GDScriptParser::DataType walk_type = p_concrete_type;
+
+	while (true) {
+		StringName walk_key = _impl_target_key(walk_type);
+
+		if (walk_key != StringName()) {
+			for (const GDScriptCache::GlobalImplClaim& claim : GDScriptCache::get_global_impl_claims(walk_key)) {
+				if (claim.trait_name == p_trait_name) {
+					return true;
+				}
+			}
+		}
+
+		if (walk_type.kind == GDScriptParser::DataType::CLASS && walk_type.class_type != nullptr) {
+			GDScriptParser::DataType next_walk = walk_type.class_type->base_type;
+			if (next_walk.kind == GDScriptParser::DataType::UNRESOLVED) {
+				break;
+			}
+			walk_type = next_walk;
+			continue;
+		}
+
+		if (walk_type.kind == GDScriptParser::DataType::NATIVE && walk_type.native_type != StringName()) {
+			StringName parent_native = ClassDB::get_parent_class(walk_type.native_type);
+			if (parent_native == StringName()) {
+				break;
+			}
+			GDScriptParser::DataType native_walk;
+			native_walk.kind = GDScriptParser::DataType::NATIVE;
+			native_walk.builtin_type = Variant::OBJECT;
+			native_walk.native_type = parent_native;
+			walk_type = native_walk;
+			continue;
+		}
+
+		break;
 	}
 
 	return false;

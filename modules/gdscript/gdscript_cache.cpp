@@ -501,30 +501,32 @@ Ref<GDScriptParserRef> GDScriptCache::get_parser(const String &p_path, GDScriptP
 	return ref;
 }
 
-Ref<GDScriptTrait> GDScriptCache::get_cached_trait(const String &p_path, const StringName &p_trait_name, Error &r_error, const String &p_owner) {
-	MutexLock lock(singleton->mutex);
+Ref<GDScriptTrait> GDScriptCache::get_cached_trait(const String& p_path, const StringName& p_trait_name, Error& r_error, const String& p_owner) {
 	Ref<GDScriptParserRef> ref;
-	if (!p_owner.is_empty() && p_path != p_owner) {
-		singleton->dependencies[p_owner].insert(p_path);
-		singleton->parser_inverse_dependencies[p_path].insert(p_owner);
-	}
-	if (singleton->parser_map.has(p_path)) {
-		ref = Ref<GDScriptParserRef>(singleton->parser_map[p_path]);
-		if (ref.is_null()) {
-			r_error = ERR_INVALID_DATA;
-			return Ref<GDScriptTrait>();
+	{
+		MutexLock lock(singleton->mutex);
+		if (!p_owner.is_empty() && p_path != p_owner) {
+			singleton->dependencies[p_owner].insert(p_path);
+			singleton->parser_inverse_dependencies[p_path].insert(p_owner);
 		}
-	} else {
-		String remapped_path = ResourceLoader::path_remap(p_path);
-		if (!FileAccess::exists(remapped_path)) {
-			r_error = ERR_FILE_NOT_FOUND;
-			return Ref<GDScriptTrait>();
+		if (singleton->parser_map.has(p_path)) {
+			ref = Ref<GDScriptParserRef>(singleton->parser_map[p_path]);
+			if (ref.is_null()) {
+				r_error = ERR_INVALID_DATA;
+				return Ref<GDScriptTrait>();
+			}
+		} else {
+			String remapped_path = ResourceLoader::path_remap(p_path);
+			if (!FileAccess::exists(remapped_path)) {
+				r_error = ERR_FILE_NOT_FOUND;
+				return Ref<GDScriptTrait>();
+			}
+			ref.instantiate();
+			ref->path = p_path;
+			singleton->parser_map[p_path] = ref.ptr();
 		}
-		ref.instantiate();
-		ref->path = p_path;
-		singleton->parser_map[p_path] = ref.ptr();
 	}
-
+	
 	r_error = ref->raise_trait_status(GDScriptParserRef::TRAIT_SOLVED);
 	if (r_error != OK) {
 		return Ref<GDScriptTrait>();

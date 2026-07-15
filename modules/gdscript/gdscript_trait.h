@@ -47,8 +47,6 @@ public:
 	StringName name;
 	String script_path;
 	GDScriptParser::TraitNode* trait_node = nullptr;
-	///keeps the parser (and thus its entire AST) alive as long as this trait object lives
-	///without this, FunctionNode* pointers in required_methods/default_methods dangle after the parser ref drops
 	Ref<GDScriptParserRef> parser_ref;
 
 	HashMap<StringName, GDScriptParser::FunctionNode*> required_methods;
