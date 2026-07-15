@@ -1200,34 +1200,10 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 			}
 		}
 
-		GDScriptParser::IdentifierNode* synth_param = parser->alloc_node<GDScriptParser::IdentifierNode>();
-		synth_param->name = parser->make_impl_trait_synth_name(p_type);
-
-		GDScriptParser::TypeNode* synth_bound_type = parser->alloc_node<GDScriptParser::TypeNode>();
+		result.kind = GDScriptParser::DataType::TRAIT_OBJECT;
+		result.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
 		for (GDScriptParser::IdentifierNode* trait_id : p_type->trait_bounds) {
-			synth_bound_type->trait_bounds.push_back(trait_id);
-		}
-		GDScriptParser::DataType trait_bound_marker;
-		trait_bound_marker.kind = GDScriptParser::DataType::VARIANT;
-		trait_bound_marker.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
-		for (GDScriptParser::IdentifierNode* trait_id : p_type->trait_bounds) {
-			trait_bound_marker.trait_bound_names.push_back(trait_id->name);
-		}
-		synth_bound_type->set_datatype(trait_bound_marker);
-		synth_param->generic_upper_bound = synth_bound_type;
-
-		result.kind = GDScriptParser::DataType::GENERIC_TYPE;
-		result.generic_param = synth_param->name;
-		result.trait_bound_names = trait_bound_marker.trait_bound_names;
-
-		if (parser->current_function != nullptr) {
-			parser->current_function->generic_parameters.push_back(synth_param);
-			result.generic_owner_function = parser->current_function;
-		} else if (parser->current_class != nullptr) {
-			parser->current_class->generic_parameters.push_back(synth_param);
-			result.generic_owner_class = parser->current_class;
-		} else {
-			push_error(R"([Reginleif] "impl Trait" syntax is not supposed to be used outside of a function or class context.)", p_type);
+			result.trait_bound_names.push_back(trait_id->name);
 		}
 
 		p_type->set_datatype(result);
@@ -7866,10 +7842,20 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 	ERR_FAIL_COND_V_MSG(!p_target.is_set(), true, "Parser bug (please report): Trying to check compatibility of unset target type");
 	ERR_FAIL_COND_V_MSG(!p_source.is_set(), true, "Parser bug (please report): Trying to check compatibility of unset value type");
 
-	if (p_target.kind == GDScriptParser::DataType::VARIANT && !p_target.trait_bound_names.is_empty()) {
+	if ((p_target.kind == GDScriptParser::DataType::VARIANT || p_target.kind == GDScriptParser::DataType::TRAIT_OBJECT) && !p_target.trait_bound_names.is_empty()) {
 		if (p_trait_analyzer == nullptr) {
 			return false;
 		}
+
+		if (p_source.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
+			for (const StringName& trait_name : p_target.trait_bound_names) {
+				if (!p_source.trait_bound_names.has(trait_name)) {
+					return false;
+				}
+			}
+			return true;
+		}
+		
 		for (const StringName& trait_name : p_target.trait_bound_names) {
 			Ref<GDScriptTrait> trait_ref = p_trait_analyzer->get_local_trait(trait_name);
 			if (trait_ref.is_null()) {
@@ -7893,6 +7879,14 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 
 	if (p_source.kind == GDScriptParser::DataType::VARIANT) {
 		// TODO: This is acceptable but unsafe. Make sure unsafe line is set.
+		return true;
+	}
+
+	if (p_target.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
+		return true;
+	}
+
+	if (p_source.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
 		return true;
 	}
 	/// case 1, both sides are generic, in which case, same param owner and name is the only hard equality 

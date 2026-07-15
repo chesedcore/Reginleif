@@ -122,6 +122,9 @@ public:
 			/// allows us to tell Godot that this type is 
 			/// generic and links against a specified generic parameter.
 			GENERIC_TYPE,
+
+			/// "impl Trait" as a dynamic trait object
+			TRAIT_OBJECT,
 		};
 		Kind kind = UNRESOLVED;
 
@@ -165,7 +168,7 @@ public:
 		_FORCE_INLINE_ bool is_set() const { return kind != RESOLVING && kind != UNRESOLVED; }
 		_FORCE_INLINE_ bool is_resolving() const { return kind == RESOLVING; }
 		_FORCE_INLINE_ bool has_no_type() const { return type_source == UNDETECTED; }
-		_FORCE_INLINE_ bool is_variant() const { return kind == VARIANT || kind == RESOLVING || kind == UNRESOLVED; }
+		_FORCE_INLINE_ bool is_variant() const { return kind == VARIANT || kind == RESOLVING || kind == UNRESOLVED || kind == TRAIT_OBJECT; }
 		_FORCE_INLINE_ bool is_hard_type() const { return type_source > INFERRED; }
 
 		String to_string() const;
@@ -264,6 +267,17 @@ public:
 					return generic_owner_class == p_other.generic_owner_class && 
 					       generic_param == p_other.generic_param && 
 						   generic_owner_function == p_other.generic_owner_function;
+
+				case TRAIT_OBJECT:
+					if (trait_bound_names.size() != p_other.trait_bound_names.size()) {
+						return false;
+					}
+					for (const StringName &E : trait_bound_names) {
+						if (!p_other.trait_bound_names.has(E)) {
+							return false;
+						}
+					}
+					return true;
 				
 				case RESOLVING:
 				case UNRESOLVED:

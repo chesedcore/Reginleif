@@ -6156,6 +6156,17 @@ String GDScriptParser::DataType::to_string() const {
 			return generic_param.string();
 		}
 
+		case TRAIT_OBJECT: {
+			String result = "impl ";
+			for (int i = 0; i < trait_bound_names.size(); i++) {
+				if (i > 0) {
+					result += "+";
+				}
+				result += trait_bound_names[i];
+			}
+			return result;
+		}
+
 		case ENUM: {
 			// native_type contains either the native class defining the enum
 			// or the fully qualified class name of the script defining the enum
@@ -6213,6 +6224,8 @@ String GDScriptParser::DataType::to_property_info_hint_string() const {
 			}
 			return generic_param;
 		}
+		case TRAIT_OBJECT:
+			return "Variant"; /// no concrete export type for a dynamic trait object.
 		case RESOLVING:
 		case UNRESOLVED:
 			break;
@@ -6291,6 +6304,7 @@ PropertyInfo GDScriptParser::DataType::to_property_info(const String &p_name) co
 			break;
 		case VARIANT:
 		case GENERIC_TYPE:
+		case TRAIT_OBJECT:
 		case RESOLVING:
 		case UNRESOLVED:
 			result.usage |= PROPERTY_USAGE_NIL_IS_VARIANT;
