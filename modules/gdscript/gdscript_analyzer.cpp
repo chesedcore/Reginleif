@@ -1133,7 +1133,7 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 		result.kind = GDScriptParser::DataType::GENERIC_TYPE;
 		result.generic_param = first;
 		result.generic_owner_function = parser->current_function;
-		p_type->set_datatype(result);
+		p_type->resolved_type = result;
 		return result;
 	}
 	
@@ -1141,7 +1141,7 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 		result.kind = GDScriptParser::DataType::GENERIC_TYPE;
 		result.generic_param = first;
 		result.generic_owner_class = parser->current_class;
-		p_type->set_datatype(result);
+		p_type->resolved_type = result;
 		return result;
 	}
 
@@ -1488,7 +1488,7 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 		return bad_type;
 	}
 
-	p_type->set_datatype(result);
+	p_type->resolved_type = result;
 	return result;
 }
 
@@ -1582,7 +1582,7 @@ void GDScriptAnalyzer::resolve_class_member(GDScriptParser::ClassNode *p_class, 
 
 				check_class_member_name_conflict(p_class, member.variable->identifier->name, member.variable);
 
-				member.variable->set_datatype(resolving_datatype);
+				member.variable->type_constraint = resolving_datatype;
 
 
 				/// [Monarch] This is where the variable actually gets resolved. So you can surgically plug
@@ -2308,13 +2308,6 @@ void GDScriptAnalyzer::resolve_function_signature(GDScriptParser::FunctionNode *
 	int default_value_count = 0;
 #endif // TOOLS_ENABLED
 
-#ifdef DEBUG_ENABLED
-	String function_visible_name = function_name;
-	if (function_name == StringName()) {
-		function_visible_name = p_is_lambda ? "<anonymous lambda>" : "<unknown function>";
-	}
-#endif // DEBUG_ENABLED
-
 	HashSet<StringName> seen_generic_params;
 	for (GDScriptParser::IdentifierNode* param : p_function->generic_parameters) {
 		if (param == nullptr) {
@@ -2574,13 +2567,13 @@ void GDScriptAnalyzer::resolve_function_signature(GDScriptParser::FunctionNode *
 
 	///static funcs should not be able to access class level generic params
 	if (p_function->is_static && parser->current_class != nullptr && parser->current_class->has_generic_parameters()) {
-		GDScriptParser::DataType return_type = p_function->get_datatype();
+		GDScriptParser::DataType return_type = p_function->return_type_constraint;
 		if (type_contains_class_generic(return_type, parser->current_class)) {
 			push_error(vformat(R"([Reginleif] Static function "%s" cannot use class-level generic parameter in its return type. Use a function-level generic instead.)", function_name), p_function);
 		}
 
 		for (int i = 0; i < p_function->parameters.size(); i++) {
-			GDScriptParser::DataType param_type = p_function->parameters[i]->get_datatype();
+			GDScriptParser::DataType param_type = p_function->parameters[i]->type_constraint;
 			if (type_contains_class_generic(param_type, parser->current_class)) {
 				push_error(vformat(R"([Reginleif] Static function "%s" cannot use class-level generic parameter in parameter "%s". Use a function-level generic instead.)", function_name, p_function->parameters[i]->identifier->name), p_function->parameters[i]);
 			}
@@ -2616,7 +2609,7 @@ void GDScriptAnalyzer::resolve_function_body(GDScriptParser::FunctionNode *p_fun
 			/// still need to check the return type even if the brace body is empty lol
 			const bool is_constructor_like = !p_is_lambda && p_function->identifier && p_function->identifier->name == GDScriptLanguage::get_singleton()->strings._init;
 			
-			GDScriptParser::DataType return_type = p_function->get_datatype();
+			GDScriptParser::DataType return_type = p_function->return_type_constraint;
 			
 			if (!p_function->is_abstract && !is_constructor_like && return_type.is_hard_type() && !(return_type.kind == GDScriptParser::DataType::BUILTIN && return_type.builtin_type == Variant::NIL)) {
 				push_error(R"(Not all code paths return a value.)", p_function);
@@ -3037,7 +3030,7 @@ GDScriptParser::IdentifierNode* GDScriptAnalyzer::find_generic_param_decl(const 
 
 void GDScriptAnalyzer::check_generic_assignable(GDScriptParser::IdentifierNode* p_generic_decl, const StringName& p_generic_param, GDScriptParser::ExpressionNode* p_initializer, const char* p_kind) {
 
-	const GDScriptParser::DataType& default_type = p_initializer->get_datatype();
+	const GDScriptParser::DataType& default_type = p_initializer->type_constraint;
 
 	if (!default_type.is_set() || default_type.has_no_type()) {
 		return;
@@ -3554,7 +3547,7 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 			bool appears_in_param = false;
 			for (int i = 0; i < parser->current_function->parameters.size(); i++) {
 
-				const GDScriptParser::DataType& param_type = parser->current_function->parameters[i]->get_datatype();
+				const GDScriptParser::DataType& param_type = parser->current_function->parameters[i]->type_constraint;
 
 				if (type_contains_this_generic_param(param_type, gp->name, parser->current_function, parser->current_class)) {
 					appears_in_param = true;
@@ -3601,7 +3594,7 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 		}
 	}
 
-	p_return->set_datatype(result);
+	p_return->return_type = result;
 }
 
 void GDScriptAnalyzer::reduce_expression(GDScriptParser::ExpressionNode *p_expression, bool p_is_root) {
@@ -3802,7 +3795,7 @@ void GDScriptAnalyzer::update_array_literal_element_type(GDScriptParser::ArrayNo
 			update_dictionary_literal_element_type(static_cast<GDScriptParser::DictionaryNode*>(element_node), expected_type.get_container_element_type_or_variant(0), expected_type.get_container_element_type_or_variant(1));
 		}
 
-		const GDScriptParser::DataType &actual_type = element_node->get_datatype();
+		const GDScriptParser::DataType &actual_type = element_node->type_constraint;
 		if (actual_type.has_no_type() || actual_type.is_variant() || !actual_type.is_hard_type()) {
 			mark_node_unsafe(element_node);
 			continue;
@@ -3851,7 +3844,7 @@ void GDScriptAnalyzer::update_dictionary_literal_element_type(GDScriptParser::Di
 			update_dictionary_literal_element_type(static_cast<GDScriptParser::DictionaryNode*>(key_element_node), expected_key_type.get_container_element_type_or_variant(0), expected_key_type.get_container_element_type_or_variant(1));
 		}
 
-		const GDScriptParser::DataType &actual_key_type = key_element_node->get_datatype();
+		const GDScriptParser::DataType &actual_key_type = key_element_node->type_constraint;
 		if (actual_key_type.has_no_type() || actual_key_type.is_variant() || !actual_key_type.is_hard_type()) {
 			mark_node_unsafe(key_element_node);
 		} else if (!is_type_compatible(expected_key_type, actual_key_type, true, p_dictionary)) {
@@ -3878,7 +3871,7 @@ void GDScriptAnalyzer::update_dictionary_literal_element_type(GDScriptParser::Di
 			update_dictionary_literal_element_type(static_cast<GDScriptParser::DictionaryNode*>(value_element_node), expected_value_type.get_container_element_type_or_variant(0), expected_value_type.get_container_element_type_or_variant(1));
 		}
 
-		const GDScriptParser::DataType &actual_value_type = value_element_node->get_datatype();
+		const GDScriptParser::DataType &actual_value_type = value_element_node->type_constraint;
 		if (actual_value_type.has_no_type() || actual_value_type.is_variant() || !actual_value_type.is_hard_type()) {
 			mark_node_unsafe(value_element_node);
 		} else if (!is_type_compatible(expected_value_type, actual_value_type, true, p_dictionary)) {
@@ -4017,7 +4010,7 @@ void GDScriptAnalyzer::reduce_assignment(GDScriptParser::AssignmentNode *p_assig
 		}
 	}
 
-	GDScriptParser::DataType assigned_value_type = p_assignment->assigned_value->get_datatype();
+	GDScriptParser::DataType assigned_value_type = p_assignment->assigned_value->type_constraint;
 
 	bool assignee_is_variant = assignee_type.is_variant();
 	bool assignee_is_hard = assignee_type.is_hard_type();
@@ -4835,7 +4828,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				push_error(vformat(
 					R"([Reginleif] Generic args provided for '%s()' but the function takes no generic call parameters.)",
 					p_call->function_name), p_call);
-				p_call->set_datatype(call_type);
+				p_call->type_constraint = call_type;
 				return;
 			}
 
@@ -4845,7 +4838,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				push_error(vformat(
 					R"([Reginleif] '%s()' has %d generic parameter(s) but %d parameters were provided.)",
 					p_call->function_name, expected, got), p_call);
-				p_call->set_datatype(call_type);
+				p_call->type_constraint = call_type;
 				return;
 			}
 
@@ -4860,7 +4853,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 							R"([Reginleif] Generic call argument '%s' for parameter '%s' violates upper bound '%s'.)",
 							arg_type.to_string(), param->name, upper.to_string()),
 							p_call->explicit_generic_args[i]);
-						p_call->set_datatype(call_type);
+						p_call->type_constraint = call_type;
 						return;
 					}
 				}
@@ -4881,7 +4874,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				param_type = resolve_generic_type(param_type, call_generic_bindings);
 			}
 
-			GDScriptParser::DataType arg_type = p_call->arguments[i]->get_datatype();
+			GDScriptParser::DataType arg_type = p_call->arguments[i]->type_constraint;
 
 			if (param_needs_generic_validation && !has_turbobrick) { ///only try to infer if there's no explicit params
 				if (!infer_generic_bindings_from_types(param_type, arg_type, call_generic_bindings)) {
@@ -4889,7 +4882,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 							R"([Reginleif] Conflicting generic type inference for call '%s()'.)",
 							p_call->function_name),
 							p_call->arguments[i]);
-					p_call->set_datatype(call_type);
+					p_call->type_constraint = call_type;
 					return;
 				}
 				param_type = resolve_generic_type(param_type, call_generic_bindings);
@@ -4915,7 +4908,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 								arg_type.to_string(),
 								param_type.to_string()),
 								p_call->arguments[i]);
-						p_call->set_datatype(call_type);
+						p_call->type_constraint = call_type;
 						return;
 #ifdef DEBUG_ENABLED
 					} else {
@@ -4952,7 +4945,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 							   p_call->function_name,
 							   upper_bound_type.to_string()),
 							p_call);
-					p_call->set_datatype(call_type);
+					p_call->type_constraint = call_type;
 					return;
 				}
 			}
@@ -4988,7 +4981,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 							   generic_param->name,
 							   upper_bound_type.to_string()),
 							p_call);
-					p_call->set_datatype(call_type);
+					p_call->type_constraint = call_type;
 					return;
 				}
 			}
@@ -5024,7 +5017,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 								R"([Reginleif] Cannot use return value of type '%s': '%s' is fixed to '%s' in '%s'.)",
 								resolved_inferred.to_string(), parent_binding.key, parent_binding.value.to_string(), p_call->function_name),
 								p_call);
-							p_call->set_datatype(call_type);
+							p_call->type_constraint = call_type;
 							return;
 						}
 						call_type.generic_type_bindings[parent_binding.key] = resolved_inferred;
@@ -5044,7 +5037,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 							R"([Reginleif] return type fixes '%s' to '%s' but '%s' is already locked to '%s' by the declared type.)",
 							E.key, resolved.to_string(), E.key, already_fixed->to_string()),
 							p_call);
-						p_call->set_datatype(call_type);
+						p_call->type_constraint = call_type;
 						return;
 					}
 					call_type.generic_type_bindings[E.key] = resolved;
@@ -5580,10 +5573,10 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 						/// [Monarch] Inject generic params with resolved concrete types, stuffed
 						/// across the full inheritance chain walked so far
 						if (!accumulated_bindings.is_empty()) {
-							p_identifier->set_datatype(resolve_generic_type(
-								p_identifier->get_datatype(), 
+							p_identifier->type_constraint = resolve_generic_type(
+								p_identifier->type_constraint, 
 								accumulated_bindings
-							));
+							);
 						}
 
 						return;
@@ -5609,10 +5602,10 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 
 						/// [Monarch] Inject generic params with resolved concrete types.
 						if (!accumulated_bindings.is_empty()) {
-							p_identifier->set_datatype(resolve_generic_type(
-								p_identifier->get_datatype(), 
+							p_identifier->type_constraint = resolve_generic_type(
+								p_identifier->type_constraint, 
 								accumulated_bindings
-							));
+							);
 						}
 						
 						return;
@@ -7828,7 +7821,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 			/// Node -> A: Node becomes Node -> Node and int -> A: Node becomes int -> Node
 			/// so it SHOULD fail correctly
 
-			GDScriptParser::DataType upper = type_from_metatype(decl->generic_upper_bound->get_datatype());
+			GDScriptParser::DataType upper = type_from_metatype(decl->generic_upper_bound->resolved_type);
 			return check_type_compatibility(upper, p_source, p_allow_implicit_conversion, p_source_node, p_class, p_func);
 
 		}

@@ -2186,7 +2186,7 @@ Error GDScriptCompiler::_parse_block(CodeGen &codegen, const GDScriptParser::Sui
 				} else {
 					bool use_conversion = return_n->use_conversion;
 					if (codegen.function_node) {
-						const GDScriptDataType function_return_type = _gdtype_from_datatype(codegen.function_node->get_datatype(), codegen.script);
+						const GDScriptDataType function_return_type = _gdtype_from_datatype(codegen.function_node->return_type_constraint, codegen.script);
 						if (function_return_type.kind == GDScriptDataType::BUILTIN &&
 								function_return_type.builtin_type == Variant::DICTIONARY &&
 								function_return_type.has_container_element_types()) {
