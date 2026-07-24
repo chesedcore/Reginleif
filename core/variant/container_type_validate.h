@@ -41,7 +41,6 @@ struct ContainerType {
 	Ref<Script> script;
 };
 
-
 struct ContainerTypeValidate {
 
 	/// [Monarch] Imagine there's an `Array[Array[int]]`. This `type` field says that the top-level type
@@ -63,30 +62,30 @@ private:
 		const ContainerTypeValidate* rhs = nullptr;
 	};
 
-	_FORCE_INLINE_ bool _internal_validate(Variant &inout_variant, const char *p_operation, bool p_output_errors) const {
+	_FORCE_INLINE_ bool _internal_validate(Variant &r_inout_variant, const char *p_operation, bool p_output_errors) const {
 		if (type == Variant::NIL) {
 			return true;
 		}
 
-		if (type != inout_variant.get_type()) {
-			if (inout_variant.get_type() == Variant::NIL && type == Variant::OBJECT) {
+		if (type != r_inout_variant.get_type()) {
+			if (r_inout_variant.get_type() == Variant::NIL && type == Variant::OBJECT) {
 				return true;
 			}
 
-			if (Variant::can_convert_strict(inout_variant.get_type(), type)) {
+			if (Variant::can_convert_strict(r_inout_variant.get_type(), type)) {
 				Variant converted_to;
-				const Variant *converted_from = &inout_variant;
+				const Variant *converted_from = &r_inout_variant;
 				Callable::CallError call_error;
 				Variant::construct(type, converted_to, &converted_from, 1, call_error);
 
 				if (call_error.error == Callable::CallError::CALL_OK) {
-					inout_variant = converted_to;
+					r_inout_variant = converted_to;
 					return true;
 				}
 			}
 
 			if (p_output_errors) {
-				ERR_FAIL_V_MSG(false, vformat("[Reginleif] Tried to %s type '%s' into %s of type '%s'.", String(p_operation), Variant::get_type_name(inout_variant.get_type()), where, Variant::get_type_name(type)));
+				ERR_FAIL_V_MSG(false, vformat("[Reginleif] Tried to %s type '%s' into %s of type '%s'.", String(p_operation), Variant::get_type_name(r_inout_variant.get_type()), where, Variant::get_type_name(type)));
 			} else {
 				return false;
 			}
@@ -96,7 +95,7 @@ private:
 			return true;
 		}
 
-		return _internal_validate_object(inout_variant, p_operation, p_output_errors);
+		return _internal_validate_object(r_inout_variant, p_operation, p_output_errors);
 	}
 
 	_FORCE_INLINE_ bool _internal_validate_object(const Variant &p_variant, const char *p_operation, bool p_output_errors) const {
@@ -166,7 +165,7 @@ private:
 	}
 
 	///[Monarch] validates internal containers, and stuff passed inside the containers might mutate to accomodate the given type
-	bool _validate_nested(Variant& inout_variant, const char* p_operation, bool p_output_errors) const {
+	bool _validate_nested(Variant &r_inout_variant, const char *p_operation, bool p_output_errors) const {
 
 		if (nested_types.is_empty()) {
 			return true;
@@ -177,8 +176,8 @@ private:
 		}
 
 		if (type == Variant::ARRAY) {
-			Array arr = inout_variant;
-			
+			Array arr = r_inout_variant;
+
 			const ContainerTypeValidate& elem_type = nested_types[0];
 			for (int i = 0; i < arr.size(); i++) {
 				Variant elem = arr[i];
@@ -187,11 +186,11 @@ private:
 				}
 				arr[i] = elem;
 			}
-			inout_variant = arr;
+			r_inout_variant = arr;
 		}
 
 		if (type == Variant::DICTIONARY && nested_types.size() >= 2) { ///maybe an errorr case?
-			Dictionary dict = inout_variant;
+			Dictionary dict = r_inout_variant;
 			const ContainerTypeValidate& key_type = nested_types[0];
 			const ContainerTypeValidate& value_type = nested_types[1];
 			Array keys = dict.keys();
@@ -210,7 +209,7 @@ private:
 				}
 				dict[new_key] = value;
 			}
-			inout_variant = dict;
+			r_inout_variant = dict;
 		}
 
 		/// TODO: expand to (maybe) cover generic classes?
@@ -219,20 +218,19 @@ private:
 
 public:
 
-	bool validate(Variant &inout_variant, const char *p_operation = "use") const {
-
-		if(!_internal_validate(inout_variant, p_operation, true)) {
+	bool validate(Variant &r_inout_variant, const char *p_operation = "use") const {
+		if (!_internal_validate(r_inout_variant, p_operation, true)) {
 			return false;
 		}
-		return _validate_nested(inout_variant, p_operation, true);
+		return _validate_nested(r_inout_variant, p_operation, true);
 	}
 
 	///was made out of necessity because both the vm and the validation layer outputted errors, leading to noise
-	_FORCE_INLINE_ bool validate_silent(Variant& inout_variant, const char* p_operation = "use") const {
-		if (!_internal_validate(inout_variant, p_operation, false)) {
+	_FORCE_INLINE_ bool validate_silent(Variant &r_inout_variant, const char *p_operation = "use") const {
+		if (!_internal_validate(r_inout_variant, p_operation, false)) {
 			return false;
 		}
-		return _validate_nested(inout_variant, p_operation, false);
+		return _validate_nested(r_inout_variant, p_operation, false);
 	}
 
 	_FORCE_INLINE_ bool validate_object(const Variant &p_variant, const char *p_operation = "use") const {

@@ -755,6 +755,8 @@ class EditorPropertyResource : public EditorProperty {
 	String generic_child_binding_payload;
 
 	void _resource_selected(const Ref<Resource> &p_resource, bool p_inspect);
+	void _resource_expand_requested(const Ref<Resource> &p_resource, bool p_inspect);
+	void _select_resource(const Ref<Resource> &p_resource, bool p_inspect, bool p_force_open);
 	void _resource_changed(const Ref<Resource> &p_resource);
 
 	///
@@ -777,6 +779,7 @@ protected:
 	static void _bind_methods();
 
 public:
+	virtual void make_passthrough(bool p_passthrough) override;
 	virtual void update_property() override;
 	void setup(Object *p_object, const String &p_path, const String &p_base_type);
 	EditorResourcePicker *get_resource_picker() const { return resource_picker; }

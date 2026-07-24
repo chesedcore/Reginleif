@@ -233,12 +233,16 @@ void SceneTreeDock::shortcut_input(const Ref<InputEvent> &p_event) {
 		_tool_selected(TOOL_CHANGE_TYPE);
 	} else if (ED_IS_SHORTCUT("scene_tree/attach_script", p_event)) {
 		_tool_selected(TOOL_ATTACH_SCRIPT);
+	} else if (ED_IS_SHORTCUT("scene_tree/extend_script", p_event)) {
+		_tool_selected(TOOL_EXTEND_SCRIPT);
 	} else if (ED_IS_SHORTCUT("scene_tree/detach_script", p_event)) {
 		_tool_selected(TOOL_DETACH_SCRIPT);
 	} else if (ED_IS_SHORTCUT("scene_tree/reparent", p_event)) {
 		_tool_selected(TOOL_REPARENT);
 	} else if (ED_IS_SHORTCUT("scene_tree/reparent_to_new_node", p_event)) {
 		_tool_selected(TOOL_REPARENT_TO_NEW_NODE);
+	} else if (ED_IS_SHORTCUT("scene_tree/make_root", p_event)) {
+		_tool_selected(TOOL_MAKE_ROOT);
 	} else if (ED_IS_SHORTCUT("scene_tree/save_branch_as_scene", p_event)) {
 		_tool_selected(TOOL_NEW_SCENE_FROM);
 	} else if (ED_IS_SHORTCUT("scene_tree/delete_no_confirm", p_event)) {
@@ -386,9 +390,6 @@ void SceneTreeDock::_perform_instantiate_scenes(const Vector<String> &p_files, N
 
 	undo_redo->commit_action();
 	_push_item(instances[instances.size() - 1]);
-	for (int i = 0; i < instances.size(); i++) {
-		emit_signal(SNAME("node_created"), instances[i]);
-	}
 }
 
 void SceneTreeDock::_perform_create_audio_stream_players(const Vector<String> &p_files, Node *p_parent, int p_pos) {
@@ -645,11 +646,6 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 				break;
 			}
 
-			if (reset_create_dialog && !p_confirm_override) {
-				create_dialog->set_base_type("Node");
-				reset_create_dialog = false;
-			}
-
 			// Prefer nodes that inherit from the current scene root.
 			Node *current_edited_scene_root = EditorNode::get_singleton()->get_edited_scene();
 			if (current_edited_scene_root) {
@@ -669,9 +665,6 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 			}
 
 			create_dialog->popup_create(true);
-			if (!p_confirm_override) {
-				emit_signal(SNAME("add_node_used"));
-			}
 		} break;
 		case TOOL_INSTANTIATE: {
 			if (!profile_allow_editing) {
@@ -685,9 +678,6 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 			}
 
 			EditorNode::get_singleton()->get_quick_open_dialog()->popup_dialog({ "PackedScene" }, callable_mp(this, &SceneTreeDock::_quick_open));
-			if (!p_confirm_override) {
-				emit_signal(SNAME("add_node_used"));
-			}
 		} break;
 		case TOOL_EXPAND_COLLAPSE: {
 			Tree *tree = scene_tree->get_scene_tree();
@@ -808,11 +798,6 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 
 			if (!_validate_no_instance_selected(full_selection)) {
 				break;
-			}
-
-			if (reset_create_dialog) {
-				create_dialog->set_base_type("Node");
-				reset_create_dialog = false;
 			}
 
 			Node *selected = scene_tree->get_selected();
@@ -3069,8 +3054,7 @@ void SceneTreeDock::_selection_changed() {
 }
 
 Node *SceneTreeDock::_do_create(Node *p_parent) {
-	Variant c = create_dialog->instantiate_selected();
-	Node *child = Object::cast_to<Node>(c);
+	Node *child = create_dialog->instantiate_selected<Node>();
 	ERR_FAIL_NULL_V(child, nullptr);
 
 	String new_name = p_parent->validate_child_name(child);
@@ -3125,8 +3109,6 @@ void SceneTreeDock::_post_do_create(Node *p_child) {
 		}
 		control->set_size(ms);
 	}
-
-	emit_signal(SNAME("node_created"), p_child);
 }
 
 void SceneTreeDock::_create() {
@@ -3158,10 +3140,7 @@ void SceneTreeDock::_create() {
 		for (Node *n : full_selection) {
 			ERR_FAIL_NULL(n);
 
-			Variant c = create_dialog->instantiate_selected();
-
-			ERR_FAIL_COND(!c);
-			Node *new_node = Object::cast_to<Node>(c);
+			Node *new_node = create_dialog->instantiate_selected<Node>();
 			ERR_FAIL_NULL(new_node);
 			replace_node(n, new_node);
 		}
@@ -4342,12 +4321,12 @@ void SceneTreeDock::attach_script_to_selected(bool p_extend) {
 
 	String inherits = selected->get_class();
 
-	if (p_extend && existing.is_valid()) {
+	if (p_extend && existing.is_valid() && !existing->is_built_in()) {
 		for (int i = 0; i < ScriptServer::get_language_count(); i++) {
 			ScriptLanguage *l = ScriptServer::get_language(i);
 			if (l->get_type() == existing->get_class()) {
 				String name = l->get_global_class_name(existing->get_path());
-				if (ScriptServer::is_global_class(name) && EDITOR_GET("interface/editors/derive_script_globals_by_name").operator bool()) {
+				if (ScriptServer::is_global_class(name) && EDITOR_GET("docks/scene_tree/derive_script_globals_by_name").operator bool()) {
 					inherits = name;
 				} else if (l->can_inherit_from_file()) {
 					inherits = "\"" + existing->get_path() + "\"";
@@ -4355,6 +4334,8 @@ void SceneTreeDock::attach_script_to_selected(bool p_extend) {
 				break;
 			}
 		}
+	} else if (p_extend) {
+		return;
 	}
 
 	script_create_dialog->connect("script_created", callable_mp(this, &SceneTreeDock::_script_created));
@@ -4412,16 +4393,6 @@ void SceneTreeDock::attach_shader_to_selected(int p_preferred_mode) {
 void SceneTreeDock::open_shader_dialog(const Ref<ShaderMaterial> &p_for_material, int p_preferred_mode) {
 	selected_shader_material = p_for_material;
 	attach_shader_to_selected(p_preferred_mode);
-}
-
-void SceneTreeDock::open_add_child_dialog() {
-	create_dialog->set_base_type("CanvasItem");
-	_tool_selected(TOOL_NEW, true);
-	reset_create_dialog = true;
-}
-
-void SceneTreeDock::open_instance_child_dialog() {
-	_tool_selected(TOOL_INSTANTIATE, true);
 }
 
 List<Node *> SceneTreeDock::paste_nodes(bool p_paste_as_sibling) {
@@ -4723,7 +4694,7 @@ void SceneTreeDock::_update_create_root_dialog_visibility() {
 		create_root_dialog->show();
 		scene_tree->hide();
 	} else {
-		main_mc->set_theme_type_variation("NoBorderHorizontalBottom");
+		main_mc->set_theme_type_variation("NoBorderBottomPanel");
 		create_root_dialog->hide();
 		scene_tree->show();
 	}
@@ -4982,8 +4953,6 @@ void SceneTreeDock::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("replace_node"), &SceneTreeDock::_replace_node);
 
 	ADD_SIGNAL(MethodInfo("remote_tree_selected"));
-	ADD_SIGNAL(MethodInfo("add_node_used"));
-	ADD_SIGNAL(MethodInfo("node_created", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, Node::get_class_static())));
 }
 
 SceneTreeDock *SceneTreeDock::singleton = nullptr;
