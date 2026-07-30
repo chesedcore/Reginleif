@@ -279,6 +279,10 @@ private:
 			return script_language->lookup_code(p_code, p_symbol, p_path, p_owner, r_result);
 		}
 
+		virtual int32_t find_function(const String &p_function, const String &p_code) const override {
+			return script_language->find_function(p_function, p_code);
+		}
+
 		EditorAdapter(ScriptLanguageExtension *p_script_language) {
 			script_language = p_script_language;
 		}
@@ -379,8 +383,10 @@ public:
 				if (err.has("path")) {
 					serr.path = err["path"];
 				}
-				serr.line = err["line"];
-				serr.column = err["column"];
+				serr.start_line = err["line"];
+				serr.start_column = err["column"];
+				serr.end_line = err["line"];
+				serr.end_column = err["column"];
 				serr.message = err["message"];
 
 				r_errors->push_back(serr);
@@ -425,7 +431,17 @@ public:
 	EXBIND0RC(bool, supports_documentation)
 	EXBIND0RC(bool, can_inherit_from_file)
 
-	EXBIND2RC(int, find_function, const String &, const String &)
+	GDVIRTUAL2RC_REQUIRED(int, _find_function, const String &, const String &)
+#ifdef TOOLS_ENABLED
+	int32_t find_function(const String &p_function, const String &p_code) {
+		int32_t ret = -1;
+		if (GDVIRTUAL_CALL(_find_function, p_function, p_code, ret)) {
+			return ret;
+		}
+		return -1;
+	}
+#endif // TOOLS_ENABLED
+
 	EXBIND3RC(String, make_function, const String &, const String &, const PackedStringArray &)
 	EXBIND0RC(bool, can_make_function)
 	EXBIND3R(Error, open_in_external_editor, const Ref<Script> &, int, int)
@@ -642,8 +658,14 @@ public:
 	}
 
 	EXBIND0(reload_all_scripts)
-	EXBIND2(reload_scripts, const Array &, bool)
-	EXBIND2(reload_tool_script, const Ref<Script> &, bool)
+	GDVIRTUAL2_REQUIRED(_reload_scripts, const Array &, bool);
+	virtual void reload_scripts(const Array &p_scripts) override {
+		GDVIRTUAL_CALL(_reload_scripts, p_scripts, true);
+	}
+	GDVIRTUAL2_REQUIRED(_reload_tool_script, const Ref<Script> &, bool);
+	virtual void reload_tool_script(const Ref<Script> &p_script) override {
+		GDVIRTUAL_CALL(_reload_tool_script, p_script, true);
+	}
 	/* LOADER FUNCTIONS */
 
 	GDVIRTUAL0RC_REQUIRED(PackedStringArray, _get_recognized_extensions)
@@ -861,12 +883,12 @@ public:
 		List<Pair<StringName, Variant>> *state = (List<Pair<StringName, Variant>> *)p_userdata;
 		state->push_back(Pair<StringName, Variant>(*(const StringName *)p_name, *(const Variant *)p_value));
 	}
-	virtual void get_property_state(List<Pair<StringName, Variant>> &state) override {
+	virtual void get_property_state(List<Pair<StringName, Variant>> &r_state) override {
 		if (native_info->get_property_state_func) {
-			native_info->get_property_state_func(instance, _add_property_with_state, &state);
+			native_info->get_property_state_func(instance, _add_property_with_state, &r_state);
 			return;
 		}
-		ScriptInstance::get_property_state(state);
+		ScriptInstance::get_property_state(r_state);
 	}
 
 	virtual void get_method_list(List<MethodInfo> *p_list) const override {

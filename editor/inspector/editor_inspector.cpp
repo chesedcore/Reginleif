@@ -230,7 +230,7 @@ Size2 EditorProperty::get_minimum_size() const {
 		return Vector2();
 	}
 
-	Size2 ms = Size2(0, theme_cache.inspector_property_height);
+	Size2 ms;
 	for (int i = 0; i < get_child_count(); i++) {
 		Control *c = as_sortable_control(get_child(i));
 		if (!c) {
@@ -250,7 +250,8 @@ Size2 EditorProperty::get_minimum_size() const {
 		ms = ms.max(minsize);
 	}
 
-	if (!label.is_empty()) {
+	bool label_empty = label.is_empty();
+	if (!label_empty) {
 		ms.width += theme_cache.font_offset + theme_cache.horizontal_separation;
 	}
 
@@ -285,11 +286,18 @@ Size2 EditorProperty::get_minimum_size() const {
 	ms.height = MAX(ms.height, rs.y);
 
 	if (bottom_editor != nullptr && bottom_editor->is_visible()) {
-		ms.height += label.is_empty() ? 0 : _get_v_separation();
+		// If the label area is empty, leave the height alone before calculating the bottom editor.
+		if (ms.height > 0 || !label_empty) {
+			ms.height = MAX(ms.height, theme_cache.inspector_property_height);
+		}
+
+		ms.height += label_empty ? 0 : _get_v_separation();
 		Size2 bems = bottom_editor->get_combined_minimum_size();
 		ms.height += bems.height;
 		ms.width = MAX(ms.width, bems.width);
 	}
+
+	ms.height = MAX(ms.height, theme_cache.inspector_property_height);
 
 	return ms;
 }
@@ -407,7 +415,12 @@ void EditorProperty::_notification(int p_what) {
 
 				if (bottom_editor) {
 					int v_offset = label.is_empty() ? 0 : _get_v_separation();
-					bottom_rect = Rect2(0, rect.size.height + v_offset, size.width, bottom_editor->get_combined_minimum_size().height);
+					bottom_rect.size = Size2(size.width, bottom_editor->get_combined_minimum_size().height);
+
+					// If the label area is empty, don't take it into account for the bottom editor position.
+					if (!no_children || !label.is_empty() || left_container->get_child_count() > 0 || right_container->get_child_count() > 0) {
+						bottom_rect.position = Point2(0, rect.size.height + v_offset);
+					}
 				}
 
 				if (keying) {
@@ -542,7 +555,7 @@ void EditorProperty::_notification(int p_what) {
 			Color color;
 			if (draw_warning || draw_prop_warning) {
 				color = is_read_only() ? theme_cache.readonly_warning_color : theme_cache.warning_color;
-			} else if (is_read_only()) {
+			} else if (is_deprecated || is_read_only()) {
 				color = (sub_inspector_color_level >= 0) ? theme_cache.sub_inspector_property_color : theme_cache.readonly_property_color;
 			} else {
 				color = (sub_inspector_color_level >= 0) ? theme_cache.sub_inspector_property_color : theme_cache.property_color;
@@ -852,6 +865,10 @@ void EditorProperty::set_internal(bool p_internal) {
 	internal = p_internal;
 }
 
+void EditorProperty::make_passthrough(bool p_passthrough) {
+	set_mouse_behavior_recursive(p_passthrough ? MOUSE_BEHAVIOR_DISABLED : MOUSE_BEHAVIOR_INHERITED);
+}
+
 void EditorProperty::update_property() {
 	GDVIRTUAL_CALL(_update_property);
 }
@@ -949,6 +966,24 @@ void EditorProperty::update_editor_property_status() {
 	bool new_warning = false;
 	if (object->has_method("_get_property_warning")) {
 		new_warning = !String(object->call("_get_property_warning", property)).is_empty();
+	}
+
+	// Check if the property is deprecated.
+	if (!new_warning && !doc_path.is_empty()) {
+		EditorInspector *inspector = get_parent_inspector();
+		if (inspector) {
+			const String classname = doc_path.get_slicec(':', 1);
+			const String propname = doc_path.get_slicec(':', 2);
+			DocData::ClassDoc *cd = EditorHelp::get_doc(classname);
+			if (cd) {
+				for (const DocData::PropertyDoc &prop : cd->properties) {
+					if (prop.name == propname) {
+						is_deprecated = prop.is_deprecated;
+						break;
+					}
+				}
+			}
+		}
 	}
 
 	Variant current = object->get(_get_revert_property());
@@ -1320,6 +1355,10 @@ HBoxContainer *EditorProperty::get_inline_container(InlineControlSide p_side) {
 }
 
 void EditorProperty::set_bottom_editor(Control *p_control) {
+	if (bottom_editor == p_control) {
+		return;
+	}
+
 	bottom_editor = p_control;
 	if (has_borders) {
 		_update_property_bg();
@@ -1744,8 +1783,10 @@ void EditorProperty::_update_popup() {
 		menu->add_icon_item(theme_cache.help_icon, TTR("Open Documentation"), MENU_OPEN_DOCUMENTATION);
 	}
 
-	Vector<String> property_paths = { String::num_int64(get_edited_object()->get_instance_id()), property_path };
-	EditorContextMenuPluginManager::get_singleton()->add_options_from_plugins(menu, EditorContextMenuPlugin::CONTEXT_SLOT_INSPECTOR_PROPERTY, property_paths);
+	if (EditorContextMenuPluginManager::get_singleton()) {
+		Vector<String> property_paths = { String::num_int64(get_edited_object()->get_instance_id()), property_path };
+		EditorContextMenuPluginManager::get_singleton()->add_options_from_plugins(menu, EditorContextMenuPlugin::CONTEXT_SLOT_INSPECTOR_PROPERTY, property_paths);
+	}
 }
 
 ////////////////////////////////////////////////
@@ -2635,7 +2676,7 @@ void EditorInspectorSection::gui_input(const Ref<InputEvent> &p_event) {
 
 		bool is_valid_revert = false;
 		if (can_revert && revert_rect.has_point(pos)) {
-			Variant revert_value = EditorPropertyRevert::get_property_revert_value(object, related_enable_property, &is_valid_revert);
+			EditorPropertyRevert::get_property_revert_value(object, related_enable_property, &is_valid_revert);
 			ERR_FAIL_COND(!is_valid_revert);
 		}
 		if (is_valid_revert || (checkable && check_rect.has_point(pos))) {
@@ -2656,7 +2697,7 @@ void EditorInspectorSection::gui_input(const Ref<InputEvent> &p_event) {
 				fold();
 			}
 		}
-	} else if ((!checkable || checked) && mb.is_valid() && mb->is_pressed() && mb->get_button_index() == MouseButton::RIGHT) {
+	} else if (mb.is_valid() && mb->is_pressed() && mb->get_button_index() == MouseButton::RIGHT) {
 		accept_event();
 		_update_popup();
 		menu->set_position(get_screen_position() + get_local_mouse_position());
@@ -2770,6 +2811,10 @@ void EditorInspectorSection::set_checked(bool p_checked) {
 	queue_redraw();
 }
 
+void EditorInspectorSection::set_doc_path(const String &p_doc_path) {
+	doc_path = p_doc_path;
+}
+
 bool EditorInspectorSection::has_revertable_properties() const {
 	return !revertable_properties.is_empty();
 }
@@ -2812,20 +2857,62 @@ void EditorInspectorSection::update_property() {
 }
 
 void EditorInspectorSection::_update_popup() {
-	if (!menu) {
+	if (menu) {
+		menu->clear();
+	} else {
 		menu = memnew(PopupMenu);
 		add_child(menu);
 		menu->connect(SceneStringName(id_pressed), callable_mp(this, &EditorInspectorSection::menu_option));
-
-		menu->add_icon_item(theme_cache.icon_copy, TTRC("Copy Section Values"), MENU_COPY_VALUE);
-		menu->add_icon_item(theme_cache.icon_paste, TTRC("Paste Section Values"), MENU_PASTE_VALUE);
 	}
-	menu->set_item_disabled(MENU_PASTE_VALUE, EditorInspector::get_property_clipboard_type() != EditorInspector::PropertyClipboard::Type::SECTION);
+
+	if (checkable) {
+		menu->add_icon_item(theme_cache.icon_copy, TTRC("Copy Value"), MENU_COPY_VALUE);
+		menu->add_icon_item(theme_cache.icon_paste, TTRC("Paste Value"), MENU_PASTE_VALUE);
+		menu->set_item_disabled(-1, EditorInspector::get_property_clipboard_type() != EditorInspector::PropertyClipboard::Type::PROPERTY);
+		menu->add_icon_item(theme_cache.icon_copy_path, TTRC("Copy Property Path"), MENU_COPY_PROPERTY_PATH);
+		menu->set_item_disabled(-1, related_enable_property.is_empty());
+		menu->add_separator();
+	}
+
+	menu->add_icon_item(theme_cache.icon_copy, TTRC("Copy Section Values"), MENU_COPY_SECTION);
+	menu->add_icon_item(theme_cache.icon_paste, TTRC("Paste Section Values"), MENU_PASTE_SECTION);
+	menu->set_item_disabled(-1, EditorInspector::get_property_clipboard_type() != EditorInspector::PropertyClipboard::Type::SECTION);
+
+	if (can_revert) {
+		menu->add_separator();
+		menu->add_icon_item(theme_cache.icon_gui_revert, TTRC("Revert Value"), MENU_REVERT_VALUE);
+	}
+	if (!doc_path.is_empty() && ScriptEditor::get_singleton() && EditorNode::get_singleton()) {
+		menu->add_separator();
+		menu->add_icon_item(theme_cache.help_icon, TTRC("Open Documentation"), MENU_OPEN_DOCUMENTATION);
+	}
 }
 
-void EditorInspectorSection::menu_option(int p_option) const {
+void EditorInspectorSection::menu_option(int p_option) {
 	switch (p_option) {
 		case MENU_COPY_VALUE: {
+			EditorInspector::set_property_clipboard(EditorInspector::PropertyClipboard::Type::PROPERTY, object->get(related_enable_property));
+		} break;
+
+		case MENU_PASTE_VALUE: {
+			if (EditorInspector::get_property_clipboard_type() != EditorInspector::PropertyClipboard::Type::PROPERTY) {
+				return;
+			}
+
+			checked = EditorInspector::get_property_clipboard_value();
+			emit_signal(SNAME("section_toggled_by_user"), related_enable_property, checked);
+			if (checked) {
+				unfold();
+			} else if (!checkbox_only) {
+				vbox->hide();
+			}
+		} break;
+
+		case MENU_COPY_PROPERTY_PATH: {
+			DisplayServer::get_singleton()->clipboard_set(related_enable_property);
+		} break;
+
+		case MENU_COPY_SECTION: {
 			Dictionary clipboard;
 			for (const EditorProperty *property : section_properties) {
 				clipboard[property->get_edited_property()] = property->get_edited_property_value();
@@ -2833,7 +2920,7 @@ void EditorInspectorSection::menu_option(int p_option) const {
 			EditorInspector::set_property_clipboard(EditorInspector::PropertyClipboard::Type::SECTION, clipboard);
 		} break;
 
-		case MENU_PASTE_VALUE: {
+		case MENU_PASTE_SECTION: {
 			if (EditorInspector::get_property_clipboard_type() != EditorInspector::PropertyClipboard::Type::SECTION) {
 				break;
 			}
@@ -2852,6 +2939,24 @@ void EditorInspectorSection::menu_option(int p_option) const {
 				}
 			}
 			ur->commit_action();
+		} break;
+
+		case MENU_REVERT_VALUE: {
+			bool is_valid_revert = false;
+			Variant revert_value = EditorPropertyRevert::get_property_revert_value(object, related_enable_property, &is_valid_revert);
+			ERR_FAIL_COND(!is_valid_revert);
+			checked = revert_value;
+			emit_signal(SNAME("section_toggled_by_user"), related_enable_property, revert_value);
+			if (checked) {
+				unfold();
+			} else if (!checkbox_only) {
+				vbox->hide();
+			}
+		} break;
+
+		case MENU_OPEN_DOCUMENTATION: {
+			ScriptEditor::get_singleton()->goto_help(doc_path);
+			EditorNode::get_singleton()->get_editor_main_screen()->select(EditorMainScreen::EDITOR_SCRIPT);
 		} break;
 	}
 }
@@ -3829,7 +3934,7 @@ EditorPaginator::EditorPaginator() {
 	add_child(page_count_label);
 
 	next_page_button = memnew(Button);
-	prev_page_button->set_accessibility_name(TTRC("Next Page"));
+	next_page_button->set_accessibility_name(TTRC("Next Page"));
 	next_page_button->set_flat(true);
 	next_page_button->connect(SceneStringName(pressed), callable_mp(this, &EditorPaginator::_next_page_button_pressed));
 	add_child(next_page_button);
@@ -3910,6 +4015,8 @@ void EditorInspector::initialize_section_theme(EditorInspectorSection::ThemeCach
 	p_cache.icon_gui_animation_key = p_control->get_editor_theme_icon(SNAME("Key"));
 	p_cache.icon_copy = p_control->get_editor_theme_icon(SNAME("ActionCopy"));
 	p_cache.icon_paste = p_control->get_editor_theme_icon(SNAME("ActionPaste"));
+	p_cache.icon_copy_path = p_control->get_editor_theme_icon(SNAME("CopyNodePath"));
+	p_cache.help_icon = p_control->get_editor_theme_icon(SNAME("Help"));
 
 	p_cache.indent_box = p_control->get_theme_stylebox(SNAME("indent_box"), SNAME("EditorInspectorSection"));
 	p_cache.icon_hover = p_control->get_theme_stylebox(SceneStringName(hover), SceneStringName(FlatButton));
@@ -4553,6 +4660,10 @@ void EditorInspector::update_tree() {
 		if ((p.usage & PROPERTY_USAGE_SCRIPT_VARIABLE) && name_style == EditorPropertyNameProcessor::STYLE_LOCALIZED) {
 			name_style = EditorPropertyNameProcessor::STYLE_CAPITALIZED;
 		}
+		// Metadata entries are accessed by String, so we should show the actual key name directly.
+		if (path.begins_with("metadata/")) {
+			name_style = EditorPropertyNameProcessor::STYLE_RAW;
+		}
 		const String property_label_string = EditorPropertyNameProcessor::get_singleton()->process_name(name_override, name_style, p.name, doc_name) + feature_tag;
 
 		// Remove the property from the path.
@@ -4880,6 +4991,7 @@ void EditorInspector::update_tree() {
 						}
 
 						if (use_doc_hints) {
+							last_created_section->set_doc_path(doc_path);
 							last_created_section->set_tooltip_text(doc_tooltip_text);
 						}
 						continue;
@@ -5057,17 +5169,14 @@ void EditorInspector::update_tree() {
 		bool is_localized = property_name_style == EditorPropertyNameProcessor::STYLE_LOCALIZED;
 		for (const KeyValue<String, HashMap<String, LocalVector<EditorProperty *>>> &KV : favorites_to_add) {
 			String section_name = KV.key;
-			String label;
 			String tooltip;
 			VBoxContainer *parent_vbox = favorites_vbox;
 			if (!section_name.is_empty()) {
 				favorites_groups_vbox->show();
 
 				if (is_localized) {
-					label = EditorPropertyNameProcessor::get_singleton()->translate_group_name(section_name);
 					tooltip = section_name;
 				} else {
-					label = section_name;
 					tooltip = EditorPropertyNameProcessor::get_singleton()->translate_group_name(section_name);
 				}
 
@@ -5086,9 +5195,11 @@ void EditorInspector::update_tree() {
 					Variant value_checked = object->get(corresponding_section->related_enable_property, &valid);
 					if (valid) {
 						section->section = corresponding_section->section;
+						section->label = corresponding_section->label;
 						section->set_checkable(corresponding_section->related_enable_property, corresponding_section->checkbox_only, value_checked.operator bool());
 						section->set_keying(keying);
 						if (use_doc_hints) {
+							section->set_doc_path(corresponding_section->doc_path);
 							section->set_tooltip_text(corresponding_section->get_tooltip_text());
 						}
 
@@ -5104,10 +5215,8 @@ void EditorInspector::update_tree() {
 				VBoxContainer *vbox = parent_vbox;
 				if (!section_name.is_empty()) {
 					if (is_localized) {
-						label = EditorPropertyNameProcessor::get_singleton()->translate_group_name(section_name);
 						tooltip = section_name;
 					} else {
-						label = section_name;
 						tooltip = EditorPropertyNameProcessor::get_singleton()->translate_group_name(section_name);
 					}
 
@@ -5125,9 +5234,11 @@ void EditorInspector::update_tree() {
 						Variant value_checked = object->get(corresponding_section->related_enable_property, &valid);
 						if (valid) {
 							section->section = corresponding_section->section;
+							section->label = corresponding_section->label;
 							section->set_checkable(corresponding_section->related_enable_property, corresponding_section->checkbox_only, value_checked.operator bool());
 							section->set_keying(keying);
 							if (use_doc_hints) {
+								section->set_doc_path(corresponding_section->doc_path);
 								section->set_tooltip_text(corresponding_section->get_tooltip_text());
 							}
 

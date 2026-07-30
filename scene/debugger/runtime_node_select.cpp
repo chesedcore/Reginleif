@@ -61,6 +61,7 @@
 #ifndef PHYSICS_3D_DISABLED
 #include "scene/3d/physics/collision_object_3d.h"
 #include "scene/3d/physics/collision_shape_3d.h"
+#include "servers/physics_3d/direct_states/physics_direct_space_state_3d.h"
 #endif // PHYSICS_3D_DISABLED
 #include "scene/3d/visual_instance_3d.h"
 #include "scene/resources/3d/convex_polygon_shape_3d.h"
@@ -177,7 +178,7 @@ void RuntimeNodeSelect::_setup(const Dictionary &p_settings) {
 	view_3d_controller->set_z_far(camera_zfar);
 
 	view_3d_controller->set_invert_x_axis(p_settings.get("editors/3d/navigation/invert_x_axis", false));
-	view_3d_controller->set_invert_x_axis(p_settings.get("editors/3d/navigation/invert_y_axis", false));
+	view_3d_controller->set_invert_y_axis(p_settings.get("editors/3d/navigation/invert_y_axis", false));
 
 	view_3d_controller->set_warped_mouse_panning(p_settings.get("editors/3d/navigation/warped_mouse_panning", true));
 
@@ -1539,7 +1540,9 @@ void RuntimeNodeSelect::_reset_camera_3d() {
 	if (game_camera) {
 		Transform3D transform = game_camera->get_camera_transform();
 		transform.translate_local(0, 0, -cursor.distance);
-		cursor.pos = transform.origin;
+		cursor.pos_x = transform.origin.x;
+		cursor.pos_y = transform.origin.y;
+		cursor.pos_z = transform.origin.z;
 
 		cursor.x_rot = -game_camera->get_global_rotation().x;
 		cursor.y_rot = -game_camera->get_global_rotation().y;

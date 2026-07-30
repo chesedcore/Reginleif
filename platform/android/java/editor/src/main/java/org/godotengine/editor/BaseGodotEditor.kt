@@ -211,6 +211,7 @@ abstract class BaseGodotEditor : GodotActivity(), GameMenuFragment.GameMenuListe
 	private var changingOrientationAllowed = false
 	private var distractionFreeModeEnabled = false
 	private var activeWorkspace: String? = null
+	private var currentOrientation = Configuration.ORIENTATION_UNDEFINED
 
 	override fun getGodotAppLayout() = R.layout.godot_editor_layout
 
@@ -276,14 +277,25 @@ abstract class BaseGodotEditor : GodotActivity(), GameMenuFragment.GameMenuListe
 
 		// Add the game menu bar.
 		setupGameMenuBar()
+
+		if (!isLargeScreen && !isNativeXRDevice(applicationContext) && godot?.isEditorHint() == true) {
+			// Lock the editor screen orientation to landscape on small screens.
+			changingOrientationAllowed = true
+			requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_USER_LANDSCAPE
+			changingOrientationAllowed = false
+		}
 	}
 
 	override fun onConfigurationChanged(newConfig: Configuration) {
 		super.onConfigurationChanged(newConfig)
 
-		// Show EditorTitleBar on small screens only in landscape due to width limitations in portrait.
-		// TODO: Enable for portrait once the title bar width is optimized.
-		EditorUtils.toggleTitleBar(isLargeScreen || newConfig.orientation == Configuration.ORIENTATION_LANDSCAPE)
+		// Some editor parts are hidden on small screens due to width limitations in portrait.
+		if (!isLargeScreen && currentOrientation != newConfig.orientation) {
+			currentOrientation = newConfig.orientation
+			godot?.runOnRenderThread {
+				EditorUtils.orientationChanged(currentOrientation == Configuration.ORIENTATION_PORTRAIT)
+			}
+		}
 	}
 
 	override fun onDestroy() {
@@ -715,7 +727,7 @@ abstract class BaseGodotEditor : GodotActivity(), GameMenuFragment.GameMenuListe
 	/**
 	 * The Godot Android Editor sets its own orientation via its AndroidManifest
 	 */
-	protected open fun overrideOrientationRequest() = !changingOrientationAllowed
+	protected open fun overrideOrientationRequest() = isLargeScreen || godot?.isProjectManagerHint() == true || !changingOrientationAllowed
 
 	protected open fun overrideVolumeButtons() = false
 
@@ -934,12 +946,16 @@ abstract class BaseGodotEditor : GodotActivity(), GameMenuFragment.GameMenuListe
 			}
 		}
 
-		toggleScriptEditorOrientation()
+		if (!isLargeScreen) {
+			toggleScriptEditorOrientation()
+		}
 	}
 
 	override fun onDistractionFreeModeChanged(enabled: Boolean) {
 		distractionFreeModeEnabled = enabled
-		toggleScriptEditorOrientation()
+		if (!isLargeScreen) {
+			toggleScriptEditorOrientation()
+		}
 	}
 
 	private fun toggleScriptEditorOrientation() {

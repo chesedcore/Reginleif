@@ -143,12 +143,12 @@ void EditorDock::_bind_methods() {
 	BIND_ENUM_CONSTANT(DOCK_SLOT_BOTTOM_R);
 	BIND_ENUM_CONSTANT(DOCK_SLOT_MAX);
 
-	GDVIRTUAL_BIND(_update_layout, "layout", "slot");
+	GDVIRTUAL_BIND(_update_layout_and_slot, "layout", "slot");
 	GDVIRTUAL_BIND(_save_layout_to_config, "config", "section");
 	GDVIRTUAL_BIND(_load_layout_from_config, "config", "section");
 
 #ifndef DISABLE_DEPRECATED
-	GDVIRTUAL_BIND_COMPAT(_update_layout_, "layout");
+	GDVIRTUAL_BIND(_update_layout, "layout");
 #endif
 }
 
@@ -162,8 +162,16 @@ void EditorDock::make_visible() {
 	EditorDockManager::get_singleton()->open_dock(this, true);
 }
 
-void EditorDock::make_floating() {
+void EditorDock::make_floating(int p_screen) {
 	EditorDockManager::get_singleton()->make_dock_floating(this);
+
+	if (p_screen < 0) {
+		return;
+	}
+	Window *current_window = get_window();
+	if (current_window) {
+		current_window->set_current_screen(p_screen);
+	}
 }
 
 void EditorDock::close() {
@@ -330,6 +338,16 @@ Ref<Texture2D> EditorDock::get_effective_icon(const Callable &p_icon_fetch) {
 		icon = p_icon_fetch.call(icon_name);
 	}
 	return icon;
+}
+
+void EditorDock::update_layout(DockLayout p_layout, int p_slot) {
+	if (GDVIRTUAL_CALL(_update_layout_and_slot, p_layout, p_slot)) {
+		return;
+	}
+
+#ifndef DISABLE_DEPRECATED
+	GDVIRTUAL_CALL(_update_layout, p_layout);
+#endif
 }
 
 EditorDock::EditorDock() {

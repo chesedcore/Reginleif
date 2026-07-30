@@ -112,6 +112,7 @@ void ProjectManager::_notification(int p_what) {
 			_select_main_view(MAIN_VIEW_PROJECTS);
 			_update_list_placeholder();
 			_titlebar_resized();
+			_update_compact_mode(true);
 		} break;
 
 		case NOTIFICATION_TRANSLATION_CHANGED: {
@@ -145,6 +146,7 @@ void ProjectManager::_notification(int p_what) {
 		} break;
 		case NOTIFICATION_RESIZED: {
 			project_list->resize_project_titles();
+			_update_compact_mode();
 		} break;
 	}
 }
@@ -180,8 +182,18 @@ void ProjectManager::_build_icon_type_cache(Ref<Theme> p_theme) {
 
 // Main layout.
 
+// Hides certain parts of the Project Manager when window width gets smaller than combined_minimum_size.
+void ProjectManager::_update_compact_mode(bool p_reset_threshold) {
+	if (p_reset_threshold) {
+		compact_mode_threshold = root_container->get_combined_minimum_size().width;
+	}
+
+	bool compact_mode = get_size().width < compact_mode_threshold;
+	project_list_sidebar->set_visible(!compact_mode);
+}
+
 void ProjectManager::_update_size_limits() {
-	const Size2 minimum_size = Size2(720, 450) * EDSCALE;
+	const Size2 minimum_size = Size2(480, 300) * EDSCALE;
 
 	// Define a minimum window size to prevent UI elements from overlapping or being cut off.
 	Window *w = Object::cast_to<Window>(SceneTree::get_singleton()->get_root());
@@ -472,6 +484,12 @@ void ProjectManager::_dim_window() {
 // Quick settings.
 
 void ProjectManager::_show_quick_settings() {
+	if (!EditorPropertyNameProcessor::get_singleton()) {
+		EditorPropertyNameProcessor *epnp = memnew(EditorPropertyNameProcessor);
+		add_child(epnp);
+
+		EditorHelp::generate_doc();
+	}
 	quick_settings_dialog->popup_centered(Size2(640, 200) * EDSCALE);
 }
 
@@ -1663,8 +1681,8 @@ ProjectManager::ProjectManager() {
 			}
 
 			// The side bar with the edit, run, rename, etc. buttons.
-			VBoxContainer *project_list_sidebar = memnew(VBoxContainer);
-			project_list_sidebar->set_custom_minimum_size(Size2(120, 120));
+			project_list_sidebar = memnew(VBoxContainer);
+			project_list_sidebar->set_custom_minimum_size(Size2(120, 120) * EDSCALE);
 			project_list_hbox->add_child(project_list_sidebar);
 
 			project_list_sidebar->add_child(memnew(HSeparator));
@@ -2002,6 +2020,8 @@ ProjectManager::ProjectManager() {
 ProjectManager::~ProjectManager() {
 	singleton = nullptr;
 	EditorInspector::cleanup_plugins();
+
+	EditorHelp::cleanup_doc();
 
 #if defined(MODULE_GDSCRIPT_ENABLED) || defined(MODULE_MONO_ENABLED)
 	EditorHelpHighlighter::free_singleton();

@@ -418,11 +418,6 @@ public:
 		Node *next = nullptr;
 		List<AnnotationNode *> annotations;
 
-		DataType datatype;
-
-		virtual DataType get_datatype() const { return datatype; }
-		virtual void set_datatype(const DataType &p_datatype) { datatype = p_datatype; }
-
 		virtual bool is_expression() const { return false; }
 
 		virtual ~Node() {}
@@ -433,6 +428,8 @@ public:
 		bool reduced = false;
 		bool is_constant = false;
 		Variant reduced_value;
+
+		DataType type_constraint;
 
 		virtual bool is_expression() const override { return true; }
 		virtual ~ExpressionNode() {}
@@ -484,6 +481,8 @@ public:
 		bool infer_datatype = false;
 		bool use_conversion_assign = false;
 		int usages = 0;
+
+		DataType type_constraint;
 
 		virtual ~AssignableNode() {}
 
@@ -606,6 +605,8 @@ public:
 	};
 
 	struct EnumNode : public Node {
+		DataType enum_type;
+
 		struct Value {
 			IdentifierNode *identifier = nullptr;
 			ExpressionNode *custom_value = nullptr;
@@ -737,19 +738,19 @@ public:
 			DataType get_datatype() const {
 				switch (type) {
 					case CLASS:
-						return m_class->get_datatype();
+						return m_class->self_type;
 					case CONSTANT:
-						return constant->get_datatype();
+						return constant->type_constraint;
 					case FUNCTION:
-						return function->get_datatype();
+						return function->return_type_constraint;
 					case VARIABLE:
-						return variable->get_datatype();
+						return variable->type_constraint;
 					case ENUM:
-						return m_enum->get_datatype();
+						return m_enum->enum_type;
 					case ENUM_VALUE:
-						return enum_value.identifier->get_datatype();
+						return enum_value.identifier->type_constraint;
 					case SIGNAL:
-						return signal->get_datatype();
+						return signal->signal_type;
 					case GROUP:
 						return DataType();
 					case UNDEFINED:
@@ -837,6 +838,8 @@ public:
 		Vector<IdentifierNode *> extends; // List for indexing: extends A.B.C
 		Vector<TypeNode*> extends_generic_args; ///generics that belong to the superclass
 		DataType base_type;
+		// Metatype that represents this class.
+		DataType self_type;
 		String fqcn; // Fully-qualified class name. Identifies uniquely any class in the project.
 
 		Vector<ImplNode*> impls; ///impl blocks declared inside this class body
@@ -964,7 +967,10 @@ public:
 		Vector<ParameterNode *> parameters;
 		HashMap<StringName, int> parameters_indices;
 		ParameterNode *rest_parameter = nullptr;
+
 		TypeNode *return_type = nullptr;
+		DataType return_type_constraint;
+
 		SuiteNode *body = nullptr;
 		bool is_abstract = false;
 		bool is_static = false; // For lambdas it's determined in the analyzer.
@@ -1122,6 +1128,8 @@ public:
 	};
 
 	struct PatternNode : public Node {
+		DataType type_constraint;
+
 		enum Type {
 			PT_LITERAL,
 			PT_EXPRESSION,
@@ -1167,6 +1175,8 @@ public:
 	};
 
 	struct ReturnNode : public Node {
+		DataType return_type;
+
 		ExpressionNode *return_value = nullptr;
 		bool void_return = false;
 		bool use_conversion = false;
@@ -1192,6 +1202,8 @@ public:
 #ifdef TOOLS_ENABLED
 		MemberDocData doc_data;
 #endif // TOOLS_ENABLED
+
+		DataType signal_type;
 
 		int usages = 0;
 
@@ -1243,6 +1255,8 @@ public:
 	};
 
 	struct SuiteNode : public Node {
+		DataType suite_type;
+
 		SuiteNode *parent_block = nullptr;
 		Vector<Node *> statements;
 		struct Local {
@@ -1363,6 +1377,8 @@ public:
 		Vector<TypeNode *> container_types;
 
 		Vector<IdentifierNode*> trait_bounds;
+
+		DataType resolved_type;
 
 		TypeNode *get_container_type_or_null(int p_index) const {
 			return p_index >= 0 && p_index < container_types.size() ? container_types[p_index] : nullptr;

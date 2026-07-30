@@ -481,7 +481,7 @@ public:
 
 #ifdef GD_MONO_HOT_RELOAD
 	bool is_assembly_reloading_needed();
-	void reload_assemblies(bool p_soft_reload);
+	void reload_assemblies();
 #endif
 
 	_FORCE_INLINE_ ManagedCallableMiddleman *get_managed_callable_middleman() const {
@@ -517,9 +517,6 @@ public:
 	}
 	String validate_path(const String &p_path) const override;
 	bool supports_builtin_mode() const override;
-	/* TODO? */ int find_function(const String &p_function, const String &p_code) const override {
-		return -1;
-	}
 	String make_function(const String &p_class, const String &p_name, const PackedStringArray &p_args) const override;
 	virtual bool can_make_function() const override { return false; }
 	virtual String _get_indentation() const;
@@ -563,8 +560,8 @@ public:
 	/* TODO? */ void get_public_annotations(List<MethodInfo> *p_annotations) const override {}
 
 	void reload_all_scripts() override;
-	void reload_scripts(const Array &p_scripts, bool p_soft_reload) override;
-	void reload_tool_script(const Ref<Script> &p_script, bool p_soft_reload) override;
+	void reload_scripts(const Array &p_scripts) override;
+	void reload_tool_script(const Ref<Script> &p_script) override;
 
 	/* LOADER FUNCTIONS */
 	void get_recognized_extensions(List<String> *p_extensions) const override;

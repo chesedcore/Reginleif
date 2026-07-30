@@ -160,6 +160,7 @@ private:
 	bool checked = false;
 	bool draw_warning = false;
 	bool draw_prop_warning = false;
+	bool is_deprecated = false;
 	bool keying = false;
 	bool deletable = false;
 	bool label_overlayed = false;
@@ -191,7 +192,7 @@ private:
 
 	void _update_popup();
 	void _focusable_focused(int p_index);
-	int _get_v_separation() const { return bottom_editor ? 0 : theme_cache.vertical_separation; }
+	int _get_v_separation() const { return bottom_editor && bottom_editor_seperation ? theme_cache.vertical_separation : 0; }
 
 	bool selectable = true;
 	bool selected = false;
@@ -218,6 +219,7 @@ private:
 protected:
 	bool has_borders = false;
 	bool can_override = false;
+	bool bottom_editor_seperation = false;
 
 	void _notification(int p_what);
 	static void _bind_methods();
@@ -266,6 +268,7 @@ public:
 	void set_doc_path(const String &p_doc_path);
 	void set_internal(bool p_internal);
 
+	virtual void make_passthrough(bool p_passthrough);
 	virtual void update_property();
 	void update_editor_property_status();
 
@@ -297,10 +300,12 @@ public:
 
 	void add_inline_control(Control *p_control, InlineControlSide p_side);
 	HBoxContainer *get_inline_container(InlineControlSide p_side);
-	void set_label_overlayed(bool p_overlay);
 
+	void set_label_overlayed(bool p_overlay);
 	void set_label_reference(Control *p_control);
+
 	void set_bottom_editor(Control *p_control);
+	Control *get_bottom_editor() const { return bottom_editor; }
 
 	void set_use_folding(bool p_use_folding);
 	bool is_using_folding() const;
@@ -460,6 +465,11 @@ class EditorInspectorSection : public Container {
 	enum MenuItems {
 		MENU_COPY_VALUE,
 		MENU_PASTE_VALUE,
+		MENU_COPY_PROPERTY_PATH,
+		MENU_COPY_SECTION,
+		MENU_PASTE_SECTION,
+		MENU_REVERT_VALUE,
+		MENU_OPEN_DOCUMENTATION,
 	};
 
 	String label;
@@ -486,6 +496,8 @@ class EditorInspectorSection : public Container {
 	bool header_hover = false;
 
 	bool checkbox_only = false;
+
+	String doc_path;
 
 	PopupMenu *menu = nullptr;
 
@@ -533,6 +545,8 @@ class EditorInspectorSection : public Container {
 		Ref<Texture2D> icon_gui_animation_key;
 		Ref<Texture2D> icon_copy;
 		Ref<Texture2D> icon_paste;
+		Ref<Texture2D> icon_copy_path;
+		Ref<Texture2D> help_icon;
 
 		Ref<StyleBoxFlat> indent_box;
 		Ref<StyleBoxFlat> icon_hover;
@@ -564,6 +578,7 @@ public:
 	void set_checkable(const String &p_related_check_property, bool p_checkbox_only, bool p_checked);
 	inline bool is_checkable() const { return checkable; }
 	void set_checked(bool p_checked);
+	void set_doc_path(const String &p_doc_path);
 	void set_keying(bool p_keying);
 
 	bool has_revertable_properties() const;
@@ -572,7 +587,7 @@ public:
 	void update_property();
 
 	void _update_popup();
-	void menu_option(int p_option) const;
+	void menu_option(int p_option);
 
 	void register_property(EditorProperty *p_property) { section_properties.push_back(p_property); }
 

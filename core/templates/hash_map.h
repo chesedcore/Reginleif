@@ -38,20 +38,6 @@
 
 #include <initializer_list>
 
-/**
- * A HashMap implementation that uses open addressing with Robin Hood hashing.
- * Robin Hood hashing swaps out entries that have a smaller probing distance
- * than the to-be-inserted entry, that evens out the average probing distance
- * and enables faster lookups. Backward shift deletion is employed to further
- * improve the performance and to avoid infinite loops in rare cases.
- *
- * Keys and values are stored in a double linked list by insertion order. This
- * has a slight performance overhead on lookup, which can be mostly compensated
- * using a paged allocator if required.
- *
- * The assignment operator copy the pairs from one map to the other.
- */
-
 template <typename TKey, typename TValue>
 struct HashMapElement {
 	HashMapElement *next = nullptr;
@@ -62,6 +48,15 @@ struct HashMapElement {
 			data(p_key, p_value) {}
 };
 
+/**
+ * Key-value container (aka hash table or dictionary) using robin-hood hashing.
+ *
+ * Key-values are pointer-stable across HashMap mutations.
+ * Remembers insertion order and iterates by it.
+ *
+ * Core container guidance:
+ * https://docs.godotengine.org/en/latest/engine_details/architecture/core_types.html#containers
+ */
 template <typename TKey, typename TValue,
 		typename Hasher = HashMapHasherDefault,
 		typename Comparator = HashMapComparatorDefault<TKey>,
@@ -444,14 +439,14 @@ public:
 			return *this;
 		}
 
-		_FORCE_INLINE_ bool operator==(const ConstIterator &b) const { return E == b.E; }
-		_FORCE_INLINE_ bool operator!=(const ConstIterator &b) const { return E != b.E; }
+		_FORCE_INLINE_ bool operator==(const ConstIterator &p_other) const { return E == p_other.E; }
+		_FORCE_INLINE_ bool operator!=(const ConstIterator &p_other) const { return E != p_other.E; }
 
 		_FORCE_INLINE_ explicit operator bool() const {
 			return E != nullptr;
 		}
 
-		_FORCE_INLINE_ ConstIterator(const HashMapElement<TKey, TValue> *p_E) { E = p_E; }
+		_FORCE_INLINE_ ConstIterator(const HashMapElement<TKey, TValue> *p_element) { E = p_element; }
 		_FORCE_INLINE_ ConstIterator() {}
 		_FORCE_INLINE_ ConstIterator(const ConstIterator &p_it) { E = p_it.E; }
 		_FORCE_INLINE_ void operator=(const ConstIterator &p_it) {
@@ -480,14 +475,14 @@ public:
 			return *this;
 		}
 
-		_FORCE_INLINE_ bool operator==(const Iterator &b) const { return E == b.E; }
-		_FORCE_INLINE_ bool operator!=(const Iterator &b) const { return E != b.E; }
+		_FORCE_INLINE_ bool operator==(const Iterator &p_other) const { return E == p_other.E; }
+		_FORCE_INLINE_ bool operator!=(const Iterator &p_other) const { return E != p_other.E; }
 
 		_FORCE_INLINE_ explicit operator bool() const {
 			return E != nullptr;
 		}
 
-		_FORCE_INLINE_ Iterator(HashMapElement<TKey, TValue> *p_E) { E = p_E; }
+		_FORCE_INLINE_ Iterator(HashMapElement<TKey, TValue> *p_element) { E = p_element; }
 		_FORCE_INLINE_ Iterator() {}
 		_FORCE_INLINE_ Iterator(const Iterator &p_it) { E = p_it.E; }
 		_FORCE_INLINE_ void operator=(const Iterator &p_it) {

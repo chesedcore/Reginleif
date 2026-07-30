@@ -153,6 +153,9 @@ void EditorPropertyVariant::update_property() {
 		}
 		ERR_FAIL_NULL(sub_property);
 
+		// Doesn't affect foldable property types, since they don't start with a bottom editor.
+		set_bottom_editor(sub_property->get_bottom_editor() ? content : nullptr);
+
 		sub_property->set_object_and_property(get_edited_object(), get_edited_property());
 		sub_property->set_name_split_ratio(0);
 		sub_property->set_selectable(false);
@@ -1708,8 +1711,6 @@ void EditorPropertySignal::_edit_pressed() {
 }
 
 void EditorPropertySignal::update_property() {
-	String type = base_type;
-
 	Signal signal = get_edited_property_value();
 
 	edit->set_text("Signal: " + signal.get_name());
@@ -1729,8 +1730,6 @@ EditorPropertySignal::EditorPropertySignal() {
 ///////////////////// CALLABLE /////////////////////////
 
 void EditorPropertyCallable::update_property() {
-	String type = base_type;
-
 	Callable callable = get_edited_property_value();
 
 	edit->set_text("Callable");
@@ -3396,6 +3395,14 @@ void EditorPropertyResource::_set_read_only(bool p_read_only) {
 }
 
 void EditorPropertyResource::_resource_selected(const Ref<Resource> &p_resource, bool p_inspect) {
+	_select_resource(p_resource, p_inspect, false);
+}
+
+void EditorPropertyResource::_resource_expand_requested(const Ref<Resource> &p_resource, bool p_inspect) {
+	_select_resource(p_resource, p_inspect, true);
+}
+
+void EditorPropertyResource::_select_resource(const Ref<Resource> &p_resource, bool p_inspect, bool p_force_open) {
 	if (p_resource->is_built_in() && !p_resource->get_path().is_empty()) {
 		String parent = p_resource->get_path().get_slice("::", 0);
 		List<String> extensions;
@@ -3413,7 +3420,10 @@ void EditorPropertyResource::_resource_selected(const Ref<Resource> &p_resource,
 	}
 
 	if (!p_inspect && use_sub_inspector) {
-		bool unfold = !get_edited_object()->editor_is_section_unfolded(get_edited_property());
+		bool unfold = p_force_open;
+		if (!unfold) {
+			unfold = !get_edited_object()->editor_is_section_unfolded(get_edited_property());
+		}
 		get_edited_object()->editor_set_section_unfold(get_edited_property(), unfold);
 		user_opened_editor = unfold;
 		update_property();
@@ -3761,6 +3771,7 @@ void EditorPropertyResource::setup(Object *p_object, const String &p_path, const
 
 	resource_picker->connect("resource_selected", callable_mp(this, &EditorPropertyResource::_resource_selected));
 	resource_picker->connect("resource_changed", callable_mp(this, &EditorPropertyResource::_resource_changed));
+	resource_picker->connect("_resource_expand_requested", callable_mp(this, &EditorPropertyResource::_resource_expand_requested));
 
 	for (int i = 0; i < resource_picker->get_child_count(); i++) {
 		Button *b = Object::cast_to<Button>(resource_picker->get_child(i));
@@ -3768,6 +3779,10 @@ void EditorPropertyResource::setup(Object *p_object, const String &p_path, const
 			add_focusable(b);
 		}
 	}
+}
+
+void EditorPropertyResource::make_passthrough(bool p_passthrough) {
+	resource_picker->make_passthrough(p_passthrough);
 }
 
 void EditorPropertyResource::update_property() {

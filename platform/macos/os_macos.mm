@@ -239,9 +239,7 @@ void OS_MacOS::finalize() {
 	delete_main_loop();
 
 #ifdef SDL_ENABLED
-	if (joypad_sdl) {
-		memdelete(joypad_sdl);
-	}
+	memdelete(joypad_sdl);
 #endif
 }
 
@@ -1018,6 +1016,11 @@ String OS_MacOS::get_system_ca_certificates() {
 	}
 	CFRelease(result);
 	return certs;
+}
+
+Error OS_MacOS::get_entropy(uint8_t *r_buffer, int p_bytes) {
+	int status = SecRandomCopyBytes(kSecRandomDefault, p_bytes, r_buffer);
+	return status == errSecSuccess ? OK : FAILED;
 }
 
 OS::PreferredTextureFormat OS_MacOS::get_preferred_texture_format() const {
