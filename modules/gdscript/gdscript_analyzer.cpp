@@ -1226,7 +1226,7 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 			result.trait_bound_names.push_back(trait_id->name);
 		}
 
-		p_type->set_datatype(result);
+		p_type->resolved_type = result;
 		return result;
 	}
 
@@ -5627,14 +5627,14 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 
 					GDScriptParser::FunctionNode* impl_method = trait_analyzer != nullptr ? trait_analyzer->find_impl_method(base, name) : nullptr;
 					if (impl_method != nullptr) {
-						p_identifier->set_datatype(make_callable_type(impl_method->info));
+						p_identifier->type_constraint = make_callable_type(impl_method->info);
 						return;
 					}
 
 					if (has_global_impl_method_claim_for_type(base, name)) {
 						MethodInfo method_info;
 						method_info.name = name;
-						p_identifier->set_datatype(make_callable_type(method_info));
+						p_identifier->type_constraint = make_callable_type(method_info);
 						return;
 					}
 
@@ -5862,7 +5862,7 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 
 	GDScriptParser::FunctionNode* impl_method = trait_analyzer != nullptr ? trait_analyzer->find_impl_method(base, name) : nullptr;
 	if (impl_method != nullptr) {
-		p_identifier->set_datatype(make_callable_type(impl_method->info));
+		p_identifier->type_constraint = make_callable_type(impl_method->info);
 		p_identifier->source = GDScriptParser::IdentifierNode::INHERITED_VARIABLE;
 		return;
 	}
@@ -5870,7 +5870,7 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 	if (has_global_impl_method_claim_for_type(base, name)) {
 		MethodInfo method_info;
 		method_info.name = name;
-		p_identifier->set_datatype(make_callable_type(method_info));
+		p_identifier->type_constraint = make_callable_type(method_info);
 		p_identifier->source = GDScriptParser::IdentifierNode::INHERITED_VARIABLE;
 		return;
 	}
@@ -8028,7 +8028,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 			return true; ///genuinely unconstrained, could be fucking anything
 		}
 
-		const GDScriptParser::DataType& closed_upper = decl->generic_upper_bound->get_datatype();
+		const GDScriptParser::DataType& closed_upper = decl->generic_upper_bound->resolved_type;
 		if (!closed_upper.trait_bound_names.is_empty()) {
 			return false;
 		}
@@ -8071,7 +8071,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 				return true; /// unconstrained generic! treat as Variant
 			}
 
-			const GDScriptParser::DataType& raw_upper = decl->generic_upper_bound->get_datatype();
+			const GDScriptParser::DataType& raw_upper = decl->generic_upper_bound->resolved_type;
 			if (!raw_upper.trait_bound_names.is_empty()) {
 				if (p_trait_analyzer == nullptr) {
 					return false;
@@ -8117,7 +8117,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 			return true; ///genuinely unconstrained, once again, could be friggin anything
 		}
 
-		const GDScriptParser::DataType& closed_upper = decl->generic_upper_bound->get_datatype();
+		const GDScriptParser::DataType& closed_upper = decl->generic_upper_bound->resolved_type;
 		if (!closed_upper.trait_bound_names.is_empty()) {
 			if (p_trait_analyzer == nullptr) {
 				return false;
@@ -8235,6 +8235,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 		case GDScriptParser::DataType::VARIANT:
 		/// [Monarch]
 		case GDScriptParser::DataType::GENERIC_TYPE:
+		case GDScriptParser::DataType::TRAIT_OBJECT:
 		case GDScriptParser::DataType::BUILTIN:
 		case GDScriptParser::DataType::ENUM:
 		case GDScriptParser::DataType::RESOLVING:
@@ -8319,6 +8320,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 		case GDScriptParser::DataType::VARIANT:
 		/// [Monarch]
 		case GDScriptParser::DataType::GENERIC_TYPE:
+		case GDScriptParser::DataType::TRAIT_OBJECT:
 		case GDScriptParser::DataType::BUILTIN:
 		case GDScriptParser::DataType::ENUM:
 		case GDScriptParser::DataType::RESOLVING:
