@@ -1162,8 +1162,8 @@ static void _add_trait_method_completion_from_node(const GDScriptParser::Functio
 		}
 		const GDScriptParser::ParameterNode* param = p_method->parameters[i];
 		method_hint += param->identifier->name;
-		if (p_type_hints && param->get_datatype().is_hard_type()) {
-			method_hint += ": " + param->get_datatype().to_string();
+		if (p_type_hints && param->type_constraint.is_hard_type()) {
+			method_hint += ": " + param->type_constraint.to_string();
 		}
 	}
 	if (p_method->is_vararg()) {
@@ -1176,8 +1176,8 @@ static void _add_trait_method_completion_from_node(const GDScriptParser::Functio
 		}
 	}
 	method_hint += ")";
-	if (p_type_hints && p_method->get_datatype().is_hard_type()) {
-		const GDScriptParser::DataType& ret_type = p_method->get_datatype();
+	if (p_type_hints && p_method->return_type_constraint.is_hard_type()) {
+		const GDScriptParser::DataType& ret_type = p_method->return_type_constraint;
 		if (ret_type.kind == GDScriptParser::DataType::BUILTIN && ret_type.builtin_type == Variant::NIL) {
 			method_hint += " -> void";
 		} else {
@@ -4644,6 +4644,11 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 				r_result.class_name = "Generic";
 				r_result.class_member = base_type.generic_param;
 				return OK;
+			} break;
+
+			case GDScriptParser::DataType::TRAIT_OBJECT: {
+				/// dyn trait object, so no fixed symbol table to resolve against
+				return ERR_CANT_RESOLVE;
 			} break;
 
 			case GDScriptParser::DataType::RESOLVING:

@@ -92,10 +92,10 @@ Error GDScriptTraitAnalyzer::resolve_trait(GDScriptParser::TraitNode* p_trait) {
 
 		GDScriptTrait::MethodSignatureSnapshot snapshot;
 		for (int i = 0; i < method->parameters.size(); i++) {
-			snapshot.param_types.push_back(method->parameters[i]->get_datatype());
+			snapshot.param_types.push_back(method->parameters[i]->type_constraint);
 			snapshot.param_names.push_back(method->parameters[i]->identifier != nullptr ? method->parameters[i]->identifier->name : StringName());
 		}
-		snapshot.return_type = method->get_datatype();
+		snapshot.return_type = method->return_type_constraint;
 		gd_trait->required_signatures[method->identifier->name] = snapshot;
 	}
 
@@ -109,10 +109,10 @@ Error GDScriptTraitAnalyzer::resolve_trait(GDScriptParser::TraitNode* p_trait) {
 
 		GDScriptTrait::MethodSignatureSnapshot default_snapshot;
 		for (int i = 0; i < method->parameters.size(); i++) {
-			default_snapshot.param_types.push_back(method->parameters[i]->get_datatype());
+			default_snapshot.param_types.push_back(method->parameters[i]->type_constraint);
 			default_snapshot.param_names.push_back(method->parameters[i]->identifier != nullptr ? method->parameters[i]->identifier->name : StringName());
 		}
-		default_snapshot.return_type = method->get_datatype();
+		default_snapshot.return_type = method->return_type_constraint;
 		gd_trait->required_signatures[method->identifier->name] = default_snapshot;
 	}
 
@@ -202,7 +202,7 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 		target_type = analyzer->type_from_metatype(analyzer->resolve_datatype(p_impl->impl_target_type));
 	} else if (parser->current_class != nullptr) {
 		///in-class `impl Trait` sugar, so target is whatever class we're scanning inside
-		target_type = parser->current_class->get_datatype();
+		target_type = parser->current_class->self_type;
 	} else {
 		push_error(R"([Reginleif] "impl" block has no target type and is not inside a class.)", p_impl);
 		return ERR_PARSE_ERROR;
@@ -460,7 +460,7 @@ bool GDScriptTraitAnalyzer::_signatures_match(const GDScriptTrait::MethodSignatu
 
 	for (int i = 0; i < p_required.param_types.size(); i++) {
 		GDScriptParser::DataType required_param_type = p_required.param_types[i];
-		GDScriptParser::DataType provided_param_type = p_provided->parameters[i]->get_datatype();
+		GDScriptParser::DataType provided_param_type = p_provided->parameters[i]->type_constraint;
 
 		///parameters are contravariant in general, but gdscript doesn't do variance gymnastics
 		///anywhere else either, so we just require them to line up both ways (effectively equal)
@@ -472,7 +472,7 @@ bool GDScriptTraitAnalyzer::_signatures_match(const GDScriptTrait::MethodSignatu
 	}
 
 	GDScriptParser::DataType required_return = p_required.return_type;
-	GDScriptParser::DataType provided_return = p_provided->get_datatype();
+	GDScriptParser::DataType provided_return = p_provided->return_type_constraint;
 
 	///don't allow a Variant return to slip through when a required return is specified
 	if (!required_return.is_variant() && provided_return.is_variant()) {

@@ -148,6 +148,10 @@ GDScriptDataType GDScriptCompiler::_gdtype_from_datatype(const GDScriptParser::D
 			return GDScriptDataType(); /// return Variant for now, just type erasure
 		} break;
 
+		case GDScriptParser::DataType::TRAIT_OBJECT: {
+			return GDScriptDataType();
+		} break;
+
 		case GDScriptParser::DataType::CLASS: {
 			if (p_handle_metatype && p_datatype.is_meta_type) {
 				result.kind = GDScriptDataType::NATIVE;
@@ -365,7 +369,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 							return temp;
 						}
 
-						if (in->get_datatype().kind == GDScriptParser::DataType::BUILTIN && in->get_datatype().builtin_type == Variant::CALLABLE) {
+						if (in->type_constraint.kind == GDScriptParser::DataType::BUILTIN && in->type_constraint.builtin_type == Variant::CALLABLE) {
 							///the analyser resolved this as a trait impl method callable. remember to fetch it through
 							///GET_NAMED so the VM can build the right GDScriptImplCallable for self
 							GDScriptCodeGenerator::Address temp = codegen.add_temporary();
