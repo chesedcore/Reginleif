@@ -4358,7 +4358,9 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			OPCODE(OPCODE_RESERVED_12)
 			OPCODE(OPCODE_RESERVED_13)
 			OPCODE(OPCODE_RESERVED_14) {
+#ifdef DEBUG_ENABLED
 				err_text = "Illegal reserved opcode " + itos(_code_ptr[ip]) + " at address " + itos(ip);
+#endif
 				OPCODE_BREAK;
 			}
 			DISPATCH_OPCODE;
