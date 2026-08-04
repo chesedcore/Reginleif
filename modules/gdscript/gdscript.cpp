@@ -2333,6 +2333,44 @@ void GDScriptLanguage::finish() {
 		ERR_PRINT("GDScript bug (please report): Dangling script in script_list after language shutdown.");
 		script_list.clear();
 	}
+	
+	///scripts can fuck off before the traits they own do,
+	///so collect and destroy orphan trait methods here
+	{
+		Vector<GDScriptFunction*> impl_functions_to_delete;
+
+		for (const KeyValue<Variant::Type, HashMap<StringName, GDScriptFunction*>>& E : native_impl_methods) {
+			for (const KeyValue<StringName, GDScriptFunction*>& M : E.value) {
+				if (M.value != nullptr && !impl_functions_to_delete.has(M.value)) {
+					impl_functions_to_delete.push_back(M.value);
+				}
+			}
+		}
+		for (const KeyValue<StringName, HashMap<StringName, GDScriptFunction*>>& E : native_class_impl_methods) {
+			for (const KeyValue<StringName, GDScriptFunction*>& M : E.value) {
+				if (M.value != nullptr && !impl_functions_to_delete.has(M.value)) {
+					impl_functions_to_delete.push_back(M.value);
+				}
+			}
+		}
+		for (const KeyValue<StringName, HashMap<StringName, GDScriptFunction*>>& E : script_class_impl_methods) {
+			for (const KeyValue<StringName, GDScriptFunction*>& M : E.value) {
+				if (M.value != nullptr && !impl_functions_to_delete.has(M.value)) {
+					impl_functions_to_delete.push_back(M.value);
+				}
+			}
+		}
+
+		native_impl_methods.clear();
+		native_class_impl_methods.clear();
+		script_class_impl_methods.clear();
+		native_class_impl_method_cache.clear();
+
+		for (GDScriptFunction* function : impl_functions_to_delete) {
+			memdelete(function);
+		}
+	}
+
 	if (function_list.first() != nullptr) {
 		for (SelfList<GDScriptFunction>* E = function_list.first(); E != nullptr; E = E->next()) {
 			GDScriptFunction* f = E->self();
