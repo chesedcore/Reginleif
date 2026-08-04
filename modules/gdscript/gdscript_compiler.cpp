@@ -2579,7 +2579,11 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 
 	gd_function->method_info = method_info;
 
-	if (!is_implicit_initializer && !is_implicit_ready && !p_for_lambda) {
+	///native impl methods get a mangled key from the caller to avoid same-name collisions
+	///across different impl targets clobbering each other and leaking away the old pointer
+	///how'd i even realise that happened? across the course of 4 fucking hours that's how
+	///thank you valgrind thank you c++ and the non-existence of a Pin<Ptr>
+	if (!is_implicit_initializer && !is_implicit_ready && !p_for_lambda && !p_func_is_native_impl_method) {
 		p_script->member_functions[func_name] = gd_function;
 	}
 
@@ -3126,13 +3130,19 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 
 			if (is_builtin_target) {
 				impl_function->set_is_native_impl_method(true);
+				///mangle the key so two impls of the same method for different targets
+				///don't overwrite each other in member_functions and fuckup the old pointer
+				StringName mangled_key = StringName("@impl:builtin:" + itos((int)impl_target.builtin_type) + "::" + String(E.key));
+				p_script->member_functions[mangled_key] = impl_function;
 				GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
 			} else if (is_native_class_target) {
 				impl_function->set_is_native_impl_method(true);
+				StringName mangled_key = StringName("@impl:native:" + String(impl_target.native_type) + "::" + String(E.key));
+				p_script->member_functions[mangled_key] = impl_function;
 				GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, E.key, impl_function);
 			}
-			///CLASS-target impls need nothing extra here, _parse_function() already did
-			///`p_script->member_functions[func_name] = gd_function;` same as any ordinary method
+			///class-target impls: _parse_function() already inserted ts with func_name, which is
+			///fine since a class only ever has one impl per method name (analyzser enforces that) ((or at least it should))
 		}
 	}
 
@@ -3414,6 +3424,19 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 						return err;
 					}
 					impl_function->set_is_native_impl_method(true);
+
+					///mangle format: @impl:<target>::<method>
+					String target_key_str;
+					if (is_builtin_target) {
+						target_key_str = "builtin:" + itos((int)impl_target.builtin_type);
+					} else if (is_native_class_target) {
+						target_key_str = "native:" + String(impl_target.native_type);
+					} else {
+						target_key_str = "class:" + impl_target.class_type->fqcn;
+					}
+					StringName mangled_key = StringName("@impl:" + target_key_str + "::" + String(E.key));
+					p_script->member_functions[mangled_key] = impl_function;
+
 					if (is_builtin_target) {
 						GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
 					} else if (is_native_class_target) {

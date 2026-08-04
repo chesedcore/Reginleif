@@ -2334,7 +2334,11 @@ void GDScriptLanguage::finish() {
 		script_list.clear();
 	}
 	if (function_list.first() != nullptr) {
-		ERR_PRINT("GDScript bug (please report): Dangling function in function_list after language shutdown.");
+		for (SelfList<GDScriptFunction>* E = function_list.first(); E != nullptr; E = E->next()) {
+			GDScriptFunction* f = E->self();
+			String script_path = f->get_script() ? f->get_script()->get_script_path() : String("<no script>");
+			ERR_PRINT(vformat("GDScript bug(please report!): Dangling function: '%s' in script '%s', even after language shutdown!", f->get_name(), script_path));
+		}
 		function_list.clear();
 	}
 
