@@ -251,10 +251,26 @@ static StringName impl_target_key_from_datatype(const GDScriptParser::DataType& 
 ///of its native ancestors (`impl for Node`, reachable since Bumfuck extends Node2D extends
 /// ... extends Node). yippee. impl_target_key_from_datatype() only ever produces one or the other
 ///key, so this checks every key a CLASS type could plausibly match against
-static bool has_global_impl_method_claim_for_native_chain(StringName p_native_type, const StringName& p_method_name) {
+static bool get_global_impl_method_claim_for_key(const StringName& p_target_type_key, const StringName& p_method_name, GDScriptCache::GlobalImplClaim* r_claim = nullptr) {
+	if (p_target_type_key == StringName()) {
+		return false;
+	}
+	Vector<GDScriptCache::GlobalImplClaim> claims = GDScriptCache::get_global_impl_claims(p_target_type_key);
+	for (const GDScriptCache::GlobalImplClaim& claim : claims) {
+		if (claim.method_name == p_method_name) {
+			if (r_claim != nullptr) {
+				*r_claim = claim;
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool get_global_impl_method_claim_for_native_chain(StringName p_native_type, const StringName& p_method_name, GDScriptCache::GlobalImplClaim* r_claim = nullptr) {
 	while (p_native_type != StringName()) {
 		StringName native_key = StringName("native::" + String(p_native_type));
-		if (GDScriptCache::has_global_impl_method_claim(native_key, p_method_name)) {
+		if (get_global_impl_method_claim_for_key(native_key, p_method_name, r_claim)) {
 			return true;
 		}
 		p_native_type = ClassDB::get_parent_class(p_native_type);
@@ -262,14 +278,15 @@ static bool has_global_impl_method_claim_for_native_chain(StringName p_native_ty
 	return false;
 }
 
-static bool has_global_impl_method_claim_for_type(const GDScriptParser::DataType& p_type, const StringName& p_method_name) {
+static bool get_global_impl_method_claim_for_type(const GDScriptParser::DataType& p_type, const StringName& p_method_name, GDScriptCache::GlobalImplClaim* r_claim = nullptr) {
+	GDScriptCache::ensure_global_impls_scanned();
 	StringName direct_key = impl_target_key_from_datatype(p_type);
-	if (direct_key != StringName() && GDScriptCache::has_global_impl_method_claim(direct_key, p_method_name)) {
+	if (get_global_impl_method_claim_for_key(direct_key, p_method_name, r_claim)) {
 		return true;
 	}
 
 	if (p_type.kind == GDScriptParser::DataType::NATIVE) {
-		return has_global_impl_method_claim_for_native_chain(ClassDB::get_parent_class(p_type.native_type), p_method_name);
+		return get_global_impl_method_claim_for_native_chain(ClassDB::get_parent_class(p_type.native_type), p_method_name, r_claim);
 	}
 
 	if (p_type.kind == GDScriptParser::DataType::CLASS) {
@@ -278,17 +295,21 @@ static bool has_global_impl_method_claim_for_type(const GDScriptParser::DataType
 			current = current->base_type.class_type;
 			if (current != nullptr) {
 				StringName script_key = StringName("class::" + current->fqcn);
-				if (GDScriptCache::has_global_impl_method_claim(script_key, p_method_name)) {
+				if (get_global_impl_method_claim_for_key(script_key, p_method_name, r_claim)) {
 					return true;
 				}
 			}
 		}
 		if (current != nullptr && current->base_type.kind == GDScriptParser::DataType::NATIVE) {
-			return has_global_impl_method_claim_for_native_chain(current->base_type.native_type, p_method_name);
+			return get_global_impl_method_claim_for_native_chain(current->base_type.native_type, p_method_name, r_claim);
 		}
 	}
 
 	return false;
+}
+
+static bool has_global_impl_method_claim_for_type(const GDScriptParser::DataType& p_type, const StringName& p_method_name) {
+	return get_global_impl_method_claim_for_type(p_type, p_method_name);
 }
 
 /// [Monarch] Reginleif addition. Substitutes GENERIC_TYPE placeholders with concrete types wherever possible 
@@ -5181,6 +5202,41 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 
 	} else {
 		bool found = false;
+
+		GDScriptParser::FunctionNode* local_impl_method = trait_analyzer != nullptr ? trait_analyzer->find_impl_method(base_type, p_call->function_name) : nullptr;
+		if (local_impl_method != nullptr) {
+			found = true;
+			validate_call_arg(local_impl_method->info, p_call);
+			call_type = local_impl_method->return_type_constraint;
+			if (!p_is_root && !p_is_await && call_type.is_hard_type() && call_type.kind == GDScriptParser::DataType::BUILTIN && call_type.builtin_type == Variant::NIL) {
+				push_error(vformat(R"*(Cannot get return value of call to "%s()" because it returns "void".)*", p_call->function_name), p_call);
+			}
+		} else {
+			GDScriptCache::GlobalImplClaim global_impl_claim;
+			if (get_global_impl_method_claim_for_type(base_type, p_call->function_name, &global_impl_claim)) {
+				found = true;
+				Error trait_err = OK;
+				String trait_path = GDScriptCache::get_global_trait_path(global_impl_claim.trait_name);
+				if (trait_path.is_empty()) {
+					trait_path = global_impl_claim.owning_path;
+				}
+				Ref<GDScriptTrait> trait_ref = GDScriptCache::get_cached_trait(trait_path, global_impl_claim.trait_name, trait_err, parser->get_script_path());
+				const GDScriptTrait::MethodSignatureSnapshot* signature = trait_ref.is_valid() ? trait_ref->required_signatures.getptr(p_call->function_name) : nullptr;
+				if (signature != nullptr) {
+					List<GDScriptParser::DataType> impl_par_types;
+					for (const GDScriptParser::DataType& param_type : signature->param_types) {
+						impl_par_types.push_back(param_type);
+					}
+					validate_call_arg(impl_par_types, 0, false, p_call);
+					call_type = signature->return_type;
+					if (!p_is_root && !p_is_await && call_type.is_hard_type() && call_type.kind == GDScriptParser::DataType::BUILTIN && call_type.builtin_type == Variant::NIL) {
+						push_error(vformat(R"*(Cannot get return value of call to "%s()" because it returns "void".)*", p_call->function_name), p_call);
+					}
+				} else {
+					mark_node_unsafe(p_call);
+				}
+			}
+		}
 
 		// Enums do not have functions other than the built-in dictionary ones.
 		if (base_type.kind == GDScriptParser::DataType::ENUM && base_type.is_meta_type) {
