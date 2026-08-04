@@ -1105,7 +1105,8 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 			}
 
 			GDScriptParser::DataType upper_bound_type = type_from_metatype(resolve_datatype(generic_param->generic_upper_bound));
-			if (upper_bound_type.is_variant() || is_type_compatible(upper_bound_type, arg_type, true, contained_type)) {
+			bool upper_bound_type_unconstrained = upper_bound_type.is_variant() && upper_bound_type.trait_bound_names.is_empty();
+			if (upper_bound_type_unconstrained || is_type_compatible(upper_bound_type, arg_type, true, contained_type)) {
 				result.generic_type_bindings[param_name] = arg_type;
 				continue;
 			}
@@ -1551,7 +1552,8 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 					GDScriptParser::DataType upper_bound_type = type_from_metatype(resolve_datatype(generic_param->generic_upper_bound));
 					upper_bound_type = resolve_generic_type(upper_bound_type, result.generic_type_bindings);
 
-					if (!upper_bound_type.is_variant() && !is_type_compatible(upper_bound_type, arg_type, true, contained_type)) {
+					bool upper_bound_type_unconstrained = upper_bound_type.is_variant() && upper_bound_type.trait_bound_names.is_empty();
+					if (!upper_bound_type_unconstrained && !is_type_compatible(upper_bound_type, arg_type, true, contained_type)) {
 						
 						/// if arg_type is an open generic, you can't just reject it outright!! you need to check if its own
 						/// upper bound satisfies the constraint!! so U: Node -> T: Node is fine! BUT U: int -> T: Node is provably wrong
@@ -3198,7 +3200,7 @@ void GDScriptAnalyzer::check_generic_assignable(GDScriptParser::IdentifierNode* 
 	}
 
 	GDScriptParser::DataType upper_bound = type_from_metatype(resolve_datatype(p_generic_decl->generic_upper_bound));
-	if (upper_bound.is_variant()) {
+	if (upper_bound.is_variant() && upper_bound.trait_bound_names.is_empty()) {
 		return;
 	}
 
@@ -4973,7 +4975,8 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 
 				if (param->generic_upper_bound != nullptr) {
 					GDScriptParser::DataType upper = type_from_metatype(resolve_datatype(param->generic_upper_bound));
-					if (!upper.is_variant() && !is_type_compatible(upper, arg_type, true, p_call->explicit_generic_args[i])) {
+					bool upper_unconstrained = upper.is_variant() && upper.trait_bound_names.is_empty();
+					if (!upper_unconstrained && !is_type_compatible(upper, arg_type, true, p_call->explicit_generic_args[i])) {
 						push_error(vformat(
 							R"([Reginleif] Generic call argument '%s' for parameter '%s' violates upper bound '%s'.)",
 							arg_type.to_string(), param->name, upper.to_string()),
@@ -4993,6 +4996,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 		for (int i = 0; i < p_call->arguments.size() && i < par_types.size(); ++i, ++par_itr) {
 			GDScriptParser::DataType param_type = *par_itr;
 			const bool param_needs_generic_validation = param_type_still_has_open_generics(param_type);
+			const bool param_is_trait_object = param_type.kind == GDScriptParser::DataType::TRAIT_OBJECT;
 			
 			/// First resolve parameter with known bindings from base
 			if (!call_generic_bindings.is_empty()) {
@@ -5016,7 +5020,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			/// [Monarch] if param_type is now fully concrete (no longer an open generic),
 			/// actually validate the argument type, infer_generic_bindings_from_types only
 			/// catches inference conflicts, not type mismatches against resolved concrete types
-			if (param_needs_generic_validation &&
+			if ((param_needs_generic_validation || param_is_trait_object) &&
 				param_type.kind != GDScriptParser::DataType::GENERIC_TYPE &&
 				!param_type_still_has_open_generics(param_type) &&
 				!arg_type.is_variant() &&
@@ -5061,8 +5065,10 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				}
 
 				GDScriptParser::DataType upper_bound_type = type_from_metatype(resolve_datatype(generic_param->generic_upper_bound));
-				
-				if (!upper_bound_type.is_variant() && !is_type_compatible(upper_bound_type, *bound_arg, true, p_call)) {
+
+				bool upper_bound_type_unconstrained = upper_bound_type.is_variant() && upper_bound_type.trait_bound_names.is_empty();
+
+				if (!upper_bound_type_unconstrained && !is_type_compatible(upper_bound_type, *bound_arg, true, p_call)) {
 					push_error(vformat(
 							   R"([Reginleif] Type argument '%s' for generic parameter '%s' in '%s()' does not satisfy upper bound '%s'.)",
 							   bound_arg->to_string(),
@@ -5090,8 +5096,10 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				}
 
 				GDScriptParser::DataType upper_bound_type = type_from_metatype(resolve_datatype(generic_param->generic_upper_bound));
-				
-				if (!upper_bound_type.is_variant() && !is_type_compatible(upper_bound_type, *bound_arg, true, p_call)) {
+
+				bool upper_bound_type_unconstrained = upper_bound_type.is_variant() && upper_bound_type.trait_bound_names.is_empty();
+
+				if (!upper_bound_type_unconstrained && !is_type_compatible(upper_bound_type, *bound_arg, true, p_call)) {
 
 				/// if bound_arg is still an open generic, don't reject it outright!! it may have its own upper bound
 				/// that already satisfies this constraint!! U: Node passed as T: Node is fine, you just can't prove
@@ -7944,7 +7952,8 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 					trait_ref = GDScriptCache::get_cached_trait(trait_path, trait_name, trait_err, p_trait_analyzer->get_parser()->get_script_path());
 				}
 			}
-			if (trait_ref.is_null() || !p_trait_analyzer->type_satisfies_trait(p_source, trait_ref)) {
+			bool satisfies_trait_validation = trait_ref.is_valid() && p_trait_analyzer->type_satisfies_trait(p_source, trait_ref);
+			if (trait_ref.is_null() || !satisfies_trait_validation) {
 				return false;
 			}
 		}
@@ -7962,11 +7971,11 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 	}
 
 	if (p_target.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
-		return true;
+		return false;
 	}
 
 	if (p_source.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
-		return true;
+		return false;
 	}
 	/// case 1, both sides are generic, in which case, same param owner and name is the only hard equality 
 	if (p_target.kind == GDScriptParser::DataType::GENERIC_TYPE &&
