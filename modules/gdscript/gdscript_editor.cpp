@@ -1488,8 +1488,68 @@ static void _add_trait_attribute_method_completion(const StringName& p_method_na
 	r_result.insert(option.display, option);
 }
 
+static Ref<GDScriptTrait> _get_trait_for_completion(const StringName& p_trait_name, GDScriptTraitAnalyzer* p_trait_analyzer) {
+	if (p_trait_analyzer != nullptr) {
+		Ref<GDScriptTrait> trait_ref = p_trait_analyzer->get_local_trait(p_trait_name);
+		if (trait_ref.is_valid()) {
+			return trait_ref;
+		}
+	}
+	Error err = OK;
+	String trait_path = GDScriptCache::get_global_trait_path(p_trait_name);
+	if (!trait_path.is_empty()) {
+		return GDScriptCache::get_cached_trait(trait_path, p_trait_name, err);
+	}
+	return Ref<GDScriptTrait>();
+}
+
+static const GDScriptParser::DataType* _get_trait_bound_type_for_completion(const GDScriptParser::DataType& p_base_type) {
+	if (p_base_type.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
+		return &p_base_type;
+	}
+	if (p_base_type.kind != GDScriptParser::DataType::GENERIC_TYPE) {
+		return nullptr;
+	}
+	if (p_base_type.generic_owner_function != nullptr) {
+		for (const GDScriptParser::IdentifierNode* generic_param : p_base_type.generic_owner_function->generic_parameters) {
+			if (generic_param != nullptr && generic_param->name == p_base_type.generic_param && generic_param->generic_upper_bound != nullptr && generic_param->generic_upper_bound->resolved_type.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
+				return &generic_param->generic_upper_bound->resolved_type;
+			}
+		}
+	}
+	if (p_base_type.generic_owner_class != nullptr) {
+		for (const GDScriptParser::IdentifierNode* generic_param : p_base_type.generic_owner_class->generic_parameters) {
+			if (generic_param != nullptr && generic_param->name == p_base_type.generic_param && generic_param->generic_upper_bound != nullptr && generic_param->generic_upper_bound->resolved_type.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
+				return &generic_param->generic_upper_bound->resolved_type;
+			}
+		}
+	}
+	return nullptr;
+}
+
+static void _find_trait_bound_methods_in_base(const GDScriptParser::DataType& p_base_type, bool p_add_braces, HashMap<String, ScriptLanguage::CodeCompletionOption>& r_result, int p_recursion_depth, GDScriptTraitAnalyzer* p_trait_analyzer) {
+	const GDScriptParser::DataType* trait_bound_type = _get_trait_bound_type_for_completion(p_base_type);
+	if (trait_bound_type == nullptr) {
+		return;
+	}
+	for (const StringName& trait_name : trait_bound_type->trait_bound_names) {
+		Ref<GDScriptTrait> trait_ref = _get_trait_for_completion(trait_name, p_trait_analyzer);
+		if (trait_ref.is_null()) {
+			continue;
+		}
+		for (const KeyValue<StringName, Ref<GDScriptTraitSignatureSnapshot>>& E : trait_ref->required_signatures) {
+			_add_trait_attribute_method_completion(E.key, E.value, p_add_braces, p_recursion_depth + ScriptLanguage::LOCATION_OTHER_USER_CODE, r_result);
+		}
+	}
+}
+
 static void _find_trait_attribute_methods_in_base(const GDScriptParser::DataType& p_base_type, bool p_only_functions, bool p_types_only, bool p_add_braces, HashMap<String, ScriptLanguage::CodeCompletionOption>& r_result, int p_recursion_depth, GDScriptTraitAnalyzer* p_trait_analyzer) {
 	if (p_types_only || p_base_type.is_meta_type) {
+		return;
+	}
+
+	_find_trait_bound_methods_in_base(p_base_type, p_add_braces, r_result, p_recursion_depth, p_trait_analyzer);
+	if (_get_trait_bound_type_for_completion(p_base_type) != nullptr) {
 		return;
 	}
 
@@ -4732,6 +4792,19 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 			} break;
 
 			case GDScriptParser::DataType::GENERIC_TYPE: {
+				const GDScriptParser::DataType* trait_bound_type = _get_trait_bound_type_for_completion(base_type);
+				if (trait_bound_type != nullptr) {
+					for (const StringName& trait_name : trait_bound_type->trait_bound_names) {
+						Ref<GDScriptTrait> trait_ref = _get_trait_for_completion(trait_name, nullptr);
+						if (trait_ref.is_valid() && trait_ref->required_signatures.has(p_symbol)) {
+							r_result.type = EditorLanguage::LookupResult::Type::SCRIPT_LOCATION;
+							r_result.class_name = trait_name;
+							r_result.class_member = p_symbol;
+							return OK;
+						}
+					}
+				}
+
 				r_result.type = EditorLanguage::LookupResult::Type::SCRIPT_LOCATION;
 				r_result.class_name = "Generic";
 				r_result.class_member = base_type.generic_param;
@@ -4739,7 +4812,16 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 			} break;
 
 			case GDScriptParser::DataType::TRAIT_OBJECT: {
-				/// dyn trait object, so no fixed symbol table to resolve against
+				const GDScriptParser::DataType* trait_bound_type = _get_trait_bound_type_for_completion(base_type);
+				for (const StringName& trait_name : trait_bound_type->trait_bound_names) {
+					Ref<GDScriptTrait> trait_ref = _get_trait_for_completion(trait_name, nullptr);
+					if (trait_ref.is_valid() && trait_ref->required_signatures.has(p_symbol)) {
+						r_result.type = EditorLanguage::LookupResult::Type::SCRIPT_LOCATION;
+						r_result.class_name = trait_name;
+						r_result.class_member = p_symbol;
+						return OK;
+					}
+				}
 				return ERR_CANT_RESOLVE;
 			} break;
 

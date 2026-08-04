@@ -94,6 +94,72 @@ static GDScriptParser::DataType make_callable_type(const MethodInfo &p_info) {
 	return type;
 }
 
+static MethodInfo method_info_from_trait_signature(const StringName& p_name, const Ref<GDScriptTraitSignatureSnapshot>& p_signature) {
+	MethodInfo method_info;
+	method_info.name = p_name;
+	if (p_signature.is_null()) {
+		return method_info;
+	}
+	method_info.flags = p_signature->is_vararg ? METHOD_FLAG_VARARG : METHOD_FLAGS_DEFAULT;
+	for (int i = 0; i < p_signature->param_types.size(); i++) {
+		PropertyInfo arg_info;
+		arg_info.name = i < p_signature->param_names.size() ? p_signature->param_names[i] : StringName();
+		method_info.arguments.push_back(arg_info);
+	}
+	return method_info;
+}
+
+static const GDScriptParser::DataType* get_trait_bound_type_for_lookup(const GDScriptParser::DataType& p_base) {
+	if (p_base.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
+		return &p_base;
+	}
+	if (p_base.kind != GDScriptParser::DataType::GENERIC_TYPE) {
+		return nullptr;
+	}
+	if (p_base.generic_owner_function != nullptr) {
+		for (const GDScriptParser::IdentifierNode* generic_param : p_base.generic_owner_function->generic_parameters) {
+			if (generic_param != nullptr && generic_param->name == p_base.generic_param && generic_param->generic_upper_bound != nullptr && generic_param->generic_upper_bound->resolved_type.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
+				return &generic_param->generic_upper_bound->resolved_type;
+			}
+		}
+	}
+	if (p_base.generic_owner_class != nullptr) {
+		for (const GDScriptParser::IdentifierNode* generic_param : p_base.generic_owner_class->generic_parameters) {
+			if (generic_param != nullptr && generic_param->name == p_base.generic_param && generic_param->generic_upper_bound != nullptr && generic_param->generic_upper_bound->resolved_type.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
+				return &generic_param->generic_upper_bound->resolved_type;
+			}
+		}
+	}
+	return nullptr;
+}
+
+static Ref<GDScriptTraitSignatureSnapshot> find_trait_bound_method_signature(const GDScriptParser::DataType& p_base, const StringName& p_method_name, GDScriptTraitAnalyzer* p_trait_analyzer, const String& p_owner_path) {
+	const GDScriptParser::DataType* trait_bound_type = get_trait_bound_type_for_lookup(p_base);
+	if (trait_bound_type == nullptr || trait_bound_type->trait_bound_names.is_empty()) {
+		return Ref<GDScriptTraitSignatureSnapshot>();
+	}
+	for (const StringName& trait_name : trait_bound_type->trait_bound_names) {
+		Ref<GDScriptTrait> trait_ref;
+		if (p_trait_analyzer != nullptr) {
+			trait_ref = p_trait_analyzer->get_local_trait(trait_name);
+		}
+		if (trait_ref.is_null()) {
+			Error err = OK;
+			String trait_path = GDScriptCache::get_global_trait_path(trait_name);
+			if (!trait_path.is_empty()) {
+				trait_ref = GDScriptCache::get_cached_trait(trait_path, trait_name, err, p_owner_path);
+			}
+		}
+		if (trait_ref.is_valid()) {
+			const Ref<GDScriptTraitSignatureSnapshot>* signature = trait_ref->required_signatures.getptr(p_method_name);
+			if (signature != nullptr) {
+				return *signature;
+			}
+		}
+	}
+	return Ref<GDScriptTraitSignatureSnapshot>();
+}
+
 static GDScriptParser::DataType make_signal_type(const MethodInfo &p_info) {
 	GDScriptParser::DataType type;
 	type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
@@ -5212,6 +5278,20 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				push_error(vformat(R"*(Cannot get return value of call to "%s()" because it returns "void".)*", p_call->function_name), p_call);
 			}
 		} else {
+			Ref<GDScriptTraitSignatureSnapshot> trait_bound_signature = find_trait_bound_method_signature(base_type, p_call->function_name, trait_analyzer, parser->get_script_path());
+			if (trait_bound_signature.is_valid()) {
+				found = true;
+				List<GDScriptParser::DataType> trait_par_types;
+				for (const GDScriptParser::DataType& param_type : trait_bound_signature->param_types) {
+					trait_par_types.push_back(param_type);
+				}
+				validate_call_arg(trait_par_types, trait_bound_signature->default_arg_count, trait_bound_signature->is_vararg, p_call);
+				call_type = trait_bound_signature->return_type;
+				if (!p_is_root && !p_is_await && call_type.is_hard_type() && call_type.kind == GDScriptParser::DataType::BUILTIN && call_type.builtin_type == Variant::NIL) {
+					push_error(vformat(R"*(Cannot get return value of call to "%s()" because it returns "void".)*", p_call->function_name), p_call);
+				}
+			}
+
 			GDScriptCache::GlobalImplClaim global_impl_claim;
 			if (get_global_impl_method_claim_for_type(base_type, p_call->function_name, &global_impl_claim)) {
 				found = true;
@@ -5266,12 +5346,14 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				reduce_identifier_from_base(callee_id, &base_type);
 				GDScriptParser::DataType callee_datatype = callee_id->type_constraint;
 				if (callee_datatype.is_set() && !callee_datatype.is_variant()) {
+					bool is_trait_bound_callable = find_trait_bound_method_signature(base_type, p_call->function_name, trait_analyzer, parser->get_script_path()).is_valid();
 					bool is_impl_callable = callee_datatype.builtin_type == Variant::CALLABLE && (
+							is_trait_bound_callable ||
 							(trait_analyzer != nullptr && trait_analyzer->find_impl_method(base_type, p_call->function_name) != nullptr) ||
 							has_global_impl_method_claim_for_type(base_type, p_call->function_name));
 					found = true;
 					if (is_impl_callable) {
-						///the subscript reducer thingy exposes impl methods as Callables so member lookup succeeds
+						///the subscript reducer thingy exposes trait/impl methods as Callables so member lookup succeeds
 						///but direct method-call syntax should still be accepted for type-safe dispatch
 					} else if (callee_datatype.builtin_type == Variant::CALLABLE) {
 						push_error(vformat(R"*(Name "%s" is a Callable. You can call it with "%s.call()" instead.)*", p_call->function_name, p_call->function_name), p_call->callee);
@@ -5930,6 +6012,13 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 		}
 	}
 
+	Ref<GDScriptTraitSignatureSnapshot> trait_bound_signature = find_trait_bound_method_signature(base, name, trait_analyzer, parser->get_script_path());
+	if (trait_bound_signature.is_valid()) {
+		p_identifier->type_constraint = make_callable_type(method_info_from_trait_signature(name, trait_bound_signature));
+		p_identifier->source = GDScriptParser::IdentifierNode::INHERITED_VARIABLE;
+		return;
+	}
+
 	GDScriptParser::FunctionNode* impl_method = trait_analyzer != nullptr ? trait_analyzer->find_impl_method(base, name) : nullptr;
 	if (impl_method != nullptr) {
 		p_identifier->type_constraint = make_callable_type(impl_method->info);
@@ -6474,7 +6563,7 @@ void GDScriptAnalyzer::reduce_subscript(GDScriptParser::SubscriptNode *p_subscri
 
 		if (valid) {
 			// Do nothing.
-		} else if (base_type.is_variant() || !base_type.is_hard_type()) {
+		} else if ((base_type.is_variant() && base_type.kind != GDScriptParser::DataType::TRAIT_OBJECT) || !base_type.is_hard_type()) {
 			valid = !base_type.is_pseudo_type || p_can_be_pseudo_type;
 			result_type.kind = GDScriptParser::DataType::VARIANT;
 			if (base_type.is_variant() && base_type.is_hard_type() && base_type.is_meta_type && base_type.is_pseudo_type) {
