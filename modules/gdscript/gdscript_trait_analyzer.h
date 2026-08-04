@@ -66,7 +66,7 @@ private:
 
     /// true iff p_provided's signature (params + return type) satisfies p_required
     /// p_required is the trait's method signature, p_provided is what an impl/class actually gives us
-    bool _signatures_match(const GDScriptTrait::MethodSignatureSnapshot& p_required, GDScriptParser::FunctionNode* p_provided);
+    bool _signatures_match(const Ref<GDScriptTraitSignatureSnapshot>& p_required, GDScriptParser::FunctionNode* p_provided);
 
     bool _type_is_or_inherits(const GDScriptParser::DataType& p_type, const GDScriptParser::DataType& p_target_type) const;
 	StringName _impl_target_key(const GDScriptParser::DataType& p_type) const;

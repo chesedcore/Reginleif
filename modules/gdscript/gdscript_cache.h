@@ -40,6 +40,7 @@
 class GDScriptAnalyzer;
 class GDScriptParser;
 class GDScriptTrait;
+class GDScriptTraitSignatureSnapshot;
 
 class GDScriptParserRef : public RefCounted {
 	GDSOFTCLASS(GDScriptParserRef, RefCounted);
@@ -101,6 +102,7 @@ public:
 		StringName trait_name;
 		StringName method_name;
 		String owning_path;
+		Ref<GDScriptTraitSignatureSnapshot> signature;
 	};
 
 private:
@@ -169,7 +171,7 @@ public:
 	static String get_global_trait_path(const StringName& p_trait_name);
 	static void get_global_trait_list(List<StringName>* r_traits);
 
-	static void add_global_impl_claims(const StringName& p_target_type_key, const StringName& p_trait_name, const Vector<StringName>& p_method_names, const String& p_path);
+	static void add_global_impl_claims(const StringName& p_target_type_key, const StringName& p_trait_name, const HashMap<StringName, Ref<GDScriptTraitSignatureSnapshot>>& p_method_signatures, const String& p_path);
 	static void remove_global_impls_by_path(const String& p_path);
 	static Vector<GlobalImplClaim> get_global_impl_claims(const StringName& p_target_type_key);
 	static bool has_global_impl_method_claim(const StringName& p_target_type_key, const StringName& p_method_name);

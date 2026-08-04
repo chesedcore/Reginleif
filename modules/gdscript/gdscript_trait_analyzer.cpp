@@ -32,8 +32,27 @@
 /// Licensed under the MIT License, same terms as the Godot engine.
 
 #include "gdscript_trait_analyzer.h"
+
 #include "gdscript_analyzer.h"
 #include "core/object/class_db.h"
+
+static Ref<GDScriptTraitSignatureSnapshot> _make_trait_method_signature_snapshot(const GDScriptParser::FunctionNode* p_method) {
+	Ref<GDScriptTraitSignatureSnapshot> snapshot;
+	snapshot.instantiate();
+	if (p_method == nullptr) {
+		return snapshot;
+	}
+	for (int i = 0; i < p_method->parameters.size(); i++) {
+		snapshot->param_types.push_back(p_method->parameters[i]->type_constraint);
+		snapshot->param_names.push_back(p_method->parameters[i]->identifier != nullptr ? p_method->parameters[i]->identifier->name : StringName());
+		if (p_method->parameters[i]->initializer != nullptr) {
+			snapshot->default_arg_count++;
+		}
+	}
+	snapshot->return_type = p_method->return_type_constraint;
+	snapshot->is_vararg = p_method->is_vararg();
+	return snapshot;
+}
 
 GDScriptTraitAnalyzer::GDScriptTraitAnalyzer(GDScriptParser* p_parser, GDScriptAnalyzer* p_analyzer) {
 	parser = p_parser;
@@ -90,13 +109,7 @@ Error GDScriptTraitAnalyzer::resolve_trait(GDScriptParser::TraitNode* p_trait) {
 		analyzer->resolve_function_signature(method, p_trait);
 		gd_trait->required_methods[method->identifier->name] = method;
 
-		GDScriptTrait::MethodSignatureSnapshot snapshot;
-		for (int i = 0; i < method->parameters.size(); i++) {
-			snapshot.param_types.push_back(method->parameters[i]->type_constraint);
-			snapshot.param_names.push_back(method->parameters[i]->identifier != nullptr ? method->parameters[i]->identifier->name : StringName());
-		}
-		snapshot.return_type = method->return_type_constraint;
-		gd_trait->required_signatures[method->identifier->name] = snapshot;
+		gd_trait->required_signatures[method->identifier->name] = _make_trait_method_signature_snapshot(method);
 	}
 
 	for (GDScriptParser::FunctionNode* method : p_trait->default_methods) {
@@ -107,13 +120,7 @@ Error GDScriptTraitAnalyzer::resolve_trait(GDScriptParser::TraitNode* p_trait) {
 		analyzer->resolve_function_body(method);
 		gd_trait->default_methods[method->identifier->name] = method;
 
-		GDScriptTrait::MethodSignatureSnapshot default_snapshot;
-		for (int i = 0; i < method->parameters.size(); i++) {
-			default_snapshot.param_types.push_back(method->parameters[i]->type_constraint);
-			default_snapshot.param_names.push_back(method->parameters[i]->identifier != nullptr ? method->parameters[i]->identifier->name : StringName());
-		}
-		default_snapshot.return_type = method->return_type_constraint;
-		gd_trait->required_signatures[method->identifier->name] = default_snapshot;
+		gd_trait->required_signatures[method->identifier->name] = _make_trait_method_signature_snapshot(method);
 	}
 
 	///resolve `impl <this trait> for Type` (and `impl for Type` shorthand) blocks that
@@ -237,7 +244,7 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 		}
 
 		bool is_required = trait->required_methods.has(method_name);
-		GDScriptTrait::MethodSignatureSnapshot required_snapshot;
+		Ref<GDScriptTraitSignatureSnapshot> required_snapshot;
 		if (is_required && trait->required_signatures.has(method_name)) {
 			required_snapshot = trait->required_signatures[method_name];
 		} else {
@@ -262,12 +269,16 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 		analyzer->current_impl_self_type = previous_impl_self_type;
 
 		gd_impl->provided_methods[method_name] = provided;
+		gd_impl->provided_signatures[method_name] = _make_trait_method_signature_snapshot(provided);
 	}
 
 	///Anything not explicitly provided falls back to the trait's own default body(if it has one)
 	for (const KeyValue<StringName, GDScriptParser::FunctionNode*>& E : trait->default_methods) {
 		if (!gd_impl->provided_methods.has(E.key)) {
 			gd_impl->provided_methods[E.key] = E.value;
+			if (trait->required_signatures.has(E.key)) {
+				gd_impl->provided_signatures[E.key] = trait->required_signatures[E.key];
+			}
 		}
 	}
 
@@ -386,11 +397,7 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 	///that doesnt belong to its own file
 	StringName our_key = _impl_target_key(target_type);
 	if (our_key != StringName()) {
-		Vector<StringName> method_names;
-		for (const KeyValue<StringName, GDScriptParser::FunctionNode*>& E : gd_impl->provided_methods) {
-			method_names.push_back(E.key);
-		}
-		GDScriptCache::add_global_impl_claims(our_key, trait_name, method_names, parser->get_script_path());
+		GDScriptCache::add_global_impl_claims(our_key, trait_name, gd_impl->provided_signatures, parser->get_script_path());
 	}
 
 	///how much longer must a man keep fighting for? :sob:
@@ -454,17 +461,20 @@ Ref<GDScriptTrait> GDScriptTraitAnalyzer::get_local_trait(const StringName& p_na
 	return Ref<GDScriptTrait>();
 }
 
-bool GDScriptTraitAnalyzer::_signatures_match(const GDScriptTrait::MethodSignatureSnapshot& p_required, GDScriptParser::FunctionNode* p_provided) {
-	if (p_provided == nullptr) {
+bool GDScriptTraitAnalyzer::_signatures_match(const Ref<GDScriptTraitSignatureSnapshot>& p_required, GDScriptParser::FunctionNode* p_provided) {
+	if (p_required.is_null() || p_provided == nullptr) {
 		return false;
 	}
 
-	if (p_required.param_types.size() != p_provided->parameters.size()) {
+	if (p_required->param_types.size() != p_provided->parameters.size()) {
+		return false;
+	}
+	if (p_required->is_vararg != p_provided->is_vararg()) {
 		return false;
 	}
 
-	for (int i = 0; i < p_required.param_types.size(); i++) {
-		GDScriptParser::DataType required_param_type = p_required.param_types[i];
+	for (int i = 0; i < p_required->param_types.size(); i++) {
+		GDScriptParser::DataType required_param_type = p_required->param_types[i];
 		GDScriptParser::DataType provided_param_type = p_provided->parameters[i]->type_constraint;
 
 		///parameters are contravariant in general, but gdscript doesn't do variance gymnastics
@@ -476,7 +486,7 @@ bool GDScriptTraitAnalyzer::_signatures_match(const GDScriptTrait::MethodSignatu
 		}
 	}
 
-	GDScriptParser::DataType required_return = p_required.return_type;
+	GDScriptParser::DataType required_return = p_required->return_type;
 	GDScriptParser::DataType provided_return = p_provided->return_type_constraint;
 
 	///don't allow a Variant return to slip through when a required return is specified

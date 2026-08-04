@@ -5215,19 +5215,28 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			GDScriptCache::GlobalImplClaim global_impl_claim;
 			if (get_global_impl_method_claim_for_type(base_type, p_call->function_name, &global_impl_claim)) {
 				found = true;
-				Error trait_err = OK;
-				String trait_path = GDScriptCache::get_global_trait_path(global_impl_claim.trait_name);
-				if (trait_path.is_empty()) {
-					trait_path = global_impl_claim.owning_path;
+				Ref<GDScriptTraitSignatureSnapshot> signature = global_impl_claim.signature;
+				Ref<GDScriptTrait> trait_ref;
+				if (signature.is_null()) {
+					Error trait_err = OK;
+					String trait_path = GDScriptCache::get_global_trait_path(global_impl_claim.trait_name);
+					if (trait_path.is_empty()) {
+						trait_path = global_impl_claim.owning_path;
+					}
+					trait_ref = GDScriptCache::get_cached_trait(trait_path, global_impl_claim.trait_name, trait_err, parser->get_script_path());
+					if (trait_ref.is_valid()) {
+						const Ref<GDScriptTraitSignatureSnapshot>* cached_signature = trait_ref->required_signatures.getptr(p_call->function_name);
+						if (cached_signature != nullptr) {
+							signature = *cached_signature;
+						}
+					}
 				}
-				Ref<GDScriptTrait> trait_ref = GDScriptCache::get_cached_trait(trait_path, global_impl_claim.trait_name, trait_err, parser->get_script_path());
-				const GDScriptTrait::MethodSignatureSnapshot* signature = trait_ref.is_valid() ? trait_ref->required_signatures.getptr(p_call->function_name) : nullptr;
-				if (signature != nullptr) {
+				if (signature.is_valid()) {
 					List<GDScriptParser::DataType> impl_par_types;
 					for (const GDScriptParser::DataType& param_type : signature->param_types) {
 						impl_par_types.push_back(param_type);
 					}
-					validate_call_arg(impl_par_types, 0, false, p_call);
+					validate_call_arg(impl_par_types, signature->default_arg_count, signature->is_vararg, p_call);
 					call_type = signature->return_type;
 					if (!p_is_root && !p_is_await && call_type.is_hard_type() && call_type.kind == GDScriptParser::DataType::BUILTIN && call_type.builtin_type == Variant::NIL) {
 						push_error(vformat(R"*(Cannot get return value of call to "%s()" because it returns "void".)*", p_call->function_name), p_call);

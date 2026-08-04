@@ -65,6 +65,8 @@
 
 ///////////////////////////
 
+ class GDScriptTraitSignatureSnapshot;
+
 GDScriptNativeClass::GDScriptNativeClass(const StringName &p_name) {
 	name = p_name;
 }

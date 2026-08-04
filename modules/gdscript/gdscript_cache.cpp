@@ -371,18 +371,19 @@ String GDScriptCache::get_global_trait_path(const StringName& p_trait_name) {
 	return path != nullptr ? *path : String();
 }
 
-void GDScriptCache::add_global_impl_claims(const StringName& p_target_type_key, const StringName& p_trait_name, const Vector<StringName>& p_method_names, const String& p_path) {
+void GDScriptCache::add_global_impl_claims(const StringName& p_target_type_key, const StringName& p_trait_name, const HashMap<StringName, Ref<GDScriptTraitSignatureSnapshot>>& p_method_signatures, const String& p_path) {
 	if (p_target_type_key == StringName()) {
 		return; ///no key? more like no cross-file collision checks for this type kind! hah! hah...
 				///...yeah, i should take breaks more often...
 	}
 	MutexLock lock(singleton->mutex);
 	Vector<GlobalImplClaim>& claims = singleton->global_impls[p_target_type_key];
-	for (const StringName& method_name : p_method_names) {
+	for (const KeyValue<StringName, Ref<GDScriptTraitSignatureSnapshot>>& E : p_method_signatures) {
 		GlobalImplClaim claim;
 		claim.trait_name = p_trait_name;
-		claim.method_name = method_name;
+		claim.method_name = E.key;
 		claim.owning_path = p_path;
+		claim.signature = E.value;
 		claims.push_back(claim);
 	}
 }

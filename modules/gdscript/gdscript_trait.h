@@ -39,6 +39,17 @@
 #include "core/templates/hash_map.h"
 
 
+class GDScriptTraitSignatureSnapshot : public RefCounted {
+	GDSOFTCLASS(GDScriptTraitSignatureSnapshot, RefCounted);
+
+public:
+	Vector<GDScriptParser::DataType> param_types;
+	Vector<StringName> param_names;
+	GDScriptParser::DataType return_type;
+	int default_arg_count = 0;
+	bool is_vararg = false;
+};
+
 /// compiler internal representation of a resolved `trait` declaration
 class GDScriptTrait : public RefCounted {
 	GDSOFTCLASS(GDScriptTrait, RefCounted);
@@ -60,12 +71,7 @@ public:
 	/// this is the way. this is the only way. i'm too tired to find the other way
 	/// i'm just a college kid. i've got a test tomorrow. i can't be assed. the borrow checker
 	/// doesn't exist to save me. help me. save me.
-	struct MethodSignatureSnapshot {
-		Vector<GDScriptParser::DataType> param_types;
-		Vector<StringName> param_names;
-		GDScriptParser::DataType return_type;
-	};
-	HashMap<StringName, MethodSignatureSnapshot> required_signatures;
+	HashMap<StringName, Ref<GDScriptTraitSignatureSnapshot>> required_signatures;
 
 	_FORCE_INLINE_ bool has_method(const StringName& p_name) const {
 		return required_methods.has(p_name) || default_methods.has(p_name);
@@ -96,6 +102,7 @@ public:
 	}
 
 	HashMap<StringName, GDScriptParser::FunctionNode*> provided_methods;
+	HashMap<StringName, Ref<GDScriptTraitSignatureSnapshot>> provided_signatures;
 
 	GDScriptParser::ImplNode* impl_node = nullptr;
 
