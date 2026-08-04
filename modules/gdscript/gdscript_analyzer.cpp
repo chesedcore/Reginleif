@@ -6943,6 +6943,33 @@ void GDScriptAnalyzer::reduce_type_test(GDScriptParser::TypeTestNode *p_type_tes
 
 	reduce_expression(p_type_test->operand);
 	GDScriptParser::DataType operand_type = p_type_test->operand->type_constraint;
+	if (p_type_test->test_type->type_chain.size() == 1 && p_type_test->test_type->container_types.is_empty()) {
+		StringName trait_name = p_type_test->test_type->type_chain[0]->name;
+		Ref<GDScriptTrait> trait_ref = trait_analyzer != nullptr ? trait_analyzer->get_local_trait(trait_name) : Ref<GDScriptTrait>();
+		if (trait_ref.is_null()) {
+			String trait_path = GDScriptCache::get_global_trait_path(trait_name);
+			if (!trait_path.is_empty()) {
+				Error trait_err = OK;
+				trait_ref = GDScriptCache::get_cached_trait(trait_path, trait_name, trait_err, parser->get_script_path());
+			}
+		}
+
+		if (trait_ref.is_valid()) {
+			p_type_test->trait_test_name = trait_name;
+			GDScriptParser::DataType trait_type;
+			trait_type.kind = GDScriptParser::DataType::TRAIT_OBJECT;
+			trait_type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+			trait_type.trait_bound_names.push_back(trait_name);
+			p_type_test->test_type->resolved_type = trait_type;
+			p_type_test->test_datatype = trait_type;
+
+			if (p_type_test->operand->is_constant) {
+				p_type_test->is_constant = true;
+				p_type_test->reduced_value = trait_analyzer != nullptr && trait_analyzer->type_satisfies_trait(operand_type, trait_ref);
+			}
+			return;
+		}
+	}
 	GDScriptParser::DataType test_type = type_from_metatype(resolve_datatype(p_type_test->test_type));
 	p_type_test->test_datatype = test_type;
 

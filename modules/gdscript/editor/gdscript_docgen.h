@@ -32,6 +32,8 @@
 
 #include "../gdscript_parser.h"
 
+class GDScript;
+
 class GDScriptDocGen {
 	using GDP = GDScriptParser;
 	using GDType = GDP::DataType;

@@ -31,6 +31,7 @@
 #pragma once
 
 #include "gdscript.h"
+#include "gdscript_trait.h"
 
 #include "core/object/ref_counted.h"
 #include "core/os/safe_binary_mutex.h"

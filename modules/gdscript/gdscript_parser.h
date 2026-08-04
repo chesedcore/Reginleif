@@ -30,7 +30,6 @@
 
 #pragma once
 
-#include "gdscript_cache.h"
 #include "gdscript_tokenizer.h"
 
 #ifdef DEBUG_ENABLED
@@ -53,6 +52,7 @@
 
 
 class GDScriptImpl;
+class GDScriptParserRef;
 
 class GDScriptParser {
 	struct AnnotationInfo;
@@ -1393,6 +1393,7 @@ public:
 		ExpressionNode *operand = nullptr;
 		TypeNode *test_type = nullptr;
 		DataType test_datatype;
+		StringName trait_test_name;
 
 		TypeTestNode() {
 			type = TYPE_TEST;

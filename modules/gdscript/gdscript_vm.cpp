@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "gdscript.h"
+#include "gdscript_cache.h"
 #include "gdscript_function.h"
 #include "gdscript_lambda_callable.h"
 #include "gdscript_impl_callable.h"
@@ -37,6 +38,48 @@
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
 #include "core/variant/container_type_validate.h"
+
+static bool _gdscript_value_satisfies_trait(const Variant& p_value, const StringName& p_trait_name) {
+	GDScriptCache::ensure_global_impls_scanned();
+
+	Vector<StringName> keys;
+	if (p_value.get_type() == Variant::OBJECT) {
+		bool was_freed = false;
+		Object *object = p_value.get_validated_object_with_check(was_freed);
+		if (was_freed || object == nullptr) {
+			return false;
+		}
+
+		if (object->get_script_instance()) {
+			Script* script = object->get_script_instance()->get_script().ptr();
+			while (script != nullptr) {
+				GDScript* gdscript = Object::cast_to<GDScript>(script);
+				if (gdscript != nullptr && !gdscript->get_fully_qualified_name().is_empty()) {
+					keys.push_back(StringName("class::" + gdscript->get_fully_qualified_name()));
+				}
+				script = script->get_base_script().ptr();
+			}
+		}
+
+		StringName native = object->get_class_name();
+		while (native != StringName()) {
+			keys.push_back(StringName("native::" + String(native)));
+			native = ClassDB::get_parent_class(native);
+		}
+	} else {
+		keys.push_back(StringName("builtin::" + itos((int)p_value.get_type())));
+	}
+
+	for (const StringName& key : keys) {
+		for (const GDScriptCache::GlobalImplClaim& claim : GDScriptCache::get_global_impl_claims(key)) {
+			if (claim.trait_name == p_trait_name) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
 
 #ifdef DEBUG_ENABLED
 
@@ -334,6 +377,7 @@ void (*type_init_function_table[])(Variant *) = {
 		&&OPCODE_TYPE_TEST_DICTIONARY, \
 		&&OPCODE_TYPE_TEST_NATIVE, \
 		&&OPCODE_TYPE_TEST_SCRIPT, \
+		&&OPCODE_TYPE_TEST_TRAIT, \
 		&&OPCODE_SET_KEYED, \
 		&&OPCODE_SET_KEYED_VALIDATED, \
 		&&OPCODE_SET_INDEXED_VALIDATED, \
@@ -1085,6 +1129,21 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				}
 
 				*dst = result;
+				ip += 4;
+			}
+			DISPATCH_OPCODE;
+
+			OPCODE(OPCODE_TYPE_TEST_TRAIT) {
+				CHECK_SPACE(4);
+
+				GET_VARIANT_PTR(dst, 0);
+				GET_VARIANT_PTR(value, 1);
+
+				int trait_name_idx = _code_ptr[ip + 3];
+				GD_ERR_BREAK(trait_name_idx < 0 || trait_name_idx >= _global_names_count);
+				const StringName &trait_name = _global_names_ptr[trait_name_idx];
+
+				*dst = _gdscript_value_satisfies_trait(*value, trait_name);
 				ip += 4;
 			}
 			DISPATCH_OPCODE;

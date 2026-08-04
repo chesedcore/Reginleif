@@ -1003,7 +1003,9 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				return GDScriptCodeGenerator::Address();
 			}
 
-			if (test_type.has_type()) {
+			if (type_test->trait_test_name != StringName()) {
+				gen->write_trait_test(result, operand, type_test->trait_test_name);
+			} else if (test_type.has_type()) {
 				gen->write_type_test(result, operand, test_type);
 			} else {
 				gen->write_assign_true(result);

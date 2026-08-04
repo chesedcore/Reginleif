@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "gdscript_parser.h"
+#include "gdscript_cache.h"
 
 #include "gdscript.h"
 #include "gdscript_tokenizer_buffer.h"
