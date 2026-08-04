@@ -6397,7 +6397,11 @@ void GDScriptAnalyzer::reduce_preload(GDScriptParser::PreloadNode *p_preload) {
 
 void GDScriptAnalyzer::reduce_self(GDScriptParser::SelfNode *p_self) {
 	p_self->is_constant = false;
-	p_self->type_constraint = type_from_metatype(parser->current_class->self_type);
+	if (current_impl_self_type.is_set()) {
+		p_self->type_constraint = current_impl_self_type;
+	} else {
+		p_self->type_constraint = type_from_metatype(parser->current_class->self_type);
+	}
 	mark_lambda_use_self();
 }
 

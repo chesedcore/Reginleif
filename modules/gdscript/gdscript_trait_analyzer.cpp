@@ -254,7 +254,12 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 			continue;
 		}
 
+		GDScriptParser::DataType previous_impl_self_type = analyzer->current_impl_self_type;
+		analyzer->current_impl_self_type = target_type;
+		analyzer->current_impl_self_type.is_meta_type = false;
+		analyzer->current_impl_self_type.is_constant = false;
 		analyzer->resolve_function_body(provided);
+		analyzer->current_impl_self_type = previous_impl_self_type;
 
 		gd_impl->provided_methods[method_name] = provided;
 	}
