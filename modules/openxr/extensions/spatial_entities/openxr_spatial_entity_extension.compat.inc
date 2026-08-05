@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  register_types.cpp                                                    */
+/*  openxr_spatial_entity_extension.compat.inc                            */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,28 +28,18 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#include "register_types.h"
+#ifndef DISABLE_DEPRECATED
 
-#include "image_compress_etcpak.h"
-#include "image_decompress_etcpak.h"
+#include "openxr_spatial_entity_extension.h"
 
-void initialize_etcpak_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
+#include "core/object/class_db.h"
 
-#ifdef ETCPAK_COMPRESS_ENABLED
-	Image::_image_compress_etc1_func = _compress_etc1;
-	Image::_image_compress_etc2_func = _compress_etc2;
-	Image::_image_compress_bc_func = _compress_bc;
-#endif
-
-	Image::_image_decompress_etc1 = _decompress_etc;
-	Image::_image_decompress_etc2 = _decompress_etc;
+void OpenXRSpatialEntityExtension::_bind_compatibility_methods() {
+	ClassDB::bind_compatibility_method(D_METHOD("create_spatial_context", "capability_configurations", "next", "user_callback"), &OpenXRSpatialEntityExtension::_create_spatial_context_bind_compat_121123, DEFVAL(Variant()), DEFVAL(Callable()));
 }
 
-void uninitialize_etcpak_module(ModuleInitializationLevel p_level) {
-	if (p_level != MODULE_INITIALIZATION_LEVEL_SCENE) {
-		return;
-	}
+Ref<OpenXRFutureResult> OpenXRSpatialEntityExtension::_create_spatial_context_bind_compat_121123(const TypedArray<OpenXRSpatialCapabilityConfigurationBaseHeader> &p_capability_configurations, Ref<OpenXRStructureBase> p_next, const Callable &p_user_callback) {
+	return create_spatial_context(p_capability_configurations, p_next, p_user_callback, Callable());
 }
+
+#endif // DISABLE_DEPRECATED

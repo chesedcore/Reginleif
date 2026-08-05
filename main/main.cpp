@@ -597,6 +597,7 @@ void Main::print_help(const char *p_binary) {
 	print_help_option("--gpu-abort", "Abort on graphics API usage errors (usually validation layer errors). May help see the problem if your system freezes.\n", CLI_OPTION_AVAILABILITY_TEMPLATE_DEBUG);
 #endif
 	print_help_option("--generate-spirv-debug-info", "Generate SPIR-V debug information (Vulkan only). This allows source-level shader debugging with RenderDoc.\n");
+	print_help_option("--clear-shader-cache", "Clear the shader_cache directory at launch, so it's re-generated.\n");
 #if defined(DEBUG_ENABLED) || defined(DEV_ENABLED)
 	print_help_option("--extra-gpu-memory-tracking", "Enables additional memory tracking (see class reference for `RenderingDevice.get_driver_and_device_memory_report()` and linked methods). Currently only implemented for Vulkan. Enabling this feature may cause crashes on some systems due to buggy drivers or bugs in the Vulkan Loader. See https://github.com/godotengine/godot/issues/95967\n");
 	print_help_option("--accurate-breadcrumbs", "Force barriers between breadcrumbs. Useful for narrowing down a command causing GPU resets. Currently only implemented for Vulkan.\n");
@@ -1047,6 +1048,7 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	String main_pack;
 	bool quiet_stdout = false;
 	int separate_thread_render = -1; // Tri-state: -1 = not set, 0 = false, 1 = true.
+	bool clear_shader_cache = false;
 
 #if defined(DEBUG_ENABLED) || defined(TOOLS_ENABLED)
 	String remotefs;
@@ -1289,6 +1291,8 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #endif
 		} else if (arg == "--generate-spirv-debug-info") {
 			Engine::singleton->generate_spirv_debug_info = true;
+		} else if (arg == "--clear-shader-cache") {
+			clear_shader_cache = true;
 #if defined(DEBUG_ENABLED) || defined(DEV_ENABLED)
 		} else if (arg == "--extra-gpu-memory-tracking") {
 			Engine::singleton->extra_gpu_memory_tracking = true;
@@ -2062,6 +2066,13 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 #endif
 	}
 
+	if (clear_shader_cache && !project_path.is_empty()) {
+		const String cache_path = project_path.path_join(".godot").path_join("shader_cache");
+		if (DirAccess::dir_exists_absolute(cache_path)) {
+			OS::get_singleton()->move_to_trash(cache_path);
+		}
+	}
+
 	// Initialize WorkerThreadPool.
 	{
 #ifdef THREADS_ENABLED
@@ -2813,6 +2824,26 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	GLOBAL_DEF_BASIC("xr/openxr/startup_alert", true);
 
 	// OpenXR project extensions settings.
+#ifndef DISABLE_DEPRECATED
+#define MOVE_PROJECT_SETTING(m_old_setting, m_new_setting) \
+	if (!ProjectSettings::get_singleton()->has_setting(m_new_setting) && ProjectSettings::get_singleton()->has_setting(m_old_setting)) { \
+		Variant value = GLOBAL_GET(m_old_setting); \
+		ProjectSettings::get_singleton()->set_setting(m_new_setting, value); \
+		ProjectSettings::get_singleton()->clear(m_old_setting); \
+	}
+
+	MOVE_PROJECT_SETTING("xr/openxr/extensions/spatial_entity/enable_marker_tracking", "xr/openxr/extensions/spatial_entity/marker_tracking/enable");
+	MOVE_PROJECT_SETTING("xr/openxr/extensions/spatial_entity/aruco_dict", "xr/openxr/extensions/spatial_entity/marker_tracking/aruco_dict");
+	MOVE_PROJECT_SETTING("xr/openxr/extensions/spatial_entity/april_tag_dict", "xr/openxr/extensions/spatial_entity/marker_tracking/april_tag_dict");
+
+	if (!ProjectSettings::get_singleton()->has_setting("xr/openxr/extensions/spatial_entity/marker_tracking/enable_builtin_for_types") && ProjectSettings::get_singleton()->has_setting("xr/openxr/extensions/spatial_entity/enable_builtin_marker_tracking")) {
+		bool value = GLOBAL_GET("xr/openxr/extensions/spatial_entity/enable_builtin_marker_tracking");
+		ProjectSettings::get_singleton()->set_setting("xr/openxr/extensions/spatial_entity/marker_tracking/enable_builtin_for_types", value ? 15 : 0);
+		ProjectSettings::get_singleton()->clear("xr/openxr/extensions/spatial_entity/enable_builtin_marker_tracking");
+	}
+#undef MOVE_PROJECT_SETTING
+#endif // DISABLE_DEPRECATED
+
 	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "xr/openxr/extensions/debug_utils", PROPERTY_HINT_ENUM, "Disabled,Error,Warning,Info,Verbose"), "0");
 	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "xr/openxr/extensions/debug_message_types", PROPERTY_HINT_FLAGS, "General,Validation,Performance,Conformance"), "15");
 	GLOBAL_DEF_BASIC("xr/openxr/extensions/frame_synthesis", false);
@@ -2827,10 +2858,10 @@ Error Main::setup(const char *execpath, int argc, char *argv[], bool p_second_ph
 	GLOBAL_DEF_BASIC("xr/openxr/extensions/spatial_entity/enable_builtin_anchor_detection", false);
 	GLOBAL_DEF_BASIC("xr/openxr/extensions/spatial_entity/enable_plane_tracking", false);
 	GLOBAL_DEF_BASIC("xr/openxr/extensions/spatial_entity/enable_builtin_plane_detection", false);
-	GLOBAL_DEF_BASIC("xr/openxr/extensions/spatial_entity/enable_marker_tracking", false);
-	GLOBAL_DEF_BASIC("xr/openxr/extensions/spatial_entity/enable_builtin_marker_tracking", false);
-	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "xr/openxr/extensions/spatial_entity/aruco_dict", PROPERTY_HINT_ENUM, "4x4 50 IDs,4x4 100 IDs,4x4 250 IDs,4x4 1000 IDs,5x5 50 IDs,5x5 100 IDs,5x5 250 IDs,5x5 1000 IDs,6x6 50 IDs,6x6 100 IDs,6x6 250 IDs,6x6 1000 IDs,7x7 50 IDs,7x7 100 IDs,7x7 250 IDs,7x7 1000 IDs"), "15");
-	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "xr/openxr/extensions/spatial_entity/april_tag_dict", PROPERTY_HINT_ENUM, "4x4H5,5x5H9,6x6H10,6x6H11"), "3");
+	GLOBAL_DEF_BASIC("xr/openxr/extensions/spatial_entity/marker_tracking/enable", false);
+	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "xr/openxr/extensions/spatial_entity/marker_tracking/enable_builtin_for_types", PROPERTY_HINT_FLAGS, "QR codes,Micro QR codes,ArUco markers,April tags"), 0);
+	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "xr/openxr/extensions/spatial_entity/marker_tracking/aruco_dict", PROPERTY_HINT_ENUM, "4x4 50 IDs,4x4 100 IDs,4x4 250 IDs,4x4 1000 IDs,5x5 50 IDs,5x5 100 IDs,5x5 250 IDs,5x5 1000 IDs,6x6 50 IDs,6x6 100 IDs,6x6 250 IDs,6x6 1000 IDs,7x7 50 IDs,7x7 100 IDs,7x7 250 IDs,7x7 1000 IDs"), "15");
+	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "xr/openxr/extensions/spatial_entity/marker_tracking/april_tag_dict", PROPERTY_HINT_ENUM, "4x4H5,5x5H9,6x6H10,6x6H11"), "3");
 	GLOBAL_DEF_RST_BASIC("xr/openxr/extensions/eye_gaze_interaction", false);
 	GLOBAL_DEF_BASIC("xr/openxr/extensions/render_model", false);
 	GLOBAL_DEF_BASIC("xr/openxr/extensions/user_presence", false);
