@@ -89,6 +89,7 @@ public:
 	_FORCE_INLINE_ GDScriptParser* get_parser() { return parser; }
 
 	GDScriptParser::FunctionNode* find_impl_method(const GDScriptParser::DataType& p_base_type, const StringName& p_method_name) const;
+	Ref<GDScriptTraitSignatureSnapshot> find_impl_method_signature(const GDScriptParser::DataType& p_base_type, const StringName& p_method_name) const;
 
 	GDScriptTraitAnalyzer(GDScriptParser* p_parser, GDScriptAnalyzer* p_analyzer);
 };

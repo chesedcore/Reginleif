@@ -1503,6 +1503,33 @@ static Ref<GDScriptTrait> _get_trait_for_completion(const StringName& p_trait_na
 	return Ref<GDScriptTrait>();
 }
 
+static void _find_trait_methods_from_class_impls_for_completion(const GDScriptParser::ClassNode* p_class, bool p_add_braces, HashMap<String, ScriptLanguage::CodeCompletionOption>& r_result, int p_recursion_depth, GDScriptTraitAnalyzer* p_trait_analyzer) {
+	if (p_class == nullptr) {
+		return;
+	}
+
+	for (const GDScriptParser::ImplNode* impl : p_class->impls) {
+		if (impl == nullptr || impl->trait_name == nullptr) {
+			continue;
+		}
+
+		Ref<GDScriptTrait> trait_ref = _get_trait_for_completion(impl->trait_name->name, p_trait_analyzer);
+		if (trait_ref.is_valid()) {
+			for (const KeyValue<StringName, Ref<GDScriptTraitSignatureSnapshot>>& E : trait_ref->required_signatures) {
+				_add_trait_attribute_method_completion(E.key, E.value, p_add_braces, p_recursion_depth + ScriptLanguage::LOCATION_OTHER_USER_CODE, r_result);
+			}
+		}
+
+		for (const GDScriptParser::FunctionNode* method : impl->methods) {
+			if (method == nullptr || method->identifier == nullptr) {
+				continue;
+			}
+
+			_add_trait_attribute_method_completion(method->identifier->name, Ref<GDScriptTraitSignatureSnapshot>(), p_add_braces, p_recursion_depth + ScriptLanguage::LOCATION_OTHER_USER_CODE, r_result);
+		}
+	}
+}
+
 static const GDScriptParser::DataType* _get_trait_bound_type_for_completion(const GDScriptParser::DataType& p_base_type) {
 	if (p_base_type.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
 		return &p_base_type;
@@ -1883,14 +1910,22 @@ static void _find_identifiers_in_base(const GDScriptCompletionIdentifier &p_base
 	}
 }
 
-static void _find_identifiers(const GDScriptParser::CompletionContext &p_context, bool p_only_functions, bool p_add_braces, HashMap<String, ScriptLanguage::CodeCompletionOption> &r_result, int p_recursion_depth) {
+static void _find_identifiers(const GDScriptParser::CompletionContext &p_context, bool p_only_functions, bool p_add_braces, HashMap<String, ScriptLanguage::CodeCompletionOption> &r_result, int p_recursion_depth, GDScriptTraitAnalyzer *p_trait_analyzer = nullptr) {
 	if (!p_only_functions && p_context.current_suite) {
 		// This includes function parameters, since they are also locals.
 		_find_identifiers_in_suite(p_context.current_suite, r_result);
 	}
 
 	if (p_context.current_class) {
-		_find_identifiers_in_class(p_context.current_class, p_only_functions, false, (!p_context.current_function || p_context.current_function->is_static), false, p_add_braces, r_result, p_recursion_depth);
+		const bool is_static = !p_context.current_function || p_context.current_function->is_static;
+		_find_identifiers_in_class(p_context.current_class, p_only_functions, false, is_static, false, p_add_braces, r_result, p_recursion_depth);
+
+		if (!is_static) {
+			GDScriptCompletionIdentifier self_base;
+			self_base.type = p_context.current_class->self_type;
+			_find_trait_attribute_methods_in_base(self_base.type, p_only_functions, false, p_add_braces, r_result, p_recursion_depth, p_trait_analyzer);
+			_find_trait_methods_from_class_impls_for_completion(p_context.current_class, p_add_braces, r_result, p_recursion_depth, p_trait_analyzer);
+		}
 	}
 
 	List<StringName> functions;
@@ -4075,7 +4110,7 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 				break;
 			}
 			if (!_guess_expression_type(completion_context, static_cast<const GDScriptParser::AssignmentNode *>(completion_context.node)->assignee, type)) {
-				_find_identifiers(completion_context, false, true, options, 0);
+				_find_identifiers(completion_context, false, true, options, 0, analyzer.get_trait_analyzer());
 				r_forced = true;
 				break;
 			}
@@ -4084,7 +4119,7 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 				_find_enumeration_candidates(completion_context, type.enumeration, options);
 				r_forced = options.size() > 0;
 			} else {
-				_find_identifiers(completion_context, false, true, options, 0);
+				_find_identifiers(completion_context, false, true, options, 0, analyzer.get_trait_analyzer());
 				r_forced = true;
 			}
 		} break;
@@ -4092,7 +4127,7 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 			is_function = true;
 			[[fallthrough]];
 		case GDScriptParser::COMPLETION_IDENTIFIER: {
-			_find_identifiers(completion_context, is_function, !_guess_expecting_callable(completion_context), options, 0);
+			_find_identifiers(completion_context, is_function, !_guess_expecting_callable(completion_context), options, 0, analyzer.get_trait_analyzer());
 		} break;
 		case GDScriptParser::COMPLETION_ATTRIBUTE_METHOD:
 			is_function = true;

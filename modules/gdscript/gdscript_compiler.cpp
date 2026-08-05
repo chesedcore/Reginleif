@@ -3123,9 +3123,15 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 		bool is_builtin_target = impl_target.kind == GDScriptParser::DataType::BUILTIN;
 		bool is_native_class_target = impl_target.kind == GDScriptParser::DataType::NATIVE;
 		bool is_native_impl_target = is_builtin_target || is_native_class_target;
-		for (const KeyValue<StringName, GDScriptParser::FunctionNode*>& E : impl_node->resolved_gd_impl->provided_methods) {
+		HashSet<StringName> explicit_impl_methods;
+		for (const GDScriptParser::FunctionNode* impl_method_node : impl_node->methods) {
+			if (impl_method_node == nullptr || impl_method_node->identifier == nullptr) {
+				continue;
+			}
+			const StringName method_name = impl_method_node->identifier->name;
+			explicit_impl_methods.insert(method_name);
 			Error err = OK;
-			GDScriptFunction* impl_function = _parse_function(err, p_script, p_class, E.value, false, false, is_native_impl_target);
+			GDScriptFunction* impl_function = _parse_function(err, p_script, p_class, impl_method_node, false, false, is_native_impl_target);
 			if (err) {
 				return err;
 			}
@@ -3134,17 +3140,46 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 				impl_function->set_is_native_impl_method(true);
 				///mangle the key so two impls of the same method for different targets
 				///don't overwrite each other in member_functions and fuckup the old pointer
-				StringName mangled_key = StringName("@impl:builtin:" + itos((int)impl_target.builtin_type) + "::" + String(E.key));
+				StringName mangled_key = StringName("@impl:builtin:" + itos((int)impl_target.builtin_type) + "::" + String(method_name));
 				p_script->member_functions[mangled_key] = impl_function;
-				GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
+				GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, method_name, impl_function);
 			} else if (is_native_class_target) {
 				impl_function->set_is_native_impl_method(true);
-				StringName mangled_key = StringName("@impl:native:" + String(impl_target.native_type) + "::" + String(E.key));
+				StringName mangled_key = StringName("@impl:native:" + String(impl_target.native_type) + "::" + String(method_name));
 				p_script->member_functions[mangled_key] = impl_function;
-				GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, E.key, impl_function);
+				GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, method_name, impl_function);
 			}
 			///class-target impls: _parse_function() already inserted ts with func_name, which is
 			///fine since a class only ever has one impl per method name (analyzser enforces that) ((or at least it should))
+		}
+
+		if (!is_native_impl_target && impl_node->trait_name != nullptr) {
+			String trait_path = GDScriptCache::get_global_trait_path(impl_node->trait_name->name);
+			if (!trait_path.is_empty()) {
+				GDScriptParser trait_parser;
+				GDScriptAnalyzer trait_analyzer(&trait_parser);
+				trait_parser.parse(GDScriptCache::get_source_code(trait_path), trait_path, false);
+				trait_analyzer.analyze();
+				const GDScriptParser::TraitNode* trait = trait_parser.get_trait_tree();
+				if (trait != nullptr) {
+					for (const KeyValue<StringName, Ref<GDScriptTraitSignatureSnapshot>>& E : impl_node->resolved_gd_impl->provided_signatures) {
+						if (explicit_impl_methods.has(E.key)) {
+							continue;
+						}
+						for (const GDScriptParser::FunctionNode* default_method_node : trait->default_methods) {
+							if (default_method_node == nullptr || default_method_node->identifier == nullptr || default_method_node->identifier->name != E.key) {
+								continue;
+							}
+							Error err = OK;
+							_parse_function(err, p_script, p_class, default_method_node, false, false, false);
+							if (err) {
+								return err;
+							}
+							break;
+						}
+					}
+				}
+			}
 		}
 	}
 
@@ -3419,9 +3454,13 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 					continue;
 				}
 
-				for (const KeyValue<StringName, GDScriptParser::FunctionNode*>& E : impl_node->resolved_gd_impl->provided_methods) {
+				for (const GDScriptParser::FunctionNode* impl_method_node : impl_node->methods) {
+					if (impl_method_node == nullptr || impl_method_node->identifier == nullptr) {
+						continue;
+					}
+					const StringName method_name = impl_method_node->identifier->name;
 					Error err = OK;
-					GDScriptFunction* impl_function = _parse_function(err, p_script, root, E.value, false, false, true);
+					GDScriptFunction* impl_function = _parse_function(err, p_script, root, impl_method_node, false, false, true);
 					if (err) {
 						return err;
 					}
@@ -3436,15 +3475,15 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 					} else {
 						target_key_str = "class:" + impl_target.class_type->fqcn;
 					}
-					StringName mangled_key = StringName("@impl:" + target_key_str + "::" + String(E.key));
+					StringName mangled_key = StringName("@impl:" + target_key_str + "::" + String(method_name));
 					p_script->member_functions[mangled_key] = impl_function;
 
 					if (is_builtin_target) {
-						GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
+						GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, method_name, impl_function);
 					} else if (is_native_class_target) {
-						GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, E.key, impl_function);
+						GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, method_name, impl_function);
 					} else {
-						GDScriptLanguage::get_singleton()->register_script_class_impl_method(impl_target.class_type->fqcn, E.key, impl_function);
+						GDScriptLanguage::get_singleton()->register_script_class_impl_method(impl_target.class_type->fqcn, method_name, impl_function);
 					}
 				}
 			}

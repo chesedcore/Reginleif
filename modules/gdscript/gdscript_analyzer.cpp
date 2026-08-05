@@ -5269,11 +5269,15 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 	} else {
 		bool found = false;
 
-		GDScriptParser::FunctionNode* local_impl_method = trait_analyzer != nullptr ? trait_analyzer->find_impl_method(base_type, p_call->function_name) : nullptr;
-		if (local_impl_method != nullptr) {
+		Ref<GDScriptTraitSignatureSnapshot> local_impl_signature = trait_analyzer != nullptr ? trait_analyzer->find_impl_method_signature(base_type, p_call->function_name) : Ref<GDScriptTraitSignatureSnapshot>();
+		if (local_impl_signature.is_valid()) {
 			found = true;
-			validate_call_arg(local_impl_method->info, p_call);
-			call_type = local_impl_method->return_type_constraint;
+			List<GDScriptParser::DataType> impl_par_types;
+			for (const GDScriptParser::DataType& param_type : local_impl_signature->param_types) {
+				impl_par_types.push_back(param_type);
+			}
+			validate_call_arg(impl_par_types, local_impl_signature->default_arg_count, local_impl_signature->is_vararg, p_call);
+			call_type = local_impl_signature->return_type;
 			if (!p_is_root && !p_is_await && call_type.is_hard_type() && call_type.kind == GDScriptParser::DataType::BUILTIN && call_type.builtin_type == Variant::NIL) {
 				push_error(vformat(R"*(Cannot get return value of call to "%s()" because it returns "void".)*", p_call->function_name), p_call);
 			}
@@ -5349,7 +5353,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 					bool is_trait_bound_callable = find_trait_bound_method_signature(base_type, p_call->function_name, trait_analyzer, parser->get_script_path()).is_valid();
 					bool is_impl_callable = callee_datatype.builtin_type == Variant::CALLABLE && (
 							is_trait_bound_callable ||
-							(trait_analyzer != nullptr && trait_analyzer->find_impl_method(base_type, p_call->function_name) != nullptr) ||
+							(trait_analyzer != nullptr && trait_analyzer->find_impl_method_signature(base_type, p_call->function_name).is_valid()) ||
 							has_global_impl_method_claim_for_type(base_type, p_call->function_name));
 					found = true;
 					if (is_impl_callable) {
@@ -5369,7 +5373,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			}
 		}
 		if (!found) {
-			if (trait_analyzer != nullptr && trait_analyzer->find_impl_method(base_type, p_call->function_name) != nullptr) {
+			if (trait_analyzer != nullptr && trait_analyzer->find_impl_method_signature(base_type, p_call->function_name).is_valid()) {
 				found = true;
 			} else {
 				if (has_global_impl_method_claim_for_type(base_type, p_call->function_name)) {
@@ -5777,9 +5781,9 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 						return;
 					}
 
-					GDScriptParser::FunctionNode* impl_method = trait_analyzer != nullptr ? trait_analyzer->find_impl_method(base, name) : nullptr;
-					if (impl_method != nullptr) {
-						p_identifier->type_constraint = make_callable_type(impl_method->info);
+					Ref<GDScriptTraitSignatureSnapshot> impl_signature = trait_analyzer != nullptr ? trait_analyzer->find_impl_method_signature(base, name) : Ref<GDScriptTraitSignatureSnapshot>();
+					if (impl_signature.is_valid()) {
+						p_identifier->type_constraint = make_callable_type(method_info_from_trait_signature(name, impl_signature));
 						return;
 					}
 
@@ -6019,9 +6023,9 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 		return;
 	}
 
-	GDScriptParser::FunctionNode* impl_method = trait_analyzer != nullptr ? trait_analyzer->find_impl_method(base, name) : nullptr;
-	if (impl_method != nullptr) {
-		p_identifier->type_constraint = make_callable_type(impl_method->info);
+	Ref<GDScriptTraitSignatureSnapshot> impl_signature = trait_analyzer != nullptr ? trait_analyzer->find_impl_method_signature(base, name) : Ref<GDScriptTraitSignatureSnapshot>();
+	if (impl_signature.is_valid()) {
+		p_identifier->type_constraint = make_callable_type(method_info_from_trait_signature(name, impl_signature));
 		p_identifier->source = GDScriptParser::IdentifierNode::INHERITED_VARIABLE;
 		return;
 	}

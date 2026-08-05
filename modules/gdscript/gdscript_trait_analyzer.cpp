@@ -655,3 +655,22 @@ GDScriptParser::FunctionNode* GDScriptTraitAnalyzer::find_impl_method(const GDSc
 
 	return best_match.is_valid() ? best_match->provided_methods[p_method_name] : nullptr;
 }
+
+Ref<GDScriptTraitSignatureSnapshot> GDScriptTraitAnalyzer::find_impl_method_signature(const GDScriptParser::DataType& p_base_type, const StringName& p_method_name) const {
+	Ref<GDScriptImpl> best_match;
+
+	for (const Ref<GDScriptImpl>& impl : resolved_impls) {
+		if (impl.is_null() || !impl->provided_signatures.has(p_method_name)) {
+			continue;
+		}
+		if (!_type_is_or_inherits(p_base_type, impl->impl_target_type)) {
+			continue;
+		}
+		if (best_match.is_null() || _type_is_or_inherits(impl->impl_target_type, best_match->impl_target_type)) {
+			///impl's target is same-or-more-derived than what we've matched so far
+			best_match = impl;
+		}
+	}
+
+	return best_match.is_valid() ? best_match->provided_signatures[p_method_name] : Ref<GDScriptTraitSignatureSnapshot>();
+}
