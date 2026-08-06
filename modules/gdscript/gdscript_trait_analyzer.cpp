@@ -117,7 +117,6 @@ Error GDScriptTraitAnalyzer::resolve_trait(GDScriptParser::TraitNode* p_trait) {
 			continue;
 		}
 		analyzer->resolve_function_signature(method, p_trait);
-		analyzer->resolve_function_body(method);
 		gd_trait->default_methods[method->identifier->name] = method;
 
 		gd_trait->required_signatures[method->identifier->name] = _make_trait_method_signature_snapshot(method);

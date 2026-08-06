@@ -4858,10 +4858,17 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 		}
 		if (base_id && GDScriptParser::get_builtin_type(base_id->name) < Variant::VARIANT_MAX) {
 			base_type = make_builtin_meta_type(GDScriptParser::get_builtin_type(base_id->name));
+		} else if (subscript->base->type == GDScriptParser::Node::SELF) {
+			if (current_impl_self_type.is_set()) {
+				base_type = current_impl_self_type;
+			} else {
+				base_type = type_from_metatype(parser->current_class->self_type);
+			}
+			base_type.is_meta_type = false;
+			is_self = true;
 		} else {
 			reduce_expression(subscript->base);
 			base_type = subscript->base->type_constraint;
-			is_self = subscript->base->type == GDScriptParser::Node::SELF;
 		}
 
 #ifdef DEBUG_ENABLED
@@ -5338,7 +5345,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			} else {
 				push_error(vformat(R"*(The native enum "%s" does not behave like Dictionary and does not have methods of its own.)*", base_type.enum_type), p_call->callee);
 			}
-		} else if (!p_call->is_super && callee_type != GDScriptParser::Node::NONE) { // Check if the name exists as something else.
+		} else if (!found && !p_call->is_super && callee_type != GDScriptParser::Node::NONE) { // Check if the name exists as something else.
 			GDScriptParser::IdentifierNode *callee_id;
 			if (callee_type == GDScriptParser::Node::IDENTIFIER) {
 				callee_id = static_cast<GDScriptParser::IdentifierNode *>(p_call->callee);
@@ -5348,10 +5355,11 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			}
 			if (callee_id) {
 				reduce_identifier_from_base(callee_id, &base_type);
-				GDScriptParser::DataType callee_datatype = callee_id->type_constraint;
+				const GDScriptParser::DataType &callee_datatype = callee_id->type_constraint;
 				if (callee_datatype.is_set() && !callee_datatype.is_variant()) {
 					bool is_trait_bound_callable = find_trait_bound_method_signature(base_type, p_call->function_name, trait_analyzer, parser->get_script_path()).is_valid();
-					bool is_impl_callable = callee_datatype.builtin_type == Variant::CALLABLE && (
+					bool is_callable_type = callee_datatype.kind == GDScriptParser::DataType::BUILTIN && callee_datatype.builtin_type == Variant::CALLABLE;
+					bool is_impl_callable = is_callable_type && (
 							is_trait_bound_callable ||
 							(trait_analyzer != nullptr && trait_analyzer->find_impl_method_signature(base_type, p_call->function_name).is_valid()) ||
 							has_global_impl_method_claim_for_type(base_type, p_call->function_name));
@@ -5359,7 +5367,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 					if (is_impl_callable) {
 						///the subscript reducer thingy exposes trait/impl methods as Callables so member lookup succeeds
 						///but direct method-call syntax should still be accepted for type-safe dispatch
-					} else if (callee_datatype.builtin_type == Variant::CALLABLE) {
+					} else if (is_callable_type) {
 						push_error(vformat(R"*(Name "%s" is a Callable. You can call it with "%s.call()" instead.)*", p_call->function_name, p_call->function_name), p_call->callee);
 					} else {
 						push_error(vformat(R"*(Name "%s" called as a function but is a "%s".)*", p_call->function_name, callee_datatype.to_string()), p_call->callee);
