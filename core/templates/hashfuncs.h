@@ -164,7 +164,7 @@ template <typename, typename = std::void_t<>>
 struct has_hash_method : std::false_type {};
 
 template <typename T>
-struct has_hash_method<T, std::void_t<std::is_same<decltype(std::declval<const T>().hash()), uint32_t>>> : std::true_type {};
+struct has_hash_method<T, std::enable_if_t<std::is_same_v<decltype(std::declval<const T>().hash()), uint32_t>>> : std::true_type {};
 
 template <typename T>
 constexpr bool has_hash_method_v = has_hash_method<T>::value;
@@ -206,6 +206,9 @@ template <>
 struct HashMapHasherDefaultImpl<char *> {
 	static _FORCE_INLINE_ uint32_t hash(const char *p_cstr) { return hash_djb2(p_cstr); }
 };
+
+template <>
+struct HashMapHasherDefaultImpl<const char *> : HashMapHasherDefaultImpl<char *> {};
 
 template <>
 struct HashMapHasherDefaultImpl<wchar_t> {
@@ -285,7 +288,7 @@ template <typename, typename = std::void_t<>>
 struct has_is_same_method : std::false_type {};
 
 template <typename T>
-struct has_is_same_method<T, std::void_t<std::is_same<decltype(std::declval<const T>().is_same(std::declval<const T>())), uint32_t>>> : std::true_type {};
+struct has_is_same_method<T, std::enable_if_t<std::is_same_v<decltype(std::declval<const T>().is_same(std::declval<const T>())), bool>>> : std::true_type {};
 
 template <typename T>
 constexpr bool has_is_same_method_v = has_is_same_method<T>::value;
