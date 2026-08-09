@@ -234,10 +234,15 @@ RID RenderForwardMobile::RenderBufferDataForwardMobile::get_color_fbs(Framebuffe
 
 	RID vrs_texture;
 #ifndef XR_DISABLED
-	if (render_buffers->get_vrs_mode() == RSE::VIEWPORT_VRS_XR) {
-		Ref<XRInterface> interface = XRServer::get_singleton()->get_primary_interface();
-		if (interface.is_valid() && RD::get_singleton()->vrs_get_method() == RD::VRS_METHOD_FRAGMENT_DENSITY_MAP && interface->get_vrs_texture_format() == XRInterface::XR_VRS_TEXTURE_FORMAT_FRAGMENT_DENSITY_MAP) {
-			vrs_texture = interface->get_vrs_texture();
+	RSE::ViewportVRSMode vrs_mode = render_buffers->get_vrs_mode();
+	if (vrs_mode == RSE::VIEWPORT_VRS_XR) {
+		Ref<XRInterface> xr_interface = XRServer::get_singleton()->get_primary_interface();
+		if (xr_interface.is_valid()) {
+			bool use_vrs_fragment_density_map = RD::get_singleton()->vrs_get_method() == RD::VRS_METHOD_FRAGMENT_DENSITY_MAP && xr_interface->get_vrs_texture_format() == XRInterface::XR_VRS_TEXTURE_FORMAT_FRAGMENT_DENSITY_MAP;
+			bool use_vrs_rasterization_rate_map = RD::get_singleton()->vrs_get_method() == RD::VRS_METHOD_RASTERIZATION_RATE_MAP && xr_interface->get_vrs_texture_format() == XRInterface::XR_VRS_TEXTURE_FORMAT_RASTERIZATION_RATE_MAP;
+			if (use_vrs_fragment_density_map || use_vrs_rasterization_rate_map) {
+				vrs_texture = xr_interface->get_vrs_texture();
+			}
 		}
 	}
 #endif // XR_DISABLED
@@ -2027,8 +2032,7 @@ void RenderForwardMobile::_update_render_base_uniform_set() {
 		{
 			RD::Uniform u;
 			u.binding = 15;
-			u.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-			u.append_id(RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
+			u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 			u.append_id(RendererRD::TextureStorage::get_singleton()->texture_get_rd_texture(ltc.lut1_texture));
 			uniforms.push_back(u);
 		}
@@ -2036,8 +2040,7 @@ void RenderForwardMobile::_update_render_base_uniform_set() {
 		{
 			RD::Uniform u;
 			u.binding = 16;
-			u.uniform_type = RD::UNIFORM_TYPE_SAMPLER_WITH_TEXTURE;
-			u.append_id(RendererRD::MaterialStorage::get_singleton()->sampler_rd_get_default(RSE::CANVAS_ITEM_TEXTURE_FILTER_LINEAR, RSE::CANVAS_ITEM_TEXTURE_REPEAT_DISABLED));
+			u.uniform_type = RD::UNIFORM_TYPE_TEXTURE;
 			u.append_id(RendererRD::TextureStorage::get_singleton()->texture_get_rd_texture(ltc.lut2_texture));
 			uniforms.push_back(u);
 		}
