@@ -51,6 +51,7 @@
 #include "core/version.h"
 #include "editor/animation/animation_player_editor_plugin.h"
 #include "editor/asset_library/asset_library_editor_plugin.h"
+#include "editor/audio/audio_stream_editor_plugin.h"
 #include "editor/audio/audio_stream_preview.h"
 #include "editor/audio/editor_audio_buses.h"
 #include "editor/debugger/debugger_editor_plugin.h"
@@ -3065,6 +3066,7 @@ void EditorNode::push_item(Object *p_object, const String &p_property, bool p_in
 		GroupsDock::get_singleton()->set_selection(Vector<Node *>());
 		SceneTreeDock::get_singleton()->set_selected(nullptr);
 		InspectorDock::get_singleton()->update(nullptr);
+		EditorDebuggerNode::get_singleton()->clear_remote_tree_selection();
 		hide_unused_editors();
 		return;
 	}
@@ -5056,10 +5058,7 @@ Error EditorNode::open_scene(const String &p_scene, bool p_ignore_broken_deps, b
 		}
 	}
 
-	Error err = load_scene(p_scene, p_ignore_broken_deps, p_set_inherited, p_force_open_imported);
-	if (err != OK) {
-		return err;
-	}
+	RETURN_IF_ERROR(load_scene(p_scene, p_ignore_broken_deps, p_set_inherited, p_force_open_imported));
 
 	int current_scene_idx = editor_data.get_edited_scene_count() - 1;
 	Node *new_scene = editor_data.get_edited_scene_root(current_scene_idx);
@@ -8692,6 +8691,10 @@ EditorNode::EditorNode() {
 		Ref<EditorInspectorParticleProcessMaterialPlugin> ppm;
 		ppm.instantiate();
 		EditorInspector::add_inspector_plugin(ppm);
+
+		Ref<EditorInspectorPluginAudioStreamWAV> plugin;
+		plugin.instantiate();
+		EditorInspector::add_inspector_plugin(plugin);
 	}
 
 	editor_selection = memnew(EditorSelection);
