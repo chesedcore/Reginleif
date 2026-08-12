@@ -262,6 +262,18 @@ var t: impl Rollable
 ```
 this bounds `t` to only accepting values that `impl Rollable`.
 
+#### default methods
+you can implement default methods for traits to give any class implementing that trait the option to implement that method or not. if they don't, the default is used instead. the use cases for this are that you can use this to hack some duck-typed behaviour using `self`, or give the target access to a composed function that combines the functions that they implement.
+
+you can specify a default implementation by simply writing it as the  method signature's body:
+```gdscript
+trait Rollable
+func roll() -> void:
+	print(self, " is rolling")
+func is_rolling() -> bool
+```
+now a target need only implement `is_rolling()`, and `roll()` will be implemented by default for them.
+
 #### type tests
 you can test for traits at runtime using `is TraitName` as you would with `is` checks for classes.
 ```gdscript
