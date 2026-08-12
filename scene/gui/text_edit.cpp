@@ -973,6 +973,7 @@ void TextEdit::_notification(int p_what) {
 				} else {
 					set_v_scroll(get_v_scroll() + vel);
 				}
+				_selection_mode_update();
 			} else {
 				scrolling = false;
 				minimap_clicked = false;
@@ -2488,6 +2489,7 @@ void TextEdit::gui_input(const Ref<InputEvent> &p_gui_input) {
 					// Scroll 3 lines.
 					_scroll_up(3 * mb->get_factor(), true);
 				}
+				_selection_mode_update();
 			}
 			if (mb->get_button_index() == MouseButton::WHEEL_DOWN && !mb->is_command_or_control_pressed()) {
 				if (mb->is_shift_pressed()) {
@@ -2500,14 +2502,17 @@ void TextEdit::gui_input(const Ref<InputEvent> &p_gui_input) {
 					// Scroll 3 lines.
 					_scroll_down(3 * mb->get_factor(), true);
 				}
+				_selection_mode_update();
 			}
 			if (mb->get_button_index() == MouseButton::WHEEL_LEFT) {
 				h_scroll->set_value(h_scroll->get_value() - (100 * mb->get_factor()));
 				queue_accessibility_update();
+				_selection_mode_update();
 			}
 			if (mb->get_button_index() == MouseButton::WHEEL_RIGHT) {
 				h_scroll->set_value(h_scroll->get_value() + (100 * mb->get_factor()));
 				queue_accessibility_update();
+				_selection_mode_update();
 			}
 
 			if (mb->get_button_index() == MouseButton::LEFT) {
@@ -2968,6 +2973,7 @@ void TextEdit::gui_input(const Ref<InputEvent> &p_gui_input) {
 
 			time_since_motion = 0.0;
 			accept_event();
+			_selection_mode_update();
 		} else {
 			// Likely follow up from a double tap touch event; we apply similar logic as the mouse motion logic.
 			_on_drag_or_mouse_motion_event(drag->get_position(), true);
@@ -2993,6 +2999,7 @@ void TextEdit::gui_input(const Ref<InputEvent> &p_gui_input) {
 		if (v_scroll->get_value() != prev_v_scroll || h_scroll->get_value() != prev_h_scroll) {
 			accept_event(); // Accept event if scroll changed.
 		}
+		_selection_mode_update();
 		queue_accessibility_update();
 
 		return;
@@ -3310,20 +3317,7 @@ void TextEdit::_on_drag_or_mouse_motion_event(Vector2i p_event_position, bool p_
 		}
 
 		if (!dragging_minimap && !has_ime_text()) {
-			switch (selecting_mode) {
-				case SelectionMode::SELECTION_MODE_POINTER: {
-					_update_selection_mode_pointer();
-				} break;
-				case SelectionMode::SELECTION_MODE_WORD: {
-					_update_selection_mode_word();
-				} break;
-				case SelectionMode::SELECTION_MODE_LINE: {
-					_update_selection_mode_line();
-				} break;
-				default: {
-					break;
-				}
-			}
+			_selection_mode_update();
 		}
 	}
 
@@ -4708,8 +4702,20 @@ void TextEdit::swap_lines(int p_from_line, int p_to_line) {
 
 	String from_line_text = get_line(p_from_line);
 	String to_line_text = get_line(p_to_line);
-	Vector<Underline> from_line_underlines = _get_underline_data_for_line(p_from_line);
-	Vector<Underline> to_line_underlines = _get_underline_data_for_line(p_to_line);
+
+	// Separate underlines on both lines so they can be swapped.
+	// `_cut_line_from_underline` can push to `underlines` so iterate to the original size.
+	// The second cut can operate on the results of the first one, so loop separately.
+	int num_underlines = underlines.size();
+	for (int i = 0; i < num_underlines; i++) {
+		Underline &ul = underlines[i];
+		_cut_line_from_underline(ul, p_from_line);
+	}
+	num_underlines = underlines.size();
+	for (int i = 0; i < num_underlines; i++) {
+		Underline &ul = underlines[i];
+		_cut_line_from_underline(ul, p_to_line);
+	}
 
 	begin_complex_operation();
 	begin_multicaret_edit();
@@ -4736,46 +4742,15 @@ void TextEdit::swap_lines(int p_from_line, int p_to_line) {
 	}
 
 	// Swap underlines.
-	LocalVector<Underline> new_underlines;
-	for (const Underline &ul : underlines) {
-		if (!ul.contains_line(p_from_line) && !ul.contains_line(p_to_line)) {
-			new_underlines.push_back(ul);
-		}
-
-		else if (ul.contains_line(p_from_line) && !ul.contains_line(p_to_line)) {
-			for (const Underline &new_ul : _cut_line_from_underline(ul, p_from_line)) {
-				new_underlines.push_back(new_ul);
-			}
-		}
-
-		else if (!ul.contains_line(p_from_line) && ul.contains_line(p_to_line)) {
-			for (const Underline &new_ul : _cut_line_from_underline(ul, p_to_line)) {
-				new_underlines.push_back(new_ul);
-			}
-		}
-
-		else {
-			for (const Underline &new_ul : _cut_line_from_underline(ul, p_from_line)) {
-				for (const Underline &new_ul_2 : _cut_line_from_underline(new_ul, p_to_line)) {
-					new_underlines.push_back(new_ul_2);
-				}
-			}
+	for (Underline &ul : underlines) {
+		if (ul.start_line == p_from_line) {
+			ul.start_line = p_to_line;
+			ul.end_line = p_to_line;
+		} else if (ul.start_line == p_to_line) {
+			ul.start_line = p_from_line;
+			ul.end_line = p_from_line;
 		}
 	}
-
-	for (Underline &ul : from_line_underlines) {
-		ul.start_line = p_to_line;
-		ul.end_line = p_to_line;
-		new_underlines.push_back(ul);
-	}
-
-	for (Underline &ul : to_line_underlines) {
-		ul.start_line = p_from_line;
-		ul.end_line = p_from_line;
-		new_underlines.push_back(ul);
-	}
-
-	underlines = new_underlines;
 
 	// If only part of a selection was changed, it may now overlap.
 	merge_overlapping_carets();
@@ -4784,118 +4759,48 @@ void TextEdit::swap_lines(int p_from_line, int p_to_line) {
 	end_complex_operation();
 }
 
-Vector<TextEdit::Underline> TextEdit::_cut_line_from_underline(const Underline &p_ul, int p_line) {
-	Vector<Underline> out;
+void TextEdit::_cut_line_from_underline(Underline &r_ul, int p_line) {
 	// If this underline doesn't contain the line we want to cut,
-	// then the result is just the original underline unchanged.
-	if (!p_ul.contains_line(p_line)) {
-		out.push_back(p_ul);
+	// then no cuts are needed.
+	if (!r_ul.contains_line(p_line)) {
+		return;
 	}
 
 	// If this underline is only on the line we want to cut,
-	// then the result is no underline at all.
-	else if (p_ul.start_line == p_line && p_ul.end_line == p_line) {
-		return out;
+	// then no cuts are needed.
+	if (r_ul.start_line == p_line && r_ul.end_line == p_line) {
+		return;
 	}
 
-	// If this underline starts on the line we want to cut,
-	// then the result is a single underline starting at the beginning of the
-	// original underline's second line.
-	else if (p_ul.start_line == p_line) {
+	// If this underline ends after line we want to cut,
+	// then add an underline starting after the line to cut.
+	if (r_ul.end_line > p_line) {
 		Underline new_ul;
-		new_ul.start_line = p_ul.start_line + 1;
+		new_ul.start_line = p_line + 1;
 		new_ul.start_column = 0;
-		new_ul.end_line = p_ul.end_line;
-		new_ul.end_column = p_ul.end_column;
-		new_ul.color = p_ul.color;
-		out.push_back(new_ul);
+		new_ul.end_line = r_ul.end_line;
+		new_ul.end_column = r_ul.end_column;
+		new_ul.color = r_ul.color;
+		underlines.push_back(new_ul);
+
+		r_ul.end_line = p_line;
+		r_ul.end_column = text[r_ul.end_line].length();
 	}
 
-	// If this underline ends on the line we want to cut,
-	// then the result is a single underline ending just before the original
-	// underline's last line.
-	else if (p_ul.end_line == p_line) {
+	// If this underline starts before the line we want to cut,
+	// then add an underline ending before the line to cut.
+	if (r_ul.start_line < p_line) {
 		Underline new_ul;
-		new_ul.start_line = p_ul.start_line;
-		new_ul.start_column = p_ul.start_column;
-		new_ul.end_line = p_ul.end_line - 1;
-		new_ul.end_column = text[p_ul.end_line - 1].length();
-		new_ul.color = p_ul.color;
-		out.push_back(new_ul);
+		new_ul.start_line = r_ul.start_line;
+		new_ul.start_column = r_ul.start_column;
+		new_ul.end_line = p_line - 1;
+		new_ul.end_column = text[p_line - 1].length();
+		new_ul.color = r_ul.color;
+		underlines.push_back(new_ul);
+
+		r_ul.start_line = p_line;
+		r_ul.start_column = 0;
 	}
-
-	// At this point, the line we want to cut must be in the middle of the
-	// underline range. So the result will be two underlines: one going from
-	// the original underline's first line to just before the cut line, and
-	// another going from just after the cut line to the original's last line.
-	else {
-		Underline ul_start_to_cut;
-		ul_start_to_cut.start_line = p_ul.start_line;
-		ul_start_to_cut.start_column = p_ul.start_column;
-		ul_start_to_cut.end_line = p_line - 1;
-		ul_start_to_cut.end_column = text[p_line - 1].length();
-		ul_start_to_cut.color = p_ul.color;
-		out.push_back(ul_start_to_cut);
-
-		Underline ul_cut_to_end;
-		ul_cut_to_end.start_line = p_line + 1;
-		ul_cut_to_end.start_column = text[p_line + 1].length();
-		ul_cut_to_end.end_line = p_ul.end_line;
-		ul_cut_to_end.end_column = p_ul.end_column;
-		ul_cut_to_end.color = p_ul.color;
-		out.push_back(ul_cut_to_end);
-	}
-
-	return out;
-}
-
-Vector<TextEdit::Underline> TextEdit::_get_underline_data_for_line(int p_line) {
-	Vector<Underline> out;
-	for (const Underline &ul : underlines) {
-		// Underline doesn't contain this line at all; skip it.
-		if (!ul.contains_line(p_line)) {
-			continue;
-		}
-
-		// Underline is entirely on this line; copy it all over.
-		else if (ul.start_line == p_line && ul.end_line == p_line) {
-			out.push_back(ul);
-		}
-
-		// Underline starts on this line, but does not end here; copy the first line.
-		else if (ul.start_line == p_line) {
-			Underline new_ul;
-			new_ul.start_line = ul.start_line;
-			new_ul.start_column = ul.start_column;
-			new_ul.end_line = ul.start_line;
-			new_ul.end_column = text[ul.start_line].length();
-			new_ul.color = ul.color;
-			out.push_back(new_ul);
-		}
-
-		// Underline ends on this line, but starts before it; copy the last line.
-		else if (ul.end_line == p_line) {
-			Underline new_ul;
-			new_ul.start_line = ul.end_line;
-			new_ul.start_column = 0;
-			new_ul.end_line = ul.end_line;
-			new_ul.end_column = ul.end_column;
-			new_ul.color = ul.color;
-			out.push_back(new_ul);
-		}
-
-		// This line is in the middle of the underline; just highlight the whole line.
-		else {
-			Underline new_ul;
-			new_ul.start_line = p_line;
-			new_ul.start_column = 0;
-			new_ul.end_line = p_line;
-			new_ul.end_column = text[p_line].length();
-			new_ul.color = ul.color;
-			out.push_back(new_ul);
-		}
-	}
-	return out;
 }
 
 void TextEdit::insert_line_at(int p_line, const String &p_text) {
@@ -6729,9 +6634,6 @@ void TextEdit::select(int p_origin_line, int p_origin_column, int p_caret_line, 
 	if (had_selection != activate) {
 		_selection_changed(p_caret);
 	}
-
-	queue_accessibility_update();
-	queue_redraw();
 }
 
 bool TextEdit::has_selection(int p_caret) const {
@@ -7174,11 +7076,6 @@ HScrollBar *TextEdit::get_h_scroll_bar() const {
 
 void TextEdit::set_v_scroll(double p_scroll) {
 	v_scroll->set_value(p_scroll);
-	int max_v_scroll = v_scroll->get_max() - v_scroll->get_page();
-	if (p_scroll >= max_v_scroll - 1.0) {
-		_scroll_moved(v_scroll->get_value());
-	}
-	queue_accessibility_update();
 }
 
 double TextEdit::get_v_scroll() const {
@@ -7186,11 +7083,7 @@ double TextEdit::get_v_scroll() const {
 }
 
 void TextEdit::set_h_scroll(int p_scroll) {
-	if (p_scroll < 0) {
-		p_scroll = 0;
-	}
 	h_scroll->set_value(p_scroll);
-	queue_accessibility_update();
 }
 
 int TextEdit::get_h_scroll() const {
@@ -9197,6 +9090,22 @@ void TextEdit::_click_selection_held() {
 	}
 }
 
+void TextEdit::_selection_mode_update() {
+	switch (get_selection_mode()) {
+		case SelectionMode::SELECTION_MODE_POINTER: {
+			_update_selection_mode_pointer();
+		} break;
+		case SelectionMode::SELECTION_MODE_WORD: {
+			_update_selection_mode_word();
+		} break;
+		case SelectionMode::SELECTION_MODE_LINE: {
+			_update_selection_mode_line();
+		} break;
+		default:
+			break;
+	}
+}
+
 void TextEdit::_update_selection_mode_pointer(bool p_initial) {
 	Point2i pos = get_line_column_at_pos(get_local_mouse_pos());
 	int line = pos.y;
@@ -9594,6 +9503,8 @@ void TextEdit::_scroll_lines_up() {
 		}
 	}
 	merge_overlapping_carets();
+
+	_selection_mode_update();
 }
 
 void TextEdit::_scroll_lines_down() {
@@ -9615,13 +9526,14 @@ void TextEdit::_scroll_lines_down() {
 		}
 	}
 	merge_overlapping_carets();
+
+	_selection_mode_update();
 }
 
 void TextEdit::_adjust_viewport_to_caret_horizontally(int p_caret, bool p_maximize_selection) {
 	if (get_line_wrapping_mode() != LineWrappingMode::LINE_WRAPPING_NONE) {
 		first_visible_col = 0;
 		h_scroll->set_value(first_visible_col);
-		queue_redraw();
 		return;
 	}
 
@@ -9678,9 +9590,6 @@ void TextEdit::_adjust_viewport_to_caret_horizontally(int p_caret, bool p_maximi
 	}
 
 	h_scroll->set_value(first_visible_col);
-
-	queue_accessibility_update();
-	queue_redraw();
 }
 
 // Minimap
@@ -10101,6 +10010,9 @@ TextEdit::TextEdit(const String &p_placeholder) {
 
 	h_scroll->connect(SceneStringName(value_changed), callable_mp(this, &TextEdit::_scroll_moved));
 	v_scroll->connect(SceneStringName(value_changed), callable_mp(this, &TextEdit::_scroll_moved));
+
+	h_scroll->connect(CoreStringName(changed), callable_mp(this, &TextEdit::_selection_mode_update));
+	v_scroll->connect(CoreStringName(changed), callable_mp(this, &TextEdit::_selection_mode_update));
 
 	v_scroll->connect("scrolling", callable_mp(this, &TextEdit::_v_scroll_input));
 

@@ -320,8 +320,7 @@ private:
 		}
 	};
 	LocalVector<Underline> underlines;
-	Vector<Underline> _cut_line_from_underline(const Underline &p_ul, int p_line);
-	Vector<Underline> _get_underline_data_for_line(int p_line);
+	void _cut_line_from_underline(Underline &r_ul, int p_line);
 
 	// Placeholder
 	String placeholder_text = "";
@@ -559,6 +558,8 @@ private:
 
 	void _selection_changed(int p_caret = -1);
 	void _click_selection_held();
+
+	void _selection_mode_update();
 
 	void _update_selection_mode_pointer(bool p_initial = false);
 	void _update_selection_mode_word(bool p_initial = false);
