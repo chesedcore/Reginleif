@@ -34,7 +34,9 @@
 #include "gdscript_analyzer.h"
 #include "gdscript_compiler.h"
 #include "gdscript_parser.h"
+#include "gdscript_trait.h"
 
+#include "core/io/dir_access.h"
 #include "core/io/file_access.h"
 #include "core/io/resource_loader.h"
 #include "core/templates/rb_set.h"
@@ -42,6 +44,11 @@
 
 GDScriptParserRef::Status GDScriptParserRef::get_status() const {
 	return status;
+}
+
+///
+GDScriptParserRef::TraitStatus GDScriptParserRef::get_trait_status() const {
+	return trait_status;
 }
 
 String GDScriptParserRef::get_path() const {
@@ -113,6 +120,37 @@ Error GDScriptParserRef::raise_status(Status p_new_status) {
 	return result;
 }
 
+Error GDScriptParserRef::raise_trait_status(TraitStatus p_new_status) {
+	ERR_FAIL_COND_V(clearing, ERR_BUG);
+	ERR_FAIL_COND_V(parser == nullptr && trait_status != TRAIT_EMPTY, ERR_BUG);
+
+	if (p_new_status < trait_status) {
+		return OK;
+	}
+
+	while (result == OK && p_new_status > trait_status) {
+		switch (trait_status) {
+			case TRAIT_EMPTY: {
+				get_parser()->clear();
+				trait_status = TRAIT_PARSED;
+				String remapped_path = ResourceLoader::path_remap(path);
+				String source = GDScriptCache::get_source_code(remapped_path);
+				source_hash = source.hash();
+				result = get_parser()->parse(source, path, false);
+			} break;
+			case TRAIT_PARSED: {
+				trait_status = TRAIT_SOLVED;
+				result = get_analyzer()->analyze();
+			} break;
+			case TRAIT_SOLVED: {
+				return result;
+			}
+		}
+	}
+
+	return result;
+}
+
 void GDScriptParserRef::clear() {
 	if (clearing) {
 		return;
@@ -125,6 +163,7 @@ void GDScriptParserRef::clear() {
 	parser = nullptr;
 	analyzer = nullptr;
 	status = EMPTY;
+	trait_status = TRAIT_EMPTY;
 	result = OK;
 	source_hash = 0;
 
@@ -175,6 +214,26 @@ void GDScriptCache::move_script(const String &p_from, const String &p_to) {
 		singleton->full_gdscript_cache[p_to] = singleton->full_gdscript_cache[p_from];
 	}
 	singleton->full_gdscript_cache.erase(p_from);
+
+	///trait/impl global registries key by path too, gotta follow the move or they go stale
+	for (HashMap<StringName, String>::Iterator E = singleton->global_traits.begin(); E;) {
+		HashMap<StringName, String>::Iterator next = E;
+		++next;
+		if (E->value == p_from) {
+			singleton->global_traits[E->key] = p_to;
+		}
+		E = next;
+	}
+	for (HashMap<StringName, Vector<GlobalImplClaim>>::Iterator E = singleton->global_impls.begin(); E;) {
+		HashMap<StringName, Vector<GlobalImplClaim>>::Iterator next = E;
+		++next;
+		for (int i = 0; i < E->value.size(); i++) {
+			if (E->value[i].owning_path == p_from) {
+				E->value.write[i].owning_path = p_to;
+			}
+		}
+		E = next;
+	}
 }
 
 void GDScriptCache::remove_script(const String &p_path) {
@@ -208,6 +267,206 @@ void GDScriptCache::remove_script(const String &p_path) {
 	singleton->dependencies.erase(p_path);
 	singleton->shallow_gdscript_cache.erase(p_path);
 	singleton->full_gdscript_cache.erase(p_path);
+
+	remove_global_trait_by_path(p_path);
+	remove_global_impls_by_path(p_path);
+}
+
+///gdscript trait stuff
+
+static void _scan_trait_scripts_in_dir(const String& p_dir) {
+	Error err = OK;
+	Ref<DirAccess> dir = DirAccess::open(p_dir, &err);
+	if (err != OK || dir.is_null()) {
+		return;
+	}
+
+	if (dir->file_exists(".gdignore")) {
+		return;
+	}
+
+	dir->list_dir_begin();
+	String file_name = dir->get_next();
+	while (!file_name.is_empty()) {
+		if (dir->current_is_dir()) {
+			if (file_name != "." && file_name != ".." && file_name != "./") {
+				_scan_trait_scripts_in_dir(p_dir.path_join(file_name));
+			}
+		} else if (file_name.ends_with(".gd")) {
+			String script_path = p_dir.path_join(file_name);
+			Ref<FileAccess> f = FileAccess::open(script_path, FileAccess::READ, &err);
+			if (err == OK && f.is_valid()) {
+				GDScriptParser parser;
+				err = parser.parse(f->get_as_utf8_string(), script_path, false, false);
+				if (err == OK && parser.is_trait_script()) {
+					const GDScriptParser::TraitNode* trait = parser.get_trait_tree();
+					if (trait != nullptr && trait->identifier != nullptr) {
+						GDScriptCache::add_global_trait(trait->identifier->name, script_path);
+					}
+				}
+			}
+		}
+		file_name = dir->get_next();
+	}
+}
+
+void GDScriptCache::add_global_trait(const StringName& p_trait_name, const String& p_path) {
+	MutexLock lock(singleton->mutex);
+	singleton->global_traits[p_trait_name] = p_path;
+}
+
+void GDScriptCache::remove_global_trait(const StringName& p_trait_name) {
+	MutexLock lock(singleton->mutex);
+	singleton->global_traits.erase(p_trait_name);
+	singleton->global_traits_project_scanned = false;
+}
+
+void GDScriptCache::remove_global_trait_by_path(const String& p_path) {
+	MutexLock lock(singleton->mutex);
+	for (HashMap<StringName, String>::Iterator E = singleton->global_traits.begin(); E;) {
+		HashMap<StringName, String>::Iterator next = E;
+		++next;
+		if (E->value == p_path) {
+			singleton->global_traits.remove(E);
+			singleton->global_traits_project_scanned = false;
+		}
+		E = next;
+	}
+}
+
+bool GDScriptCache::is_global_trait(const StringName& p_trait_name) {
+	MutexLock lock(singleton->mutex);
+	return singleton->global_traits.has(p_trait_name);
+}
+
+void GDScriptCache::get_global_trait_list(List<StringName>* r_traits) {
+	MutexLock lock(singleton->mutex);
+	for (const KeyValue<StringName, String>& E : singleton->global_traits) {
+		r_traits->push_back(E.key);
+	}
+}
+
+String GDScriptCache::get_global_trait_path(const StringName& p_trait_name) {
+	{
+		MutexLock lock(singleton->mutex);
+		const String* path = singleton->global_traits.getptr(p_trait_name);
+		if (path != nullptr) {
+			return *path;
+		}
+
+		if (singleton->global_traits_project_scanned) {
+			return String();
+		}
+	}
+
+	///the fs normally populates this registry while the editor scans project
+	///files, but runtime parsing can hit this lookup before that has happened in this
+	///process. absolute cinema. do one lazy project scan on the first cache miss, 
+	///then subsequent misses stay O(1) instead of repeatedly walking the whole project
+	_scan_trait_scripts_in_dir("res://");
+
+	MutexLock lock(singleton->mutex);
+	singleton->global_traits_project_scanned = true;
+	const String* path = singleton->global_traits.getptr(p_trait_name);
+	return path != nullptr ? *path : String();
+}
+
+void GDScriptCache::add_global_impl_claims(const StringName& p_target_type_key, const StringName& p_trait_name, const HashMap<StringName, Ref<GDScriptTraitSignatureSnapshot>>& p_method_signatures, const String& p_path) {
+	if (p_target_type_key == StringName()) {
+		return; ///no key? more like no cross-file collision checks for this type kind! hah! hah...
+				///...yeah, i should take breaks more often...
+	}
+	MutexLock lock(singleton->mutex);
+	Vector<GlobalImplClaim>& claims = singleton->global_impls[p_target_type_key];
+	for (const KeyValue<StringName, Ref<GDScriptTraitSignatureSnapshot>>& E : p_method_signatures) {
+		GlobalImplClaim claim;
+		claim.trait_name = p_trait_name;
+		claim.method_name = E.key;
+		claim.owning_path = p_path;
+		claim.signature = E.value;
+		claims.push_back(claim);
+	}
+}
+
+void GDScriptCache::remove_global_impls_by_path(const String& p_path) {
+	MutexLock lock(singleton->mutex);
+	for (HashMap<StringName, Vector<GlobalImplClaim>>::Iterator E = singleton->global_impls.begin(); E;) {
+		HashMap<StringName, Vector<GlobalImplClaim>>::Iterator next = E;
+		++next;
+		Vector<GlobalImplClaim>& claims = E->value;
+		for (int i = claims.size() - 1; i >= 0; i--) {
+			if (claims[i].owning_path == p_path) {
+				claims.remove_at(i);
+			}
+		}
+		if (claims.is_empty()) {
+			singleton->global_impls.remove(E);
+		}
+		E = next;
+	}
+}
+
+Vector<GDScriptCache::GlobalImplClaim> GDScriptCache::get_global_impl_claims(const StringName& p_target_type_key) {
+	MutexLock lock(singleton->mutex);
+	const Vector<GlobalImplClaim>* claims = singleton->global_impls.getptr(p_target_type_key);
+	return claims != nullptr ? *claims : Vector<GlobalImplClaim>();
+}
+
+bool GDScriptCache::has_global_impl_method_claim(const StringName& p_target_type_key, const StringName& p_method_name) {
+	{
+		MutexLock lock(singleton->mutex);
+		const Vector<GlobalImplClaim>* claims = singleton->global_impls.getptr(p_target_type_key);
+		if (claims != nullptr) {
+			for (const GlobalImplClaim& claim : *claims) {
+				if (claim.method_name == p_method_name) {
+					return true;
+				}
+			}
+		}
+	}
+
+	ensure_global_impls_scanned();
+
+	MutexLock lock(singleton->mutex);
+	const Vector<GlobalImplClaim>* claims = singleton->global_impls.getptr(p_target_type_key);
+	if (claims == nullptr) {
+		return false;
+	}
+	for (const GlobalImplClaim& claim : *claims) {
+		if (claim.method_name == p_method_name) {
+			return true;
+		}
+	}
+	return false;
+}
+
+void GDScriptCache::ensure_global_impls_scanned() {
+	{
+		MutexLock lock(singleton->mutex);
+		if (singleton->global_impls_project_scanned || singleton->global_impls_project_scanning) {
+			return;
+		}
+		singleton->global_impls_project_scanning = true;
+	}
+
+	_scan_trait_scripts_in_dir("res://");
+
+	Vector<String> trait_paths;
+	{
+		MutexLock lock(singleton->mutex);
+		for (const KeyValue<StringName, String>& E : singleton->global_traits) {
+			trait_paths.push_back(E.value);
+		}
+	}
+
+	for (const String& path : trait_paths) {
+		Error err = OK;
+		get_full_script(path, err);
+	}
+
+	MutexLock lock(singleton->mutex);
+	singleton->global_impls_project_scanned = true;
+	singleton->global_impls_project_scanning = false;
 }
 
 Ref<GDScriptParserRef> GDScriptCache::get_parser(const String &p_path, GDScriptParserRef::Status p_status, Error &r_error, const String &p_owner) {
@@ -236,6 +495,54 @@ Ref<GDScriptParserRef> GDScriptCache::get_parser(const String &p_path, GDScriptP
 	r_error = ref->raise_status(p_status);
 
 	return ref;
+}
+
+Ref<GDScriptTrait> GDScriptCache::get_cached_trait(const String& p_path, const StringName& p_trait_name, Error& r_error, const String& p_owner) {
+	Ref<GDScriptParserRef> ref;
+	{
+		MutexLock lock(singleton->mutex);
+		if (!p_owner.is_empty() && p_path != p_owner) {
+			singleton->dependencies[p_owner].insert(p_path);
+			singleton->parser_inverse_dependencies[p_path].insert(p_owner);
+		}
+		if (singleton->parser_map.has(p_path)) {
+			ref = Ref<GDScriptParserRef>(singleton->parser_map[p_path]);
+			if (ref.is_null()) {
+				r_error = ERR_INVALID_DATA;
+				return Ref<GDScriptTrait>();
+			}
+		} else {
+			String remapped_path = ResourceLoader::path_remap(p_path);
+			if (!FileAccess::exists(remapped_path)) {
+				r_error = ERR_FILE_NOT_FOUND;
+				return Ref<GDScriptTrait>();
+			}
+			ref.instantiate();
+			ref->path = p_path;
+			singleton->parser_map[p_path] = ref.ptr();
+		}
+	}
+	
+	r_error = ref->raise_trait_status(GDScriptParserRef::TRAIT_SOLVED);
+	if (r_error != OK) {
+		return Ref<GDScriptTrait>();
+	}
+
+	GDScriptParser* trait_parser = ref->get_parser();
+	if (trait_parser == nullptr || !trait_parser->is_trait_script()) {
+		r_error = ERR_INVALID_DATA;
+		return Ref<GDScriptTrait>();
+	}
+
+	Ref<GDScriptTrait> found = ref->get_analyzer()->get_trait_analyzer()->get_local_trait(p_trait_name);
+	if (found.is_null()) {
+		r_error = ERR_DOES_NOT_EXIST;
+	} else {
+		///pin the parser ref so the AST nodes (FunctionNode*) stay alive
+		///as long as this trait object does
+		found->parser_ref = ref;
+	}
+	return found;
 }
 
 bool GDScriptCache::has_parser(const String &p_path) {
@@ -494,6 +801,11 @@ void GDScriptCache::clear() {
 	singleton->shallow_gdscript_cache.clear();
 	singleton->full_gdscript_cache.clear();
 	singleton->static_gdscript_cache.clear();
+	singleton->global_traits.clear();
+	singleton->global_traits_project_scanned = false;
+	singleton->global_impls.clear();
+	singleton->global_impls_project_scanned = false;
+	singleton->global_impls_project_scanning = false;
 }
 
 GDScriptCache::GDScriptCache() {

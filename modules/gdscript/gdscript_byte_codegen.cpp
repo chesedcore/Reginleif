@@ -717,6 +717,13 @@ void GDScriptByteCodeGenerator::write_type_test(const Address &p_target, const A
 	}
 }
 
+void GDScriptByteCodeGenerator::write_trait_test(const Address& p_target, const Address& p_source, const StringName& p_trait_name) {
+	append_opcode(GDScriptFunction::OPCODE_TYPE_TEST_TRAIT);
+	append(p_target);
+	append(p_source);
+	append(p_trait_name);
+}
+
 void GDScriptByteCodeGenerator::write_and_left_operand(const Address &p_left_operand) {
 	append_opcode(GDScriptFunction::OPCODE_JUMP_IF_NOT);
 	append(p_left_operand);

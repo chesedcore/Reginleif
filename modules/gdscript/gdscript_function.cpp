@@ -229,12 +229,19 @@ GDScriptFunction::GDScriptFunction() {
 	{
 		MutexLock lock(GDScriptLanguage::get_singleton()->mutex);
 		GDScriptLanguage::get_singleton()->function_list.add(&function_list);
+		GDScriptLanguage::get_singleton()->unregister_native_class_impl_methods_for_function(this);
 	}
 #endif
 }
 
 GDScriptFunction::~GDScriptFunction() {
 	get_script()->member_functions.erase(name);
+
+	///if this function was ALSO registered as a native-type impl method (`impl for int`),
+	///scrub it from that registry too, or the VM would happily fuck itself into freed memory
+	GDScriptLanguage::get_singleton()->unregister_native_impl_methods_for_function(this);
+	GDScriptLanguage::get_singleton()->unregister_native_class_impl_methods_for_function(this);
+	GDScriptLanguage::get_singleton()->unregister_script_class_impl_methods_for_function(this);
 
 	for (int i = 0; i < lambdas.size(); i++) {
 		memdelete(lambdas[i]);

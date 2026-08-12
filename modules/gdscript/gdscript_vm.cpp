@@ -29,13 +29,57 @@
 /**************************************************************************/
 
 #include "gdscript.h"
+#include "gdscript_cache.h"
 #include "gdscript_function.h"
 #include "gdscript_lambda_callable.h"
+#include "gdscript_impl_callable.h"
 
 #include "core/object/class_db.h"
 #include "core/os/os.h"
 #include "core/profiling/profiling.h"
 #include "core/variant/container_type_validate.h"
+
+static bool _gdscript_value_satisfies_trait(const Variant& p_value, const StringName& p_trait_name) {
+	GDScriptCache::ensure_global_impls_scanned();
+
+	Vector<StringName> keys;
+	if (p_value.get_type() == Variant::OBJECT) {
+		bool was_freed = false;
+		Object *object = p_value.get_validated_object_with_check(was_freed);
+		if (was_freed || object == nullptr) {
+			return false;
+		}
+
+		if (object->get_script_instance()) {
+			Script* script = object->get_script_instance()->get_script().ptr();
+			while (script != nullptr) {
+				GDScript* gdscript = Object::cast_to<GDScript>(script);
+				if (gdscript != nullptr && !gdscript->get_fully_qualified_name().is_empty()) {
+					keys.push_back(StringName("class::" + gdscript->get_fully_qualified_name()));
+				}
+				script = script->get_base_script().ptr();
+			}
+		}
+
+		StringName native = object->get_class_name();
+		while (native != StringName()) {
+			keys.push_back(StringName("native::" + String(native)));
+			native = ClassDB::get_parent_class(native);
+		}
+	} else {
+		keys.push_back(StringName("builtin::" + itos((int)p_value.get_type())));
+	}
+
+	for (const StringName& key : keys) {
+		for (const GDScriptCache::GlobalImplClaim& claim : GDScriptCache::get_global_impl_claims(key)) {
+			if (claim.trait_name == p_trait_name) {
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
 
 #ifdef DEBUG_ENABLED
 
@@ -333,6 +377,7 @@ void (*type_init_function_table[])(Variant *) = {
 		&&OPCODE_TYPE_TEST_DICTIONARY, \
 		&&OPCODE_TYPE_TEST_NATIVE, \
 		&&OPCODE_TYPE_TEST_SCRIPT, \
+		&&OPCODE_TYPE_TEST_TRAIT, \
 		&&OPCODE_SET_KEYED, \
 		&&OPCODE_SET_KEYED_VALIDATED, \
 		&&OPCODE_SET_INDEXED_VALIDATED, \
@@ -596,6 +641,18 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 	}
 
 	r_err.error = Callable::CallError::CALL_OK;
+
+	///native-impl methods (`impl for <builtin>`) have no GDScriptInstance*. self piggyback-rides in
+	///as p_args[0] instead. i know. fucked up. if something calls one of these with a real p_instance somehow, 
+	///it's bypassing the only two blessed call paths (the VM's native-impl dispatch, or a future impl-callable
+	///wrapper) and treating this like an ordinary bound method, which it fundamentally isn't
+	if (unlikely(_is_native_impl_method && p_instance != nullptr)) {
+		r_err.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
+#ifdef DEBUG_ENABLED
+		ERR_PRINT(vformat("Reginleif bug (please report!): native-impl method '%s' called with a non-null GDScriptInstance*. This function expects self as an implicit leading argument, not an instance.", name));
+#endif
+		return _get_default_variant_for_data_type(return_type);
+	}
 
 	static thread_local int call_depth = 0;
 	if (unlikely(++call_depth > MAX_CALL_DEPTH)) {
@@ -1076,6 +1133,21 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			}
 			DISPATCH_OPCODE;
 
+			OPCODE(OPCODE_TYPE_TEST_TRAIT) {
+				CHECK_SPACE(4);
+
+				GET_VARIANT_PTR(dst, 0);
+				GET_VARIANT_PTR(value, 1);
+
+				int trait_name_idx = _code_ptr[ip + 3];
+				GD_ERR_BREAK(trait_name_idx < 0 || trait_name_idx >= _global_names_count);
+				const StringName &trait_name = _global_names_ptr[trait_name_idx];
+
+				*dst = _gdscript_value_satisfies_trait(*value, trait_name);
+				ip += 4;
+			}
+			DISPATCH_OPCODE;
+
 			OPCODE(OPCODE_SET_KEYED) {
 				CHECK_SPACE(3);
 
@@ -1363,10 +1435,45 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 #ifdef DEBUG_ENABLED
 				//allow better error message in cases where src and dst are the same stack position
 				Variant ret = src->get_named(*index, valid);
-
 #else
 				*dst = src->get_named(*index, valid);
 #endif
+				if (!valid) {
+					///not a real property, mirrors the native_impl_function fallback already used
+					///by OPCODE_CALL
+					Variant::Type base_type = src->get_type();
+					GDScriptFunction* impl_function = nullptr;
+					if (base_type != Variant::OBJECT && GDScriptLanguage::get_singleton()->has_native_impl_methods(base_type)) {
+						impl_function = GDScriptLanguage::get_singleton()->get_native_impl_method(base_type, *index);
+					} else if (base_type == Variant::OBJECT) {
+						bool was_freed = false;
+						Object* obj = src->get_validated_object_with_check(was_freed);
+						if (obj != nullptr && !was_freed) {
+							impl_function = GDScriptLanguage::get_singleton()->find_native_class_impl_method_cached(obj->get_class_name(), *index);
+							if (impl_function == nullptr && obj->get_script_instance() != nullptr) {
+								Ref<Script> script = obj->get_script_instance()->get_script();
+								GDScript* gdscript = Object::cast_to<GDScript>(script.ptr());
+								while (gdscript != nullptr) {
+									impl_function = GDScriptLanguage::get_singleton()->get_script_class_impl_method(gdscript->get_fully_qualified_name(), *index);
+									if (impl_function != nullptr) {
+										break;
+									}
+				///genuinely sorry for the crazy indents, i'll fix it soon i swear :sob:
+									gdscript = gdscript->base.ptr();
+								}
+							}
+						}
+					}
+					if (impl_function != nullptr) {
+						GDScriptImplCallable* callable = memnew(GDScriptImplCallable(*src, impl_function));
+#ifdef DEBUG_ENABLED
+						ret = Callable(callable);
+#else
+						*dst = Callable(callable);
+#endif
+						valid = true;
+					}
+				}
 #ifdef DEBUG_ENABLED
 				if (!valid) {
 					err_text = "Invalid access to property or key '" + index->string() + "' on a base object of type '" + _get_var_type(src) + "'.";
@@ -2174,15 +2281,43 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				if (GDScriptLanguage::get_singleton()->profiling) {
 					call_time = OS::get_singleton()->get_ticks_usec();
 				}
-				Variant::Type base_type = base->get_type();
 				Object *base_obj = nullptr;
 #endif
+				Variant::Type base_type = base->get_type();
+
+				GDScriptFunction* native_impl_function = nullptr;
+				if (base_type != Variant::OBJECT && !Variant::has_builtin_method(base_type, *methodname) && GDScriptLanguage::get_singleton()->has_native_impl_methods(base_type)) {
+					native_impl_function = GDScriptLanguage::get_singleton()->get_native_impl_method(base_type, *methodname);
+				} else if (base_type == Variant::OBJECT) {
+					bool was_freed = false;
+					Object* obj = base->get_validated_object_with_check(was_freed);
+					if (obj != nullptr && !was_freed && !ClassDB::has_method(obj->get_class_name(), *methodname, false)) {
+						///check whether some `impl for native` up the inheritance chain provides it...
+						///the walk itself is memoised per (class, method), so repeated calls don't rewalk the entire fucking
+						///ClassDB::get_parent_class type tree every time you need to peek into an impl method 
+						native_impl_function = GDScriptLanguage::get_singleton()->find_native_class_impl_method_cached(obj->get_class_name(), *methodname);
+					}
+				}
 
 				Variant temp_ret;
 				Callable::CallError err;
 				if (call_ret) {
 					GET_INSTRUCTION_ARG(ret, argc + 1);
-					base->callp(*methodname, (const Variant **)argptrs, argc, temp_ret, err);
+					if (native_impl_function != nullptr) {
+						///self isn't a GDScriptInstance* for value types, so it rides in as
+						///an implicit leading argument instead, the same trick GDScriptLambdaCallable
+						///uses to prepend captures ahead of the real call arguments
+						///i love being unoriginal
+						const int total_argc = argc + 1;
+						const Variant** impl_argptrs = (const Variant**)alloca(sizeof(Variant*)* total_argc);
+						impl_argptrs[0] = base;
+						for (int i = 0; i < argc; i++) {
+							impl_argptrs[i + 1] = argptrs[i];
+						}
+						temp_ret = native_impl_function->call(nullptr, impl_argptrs, total_argc, err);
+					} else {
+						base->callp(*methodname, (const Variant**)argptrs, argc, temp_ret, err);
+					}
 					*ret = temp_ret;
 #ifdef DEBUG_ENABLED
 					if (ret->get_type() == Variant::NIL) {
@@ -2217,7 +2352,17 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 					}
 #endif
 				} else {
-					base->callp(*methodname, (const Variant **)argptrs, argc, temp_ret, err);
+					if (native_impl_function != nullptr) {
+						const int total_argc = argc + 1;
+						const Variant** impl_argptrs = (const Variant**)alloca(sizeof(Variant*)* total_argc);
+						impl_argptrs[0] = base;
+						for (int i = 0; i < argc; i++) {
+							impl_argptrs[i + 1] = argptrs[i];
+						}
+						temp_ret = native_impl_function->call(nullptr, impl_argptrs, total_argc, err);
+					} else {
+						base->callp(*methodname, (const Variant**)argptrs, argc, temp_ret, err);
+					}
 				}
 #ifdef DEBUG_ENABLED
 

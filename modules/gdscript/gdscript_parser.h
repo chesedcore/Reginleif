@@ -30,7 +30,6 @@
 
 #pragma once
 
-#include "gdscript_cache.h"
 #include "gdscript_tokenizer.h"
 
 #ifdef DEBUG_ENABLED
@@ -50,6 +49,10 @@
 #ifdef DEBUG_ENABLED
 #include "core/string/string_builder.h"
 #endif
+
+
+class GDScriptImpl;
+class GDScriptParserRef;
 
 class GDScriptParser {
 	struct AnnotationInfo;
@@ -98,6 +101,10 @@ public:
 	struct VariableNode;
 	struct WhileNode;
 
+	///
+	struct TraitNode;
+	struct ImplNode;
+
 	class DataType {
 	public:
 		Vector<DataType> container_element_types;
@@ -112,9 +119,12 @@ public:
 			RESOLVING, // Currently resolving.
 			UNRESOLVED,
 
-			/// [Monarch] Reginleif addition. Allows us to tell Godot that this type is 
+			/// allows us to tell Godot that this type is 
 			/// generic and links against a specified generic parameter.
 			GENERIC_TYPE,
+
+			/// "impl Trait" as a dynamic trait object
+			TRAIT_OBJECT,
 		};
 		Kind kind = UNRESOLVED;
 
@@ -142,6 +152,9 @@ public:
 		MethodInfo method_info; // For callable/signals.
 		HashMap<StringName, int64_t> enum_values; // For enums.
 
+		///trait names this type must satisfy
+		Vector<StringName> trait_bound_names;
+
 		/// [Monarch] Reginleif addition. Holds the class node that declared the generic params.
 		ClassNode* generic_owner_class = nullptr;
 		/// [Monarch] I was new to the codebase when I wrote the generic owner class stuff. Man I wish I had the same level of enthusiasm
@@ -155,7 +168,7 @@ public:
 		_FORCE_INLINE_ bool is_set() const { return kind != RESOLVING && kind != UNRESOLVED; }
 		_FORCE_INLINE_ bool is_resolving() const { return kind == RESOLVING; }
 		_FORCE_INLINE_ bool has_no_type() const { return type_source == UNDETECTED; }
-		_FORCE_INLINE_ bool is_variant() const { return kind == VARIANT || kind == RESOLVING || kind == UNRESOLVED; }
+		_FORCE_INLINE_ bool is_variant() const { return kind == VARIANT || kind == RESOLVING || kind == UNRESOLVED || kind == TRAIT_OBJECT; }
 		_FORCE_INLINE_ bool is_hard_type() const { return type_source > INFERRED; }
 
 		String to_string() const;
@@ -254,6 +267,17 @@ public:
 					return generic_owner_class == p_other.generic_owner_class && 
 					       generic_param == p_other.generic_param && 
 						   generic_owner_function == p_other.generic_owner_function;
+
+				case TRAIT_OBJECT:
+					if (trait_bound_names.size() != p_other.trait_bound_names.size()) {
+						return false;
+					}
+					for (const StringName &E : trait_bound_names) {
+						if (!p_other.trait_bound_names.has(E)) {
+							return false;
+						}
+					}
+					return true;
 				
 				case RESOLVING:
 				case UNRESOLVED:
@@ -284,6 +308,7 @@ public:
 			method_info = p_other.method_info;
 			enum_values = p_other.enum_values;
 			container_element_types = p_other.container_element_types;
+			trait_bound_names = p_other.trait_bound_names;
 			generic_owner_class = p_other.generic_owner_class;
 			generic_param = p_other.generic_param;
 			generic_type_bindings = p_other.generic_type_bindings;
@@ -378,6 +403,10 @@ public:
 			UNARY_OPERATOR,
 			VARIABLE,
 			WHILE,
+			
+			///
+			TRAIT,
+			IMPL,
 		};
 
 		Type type = NONE;
@@ -813,6 +842,8 @@ public:
 		DataType self_type;
 		String fqcn; // Fully-qualified class name. Identifies uniquely any class in the project.
 
+		Vector<ImplNode*> impls; ///impl blocks declared inside this class body
+
 		// Range for a class's "extends <CLASS_NAME>" line.
 		// Used as range for some warnings/errors.
 		int extends_start_line = -1;
@@ -944,7 +975,7 @@ public:
 		bool is_abstract = false;
 		bool is_static = false; // For lambdas it's determined in the analyzer.
 		bool is_coroutine = false;
-		bool has_explicit_body = false; ///[Monarch] Set to true if the parser saw { or : followed by a real suite
+		bool has_explicit_body = false;
 		Variant rpc_config;
 		MethodInfo info;
 		LambdaNode *source_lambda = nullptr;
@@ -1181,6 +1212,34 @@ public:
 		}
 	};
 
+	struct TraitNode : public Node {
+		IdentifierNode* identifier = nullptr;        ///name of this trait
+		Vector<FunctionNode*> methods;               ///required method signatures
+		Vector<FunctionNode*> default_methods;       ///methods with default bodies
+		Vector<IdentifierNode*> generic_parameters;  ///trait-level generics, for later, for later!
+		Vector<ImplNode*> impls;                     ///`impl <this trait> for Type` blocks declared in this same trait file
+
+		TraitNode() {
+			type = TRAIT;
+		}
+	};
+
+	struct ImplNode : public Node {
+		IdentifierNode* trait_name = nullptr;      ///name of the trait being implemented
+		TypeNode* impl_target_type = nullptr;      ///which type we're implementing this trait for (null if it's 'in-class' impl)
+		Vector<FunctionNode*> methods;             ///the provided method implementations
+		bool trait_owns_this_impl = false;         ///true if this is `impl for Type` in the trait file itself
+
+		///stashed here by GDScriptTraitAnalyzer::resolve_impl() once it's done, so the compiler
+		///can come back later and actually compile+register provided_methods without needing
+		///its own handle to the analyzer at all
+		Ref<GDScriptImpl> resolved_gd_impl;
+
+		ImplNode() {
+			type = IMPL;
+		}
+	};
+
 	struct SubscriptNode : public ExpressionNode {
 		ExpressionNode *base = nullptr;
 		union {
@@ -1317,6 +1376,8 @@ public:
 		Vector<IdentifierNode *> type_chain;
 		Vector<TypeNode *> container_types;
 
+		Vector<IdentifierNode*> trait_bounds;
+
 		DataType resolved_type;
 
 		TypeNode *get_container_type_or_null(int p_index) const {
@@ -1332,6 +1393,7 @@ public:
 		ExpressionNode *operand = nullptr;
 		TypeNode *test_type = nullptr;
 		DataType test_datatype;
+		StringName trait_test_name;
 
 		TypeTestNode() {
 			type = TYPE_TEST;
@@ -1410,6 +1472,9 @@ public:
 		COMPLETION_IDENTIFIER, // List available identifiers in scope.
 		COMPLETION_INHERIT_TYPE, // Type after extends. Exclude non-viable types (built-ins, enums, void). Includes subtypes using the argument index.
 		COMPLETION_METHOD, // List available methods in scope.
+		COMPLETION_TRAIT_NAME, ///trait name after "impl"
+		COMPLETION_TRAIT_BODY, ///statement start inside a trait body, only "func" and "impl" are legal
+		COMPLETION_IMPL_BODY, ///statement start inside an "impl" body, fetches unimplemented trait methods
 		COMPLETION_OVERRIDE_METHOD, // Override implementation, also for native virtuals.
 		COMPLETION_PROPERTY_DECLARATION, // Property declaration (get, set).
 		COMPLETION_PROPERTY_DECLARATION_OR_TYPE, // Property declaration (get, set) or a type hint.
@@ -1448,6 +1513,8 @@ public:
 private:
 	friend class GDScriptAnalyzer;
 	friend class GDScriptParserRef;
+	///
+	friend class GDScriptTraitAnalyzer;
 
 	bool _is_tool = false;
 	String script_path;
@@ -1462,6 +1529,9 @@ private:
 	ClassNode *head = nullptr;
 	Node *list = nullptr;
 	List<ParserError> errors;
+
+	///
+	TraitNode* trait_head = nullptr;
 
 #ifdef DEBUG_ENABLED
 public:
@@ -1533,6 +1603,9 @@ private:
 	};
 	static HashMap<StringName, AnnotationInfo> valid_annotations;
 	List<AnnotationNode *> annotation_stack;
+
+	///counter for synthesising unique names for "impl Trait" anonymous generics
+	int impl_trait_synth_counter = 0;
 
 	typedef ExpressionNode *(GDScriptParser::*ParseFunction)(ExpressionNode *p_previous_operand, bool p_can_assign);
 	// Higher value means higher precedence (i.e. is evaluated first).
@@ -1657,7 +1730,7 @@ private:
 	ClassNode *parse_class(bool p_is_static);
 	void parse_class_name();
 
-	/// [Monarch] Reginleif addition. Grants ability to parse generic parameter lists.
+	///generics
 	void parse_generic_parameters(Vector<IdentifierNode*>& p_generic_params);
 	TypeNode* parse_type_hint(bool p_allow_void = false);
 
@@ -1673,6 +1746,11 @@ private:
 	FunctionNode *parse_function(bool p_is_static);
 	bool parse_function_signature(FunctionNode *p_function, SuiteNode *p_body, const String &p_type, int p_signature_start);
 	SuiteNode *parse_suite(const String &p_context, SuiteNode *p_suite = nullptr, bool p_for_lambda = false);
+
+	///traits
+	TraitNode* parse_trait();
+	ImplNode* parse_impl();
+
 	// Annotations
 	AnnotationNode *parse_annotation(uint32_t p_valid_targets);
 	static bool register_annotation(const MethodInfo &p_info, uint32_t p_target_kinds, AnnotationAction p_apply, const Vector<Variant> &p_default_arguments = Vector<Variant>(), bool p_is_vararg = false);
@@ -1754,12 +1832,30 @@ public:
 	Error parse(const String &p_source_code, const String &p_script_path, bool p_for_completion, bool p_parse_body = true);
 	Error parse_binary(const Vector<uint8_t> &p_binary, const String &p_script_path);
 	ClassNode *get_tree() const { return head; }
+
+	///
+	TraitNode* get_trait_tree() const { return trait_head; }
+	bool is_trait_script() const { return trait_head != nullptr; }
+
 	bool is_tool() const { return _is_tool; }
+	///
+	const String &get_script_path() const { return script_path; }
 	Ref<GDScriptParserRef> get_depended_parser_for(const String &p_path);
 	const HashMap<String, Ref<GDScriptParserRef>> &get_depended_parsers();
 	ClassNode *find_class(const String &p_qualified_name) const;
 	bool has_class(const GDScriptParser::ClassNode *p_class) const;
 	static Variant::Type get_builtin_type(const StringName &p_type); // Excluding `Variant::NIL` and `Variant::OBJECT`.
+
+	String make_impl_trait_synth_name(const TypeNode* p_impl_trait_type) {
+		String label;
+		for (int i = 0; i < p_impl_trait_type->trait_bounds.size(); i++) {
+			if (i > 0) {
+				label += "+";
+			}
+			label += p_impl_trait_type->trait_bounds[i]->name;
+		}
+		return vformat("__impl_%s_%d", label, impl_trait_synth_counter++);
+	}
 
 	CompletionContext get_completion_context() const { return completion_context; }
 	void get_annotation_list(List<MethodInfo> *r_annotations) const;

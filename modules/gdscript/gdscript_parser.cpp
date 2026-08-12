@@ -29,6 +29,7 @@
 /**************************************************************************/
 
 #include "gdscript_parser.h"
+#include "gdscript_cache.h"
 
 #include "gdscript.h"
 #include "gdscript_tokenizer_buffer.h"
@@ -788,6 +789,38 @@ void GDScriptParser::parse_program() {
 		}
 	}
 
+	///if the first meaningful token is `trait`, this is a trait file entirely
+	///get your ass out of the class path and go down this trait path instead
+	if (current.type == GDScriptTokenizer::Token::TRAIT) {
+		advance();
+		// head = nullptr;             ///trait files don't have a class head!
+		// current_class = nullptr;    ///nor a 'class' context, obvciously, duh
+		trait_head = parse_trait();
+
+		///a trait file may be followed by `impl <this trait> for Type` blocks (including the
+		///`impl for Type` shorthand) riiiiight here
+		while (trait_head != nullptr) {
+			consume_indents_and_newlines();
+
+			if (current.type != GDScriptTokenizer::Token::IMPL) {
+				break;
+			}
+
+			advance();
+			ImplNode* impl = parse_impl();
+			if (impl != nullptr) {
+				trait_head->impls.push_back(impl);
+			}
+		}
+
+		if (!check(GDScriptTokenizer::Token::TK_EOF)) {
+			push_error(R"([Reginleif] Unexpected item after trait declaration. A trait file must contain only its trait and, optionally, "impl" blocks for it.)");
+		}
+		
+		clear_unused_annotations();
+		return;
+	}
+
 	if (current.type == GDScriptTokenizer::Token::CLASS_NAME || current.type == GDScriptTokenizer::Token::EXTENDS) {
 		// Set range of the class to only start at extends or class_name if present.
 		reset_extents(head, current);
@@ -1384,6 +1417,14 @@ void GDScriptParser::parse_class_body(bool p_is_multiline) {
 					end_statement("superclass");
 				}
 				break;
+			///
+			case GDScriptTokenizer::Token::IMPL: {
+				advance();
+				ImplNode* impl = parse_impl();
+				if (impl != nullptr) {
+					current_class->impls.push_back(impl);
+				}
+			} break;
 			case GDScriptTokenizer::Token::LITERAL:
 				if (current.literal.get_type() == Variant::STRING) {
 					// Allow strings in class body as multiline comments.
@@ -4230,6 +4271,25 @@ GDScriptParser::ExpressionNode *GDScriptParser::parse_invalid_token(ExpressionNo
 GDScriptParser::TypeNode *GDScriptParser::parse_type(bool p_allow_void) {
 	TypeNode *type = alloc_node<TypeNode>();
 	make_completion_context(p_allow_void ? COMPLETION_TYPE_NAME_OR_VOID : COMPLETION_TYPE_NAME, type);
+
+	if (match(GDScriptTokenizer::Token::IMPL)) {
+		if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected trait name after "impl".)")) {
+			complete_extents(type);
+			return type;
+		}
+		type->trait_bounds.push_back(parse_identifier());
+
+		while (match(GDScriptTokenizer::Token::PLUS)) {
+			if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected trait name after "+" in trait bound.)")) {
+				break;
+			}
+			type->trait_bounds.push_back(parse_identifier());
+		}
+
+		complete_extents(type);
+		return type;
+	}
+
 	if (!match(GDScriptTokenizer::Token::IDENTIFIER)) {
 		if (match(GDScriptTokenizer::Token::TK_VOID)) {
 			if (p_allow_void) {
@@ -4282,6 +4342,154 @@ GDScriptParser::TypeNode *GDScriptParser::parse_type(bool p_allow_void) {
 
 	complete_extents(type);
 	return type;
+}
+
+///traits stuff goes here
+
+GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
+	TraitNode* trait = alloc_node<TraitNode>();
+
+	if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected identifier for the trait name after "trait".)")) {
+		complete_extents(trait);
+		return nullptr;
+	}
+
+	trait->identifier = parse_identifier();
+
+	///trait-level generics, same shit as class level stuff
+	parse_generic_parameters(trait->generic_parameters);
+
+	end_statement(R"("trait" statement)");
+
+	///actual trait body parsed here. only funcs allowed! either signatures or default bodies
+	///additionally, you can also impl traits in this file itself
+	while (true) {
+		if (is_at_end() || check(GDScriptTokenizer::Token::IMPL)) { break; }
+
+		if (match(GDScriptTokenizer::Token::NEWLINE)) { continue; }
+		if (match(GDScriptTokenizer::Token::PASS)) {
+			end_statement(R"("pass")");
+			continue;
+		}
+
+		make_completion_context(COMPLETION_TRAIT_BODY, trait);
+
+		if (match(GDScriptTokenizer::Token::FUNC)) {
+			FunctionNode* method = parse_function(false);
+			if (method == nullptr) { continue; }
+
+			if (method->has_explicit_body) {
+				///has a real body, even if it's empty, so it's a default method
+				trait->default_methods.push_back(method);
+			} else {
+				///no body at all, so it's a function signature contract thingy
+				trait->methods.push_back(method);
+			}
+		} else {
+			make_completion_context(COMPLETION_TRAIT_BODY, trait);
+			push_error(vformat(R"([Reginleif] Unexpected "%s" in trait body. Only "func" declarations and "impl for" implementations are allowed.)", current.get_name()));
+			advance();
+		}
+
+		if (panic_mode) { synchronize(); }
+	}
+
+	complete_extents(trait);
+	return trait;
+}
+
+GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
+	ImplNode* impl = alloc_node<ImplNode>();
+
+	///`impl for Type` shorthand: no trait name means "the trait declared in this file".
+	///only legal inside a trait file itself, checked later by the trait analyzer.
+	make_completion_context(COMPLETION_TRAIT_NAME, impl);
+
+	if (!check(GDScriptTokenizer::Token::FOR)) {
+		if (!consume(GDScriptTokenizer::Token::IDENTIFIER, R"([Reginleif] Expected trait name after "impl".)")) {
+			complete_extents(impl);
+			return nullptr;
+		}
+
+		impl->trait_name = parse_identifier();
+	}
+
+	if (match(GDScriptTokenizer::Token::FOR)) {
+		///`impl for Type` form, it's only legal in the trait file itself
+		impl->trait_owns_this_impl = true;
+		impl->impl_target_type = parse_type();
+		if (impl->impl_target_type == nullptr) {
+			if (impl->trait_name != nullptr) {
+				push_error(vformat(R"([Reginleif] Expected type after "for" in "impl %s for Type" syntax.)", impl->trait_name->name));
+			} else {
+				push_error(R"([Reginleif] Expected type after "for" in "impl for Type" syntax.)");
+			}
+			complete_extents(impl);
+			return nullptr;
+		}
+	}
+	///otherwise it must be `impl Trait` form, in-class, and thus impl_target_type stays null 
+	///(because it targets the type this is happening on itself)
+
+	bool use_braces = check(GDScriptTokenizer::Token::BRACE_OPEN);
+	if (!use_braces) {
+		consume(GDScriptTokenizer::Token::COLON, R"([Reginleif] Expected ":" or "{" after impl declaration.)");
+	}
+	bool multiline = !use_braces && match(GDScriptTokenizer::Token::NEWLINE);
+
+	if (use_braces) {
+		advance();
+		consume_indents_and_newlines();
+	} else if (multiline && !consume(GDScriptTokenizer::Token::INDENT, R"([Reginleif] Expected indented block after impl declaration.)")) {
+		complete_extents(impl);
+		return impl;
+	}
+
+	///parse impl body, must have only funcs, and those functions MUST have bodies
+	while (true) {
+		if (use_braces) {
+			consume_indents_and_newlines();
+			if (check(GDScriptTokenizer::Token::BRACE_CLOSE) || is_at_end()) { break; }
+		} else {
+			if (check(GDScriptTokenizer::Token::DEDENT) || is_at_end()) { break; }
+		}
+
+		if (match(GDScriptTokenizer::Token::NEWLINE)) { continue; }
+		if (match(GDScriptTokenizer::Token::PASS)) {
+			end_statement(R"("pass")");
+			continue;
+		}
+
+		make_completion_context(COMPLETION_IMPL_BODY, impl, -1, true);
+
+		if (match(GDScriptTokenizer::Token::FUNC)) {
+			FunctionNode* method = parse_function(false);
+			if (method != nullptr) {
+				override_completion_context(method, COMPLETION_IMPL_BODY, impl);
+				///impl methods must actually implement something :>
+				if (!method->has_explicit_body) {
+					push_error(vformat(R"([Reginleif] "impl" method "%s" must have a body.)", method->identifier != nullptr ? String(method->identifier->name) : String()), method);
+				} else {
+					impl->methods.push_back(method);
+				}
+			}
+		} else {
+			push_error(vformat(R"([Reginleif] Unexpected "%s" in impl body. Only "func" declarations are allowed.)", current.get_name()));
+			advance();
+		}
+
+		if (panic_mode) { synchronize(); }
+	}
+
+	if (use_braces) {
+		consume_indents_and_newlines();
+		consume(GDScriptTokenizer::Token::BRACE_CLOSE, R"([Reginleif] Expected "}" after impl body.)");
+	} else if (multiline) {
+		consume(GDScriptTokenizer::Token::DEDENT, R"([Reginleif] Expected end of indented block after impl body.)");
+	}
+
+	complete_extents(impl);
+	return impl;
 }
 
 #ifdef TOOLS_ENABLED
@@ -4684,6 +4892,7 @@ GDScriptParser::ParseRule *GDScriptParser::get_rule(GDScriptTokenizer::Token::Ty
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // STATIC,
 		{ &GDScriptParser::parse_call,						nullptr,                                        PREC_NONE }, // SUPER,
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // TRAIT,
+		{ nullptr,                                          nullptr,                                         PREC_NONE}, /// IMPL,
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // VAR,
 		{ nullptr,                                          nullptr,                                        PREC_NONE }, // TK_VOID,
 		{ &GDScriptParser::parse_yield,                     nullptr,                                        PREC_NONE }, // YIELD,
@@ -5903,7 +6112,28 @@ String GDScriptParser::DataType::to_string() const {
 
 		///
 		case GENERIC_TYPE: {
+			if (!trait_bound_names.is_empty()) {
+				String result = "impl ";
+				for (int i = 0; i < trait_bound_names.size(); i++) {
+					if (i > 0) {
+						result += "+";
+					}
+					result += trait_bound_names[i];
+				}
+				return result;
+			}
 			return generic_param.string();
+		}
+
+		case TRAIT_OBJECT: {
+			String result = "impl ";
+			for (int i = 0; i < trait_bound_names.size(); i++) {
+				if (i > 0) {
+					result += "+";
+				}
+				result += trait_bound_names[i];
+			}
+			return result;
 		}
 
 		case ENUM: {
@@ -5963,6 +6193,8 @@ String GDScriptParser::DataType::to_property_info_hint_string() const {
 			}
 			return generic_param;
 		}
+		case TRAIT_OBJECT:
+			return "Variant"; /// no concrete export type for a dynamic trait object.
 		case RESOLVING:
 		case UNRESOLVED:
 			break;
@@ -6041,6 +6273,7 @@ PropertyInfo GDScriptParser::DataType::to_property_info(const String &p_name) co
 			break;
 		case VARIANT:
 		case GENERIC_TYPE:
+		case TRAIT_OBJECT:
 		case RESOLVING:
 		case UNRESOLVED:
 			result.usage |= PROPERTY_USAGE_NIL_IS_VARIANT;

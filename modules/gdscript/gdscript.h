@@ -443,7 +443,7 @@ class GDScriptLanguage : public ScriptLanguage {
 
 	friend class GDScriptInstance;
 
-	Mutex mutex;
+	mutable Mutex mutex;
 
 	friend class GDScript;
 
@@ -463,12 +463,43 @@ class GDScriptLanguage : public ScriptLanguage {
 
 	HashMap<String, ObjectID> orphan_subclasses;
 
+	///impl stuff, native-type dispatch for `impl for <native>` methods.
+	///keyed by Variant::Type first so a type with zero impls is a single cheap has() check
+	///
+	HashMap<Variant::Type, HashMap<StringName, GDScriptFunction*>> native_impl_methods;
+
+
+	HashMap<StringName, HashMap<StringName, GDScriptFunction*>> native_class_impl_methods;
+
+	HashMap<StringName, HashMap<StringName, GDScriptFunction*>> script_class_impl_methods;
+
+	///"dont rewalk the entire type tree just to find an impl" cache
+	mutable HashMap<StringName, HashMap<StringName, GDScriptFunction*>> native_class_impl_method_cache;
+
 #ifdef TOOLS_ENABLED
 	void _extension_loaded(const Ref<GDExtension> &p_extension);
 	void _extension_unloading(const Ref<GDExtension> &p_extension);
 #endif
 
 public:
+	///registers (or replaces) a script-defined method for a native/builtin Variant type, via `impl for <native>`
+	void register_native_impl_method(Variant::Type p_type, const StringName& p_method_name, GDScriptFunction* p_function);
+	void unregister_native_impl_methods_for_function(GDScriptFunction* p_function);
+	bool has_native_impl_methods(Variant::Type p_type) const;
+	GDScriptFunction* get_native_impl_method(Variant::Type p_type, const StringName& p_method_name) const;
+
+
+	void register_native_class_impl_method(const StringName& p_native_class, const StringName& p_method_name, GDScriptFunction* p_function);
+	void unregister_native_class_impl_methods_for_function(GDScriptFunction* p_function);
+	bool has_native_class_impl_methods(const StringName& p_native_class) const;
+	GDScriptFunction* get_native_class_impl_method(const StringName& p_native_class, const StringName& p_method_name) const;
+
+	void register_script_class_impl_method(const StringName& p_script_class, const StringName& p_method_name, GDScriptFunction* p_function);
+	void unregister_script_class_impl_methods_for_function(GDScriptFunction* p_function);
+	GDScriptFunction* get_script_class_impl_method(const StringName& p_script_class, const StringName& p_method_name) const;
+
+	GDScriptFunction* find_native_class_impl_method_cached(const StringName& p_concrete_class, const StringName& p_method_name) const;
+
 	bool debug_break(const String &p_error, bool p_allow_continue = true);
 	bool debug_break_parse(const String &p_file, int p_line, const String &p_error);
 
