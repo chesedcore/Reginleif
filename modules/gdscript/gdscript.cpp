@@ -65,6 +65,8 @@
 
 ///////////////////////////
 
+ class GDScriptTraitSignatureSnapshot;
+
 GDScriptNativeClass::GDScriptNativeClass(const StringName &p_name) {
 	name = p_name;
 }
@@ -1991,6 +1993,22 @@ Variant GDScriptInstance::callp(const StringName &p_method, const Variant **p_ar
 		sptr = sptr->base.ptr();
 	}
 
+	sptr = script.ptr();
+	while (sptr) {
+		GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->get_script_class_impl_method(sptr->get_fully_qualified_name(), p_method);
+		if (impl_function != nullptr) {
+			const int total_argc = p_argcount + 1;
+			const Variant** impl_argptrs = (const Variant**)alloca(sizeof(Variant*) * total_argc);
+			Variant self = owner;
+			impl_argptrs[0] = &self;
+			for (int i = 0; i < p_argcount; i++) {
+				impl_argptrs[i + 1] = p_args[i];
+			}
+			return impl_function->call(nullptr, impl_argptrs, total_argc, r_error);
+		}
+		sptr = sptr->base.ptr();
+	}
+
 	r_error.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
 	return Variant();
 }
@@ -2317,8 +2335,50 @@ void GDScriptLanguage::finish() {
 		ERR_PRINT("GDScript bug (please report): Dangling script in script_list after language shutdown.");
 		script_list.clear();
 	}
+	
+	///scripts can fuck off before the traits they own do,
+	///so collect and destroy orphan trait methods here
+	{
+		Vector<GDScriptFunction*> impl_functions_to_delete;
+
+		for (const KeyValue<Variant::Type, HashMap<StringName, GDScriptFunction*>>& E : native_impl_methods) {
+			for (const KeyValue<StringName, GDScriptFunction*>& M : E.value) {
+				if (M.value != nullptr && !impl_functions_to_delete.has(M.value)) {
+					impl_functions_to_delete.push_back(M.value);
+				}
+			}
+		}
+		for (const KeyValue<StringName, HashMap<StringName, GDScriptFunction*>>& E : native_class_impl_methods) {
+			for (const KeyValue<StringName, GDScriptFunction*>& M : E.value) {
+				if (M.value != nullptr && !impl_functions_to_delete.has(M.value)) {
+					impl_functions_to_delete.push_back(M.value);
+				}
+			}
+		}
+		for (const KeyValue<StringName, HashMap<StringName, GDScriptFunction*>>& E : script_class_impl_methods) {
+			for (const KeyValue<StringName, GDScriptFunction*>& M : E.value) {
+				if (M.value != nullptr && !impl_functions_to_delete.has(M.value)) {
+					impl_functions_to_delete.push_back(M.value);
+				}
+			}
+		}
+
+		native_impl_methods.clear();
+		native_class_impl_methods.clear();
+		script_class_impl_methods.clear();
+		native_class_impl_method_cache.clear();
+
+		for (GDScriptFunction* function : impl_functions_to_delete) {
+			memdelete(function);
+		}
+	}
+
 	if (function_list.first() != nullptr) {
-		ERR_PRINT("GDScript bug (please report): Dangling function in function_list after language shutdown.");
+		for (SelfList<GDScriptFunction>* E = function_list.first(); E != nullptr; E = E->next()) {
+			GDScriptFunction* f = E->self();
+			String script_path = f->get_script() ? f->get_script()->get_script_path() : String("<no script>");
+			ERR_PRINT(vformat("GDScript bug(please report!): Dangling function: '%s' in script '%s', even after language shutdown!", f->get_name(), script_path));
+		}
 		function_list.clear();
 	}
 
@@ -2669,9 +2729,10 @@ Vector<String> GDScriptLanguage::get_reserved_words() const {
 		"extends",
 		"func",
 		"namespace", // Reserved for potential future use.
+		"impl",
 		"signal",
 		"static",
-		"trait", // Reserved for potential future use.
+		"trait",
 		"var",
 		// Other keywords.
 		"await",
@@ -2746,6 +2807,23 @@ String GDScriptLanguage::_get_global_class_name(const String &p_path, String *r_
 
 	GDScriptParser parser;
 	err = parser.parse(source, p_path, false, false);
+
+	///trait files are registered into GDScriptCache's own trait table (see
+	///_register_global_trait below), !!!NOT:!!! ScriptServer's global class table, so trait names
+	///can never collide with class names. i know this should've been very ideally been done in 
+	///scriptlanguage, but for ease of access, and much more importantly, locality within the gdscript module,
+	///it has been implemented here instead. an even more important consideration was that if this wasn't done,
+	///then i'd have to force-pass the entire filesystem a second time just to parse traits. this architecture
+	///allows us to fold this scouring into one pass. yay :>
+
+	if (parser.is_trait_script()) {
+		GDScriptCache::remove_global_trait_by_path(p_path);
+		const GDScriptParser::TraitNode* t = parser.get_trait_tree();
+		if (t != nullptr && t->identifier != nullptr) {
+			GDScriptCache::add_global_trait(t->identifier->name, p_path);
+		}
+		return String();
+	}
 
 	const GDScriptParser::ClassNode *c = parser.get_tree();
 	if (!c) {
@@ -2848,6 +2926,156 @@ String GDScriptLanguage::_get_global_class_name(const String &p_path, String *r_
 
 thread_local GDScriptLanguage::CallLevel *GDScriptLanguage::_call_stack = nullptr;
 thread_local uint32_t GDScriptLanguage::_call_stack_size = 0;
+
+void GDScriptLanguage::register_native_impl_method(Variant::Type p_type, const StringName& p_method_name, GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	native_impl_methods[p_type][p_method_name] = p_function;
+}
+
+void GDScriptLanguage::unregister_native_impl_methods_for_function(GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	for (HashMap<Variant::Type, HashMap<StringName, GDScriptFunction*>>::Iterator E = native_impl_methods.begin(); E;) {
+		HashMap<Variant::Type, HashMap<StringName, GDScriptFunction*>>::Iterator next = E;
+		++next;
+		HashMap<StringName, GDScriptFunction*>& methods = E->value;
+		for (HashMap<StringName, GDScriptFunction*>::Iterator M = methods.begin(); M;) {
+			HashMap<StringName, GDScriptFunction*>::Iterator next_m = M;
+			++next_m;
+			if (M->value == p_function) {
+				methods.remove(M);
+			}
+			M = next_m;
+		}
+		if (methods.is_empty()) {
+			native_impl_methods.remove(E);
+		}
+		E = next;
+	}
+}
+
+bool GDScriptLanguage::has_native_impl_methods(Variant::Type p_type) const {
+	MutexLock lock(mutex);
+	return native_impl_methods.has(p_type);
+}
+
+GDScriptFunction* GDScriptLanguage::get_native_impl_method(Variant::Type p_type, const StringName& p_method_name) const {
+	MutexLock lock(mutex);
+	HashMap<Variant::Type, HashMap<StringName, GDScriptFunction*>>::ConstIterator E = native_impl_methods.find(p_type);
+	if (!E) {
+		return nullptr;
+	}
+	HashMap<StringName, GDScriptFunction*>::ConstIterator M = E->value.find(p_method_name);
+	return M ? M->value : nullptr;
+}
+
+void GDScriptLanguage::register_native_class_impl_method(const StringName& p_native_class, const StringName& p_method_name, GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	native_class_impl_methods[p_native_class][p_method_name] = p_function;
+}
+
+void GDScriptLanguage::unregister_native_class_impl_methods_for_function(GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	for (HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::Iterator E = native_class_impl_methods.begin(); E;) {
+		HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::Iterator next = E;
+		++next;
+		HashMap<StringName, GDScriptFunction*>& methods = E->value;
+		for (HashMap<StringName, GDScriptFunction*>::Iterator M = methods.begin(); M;) {
+			HashMap<StringName, GDScriptFunction*>::Iterator next_m = M;
+			++next_m;
+			if (M->value == p_function) {
+				methods.remove(M);
+			}
+			M = next_m;
+		}
+		if (methods.is_empty()) {
+			native_class_impl_methods.remove(E);
+		}
+		E = next;
+	}
+	///clear cache onteardown
+	native_class_impl_method_cache.clear();
+}
+
+
+void GDScriptLanguage::register_script_class_impl_method(const StringName& p_script_class, const StringName& p_method_name, GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	script_class_impl_methods[p_script_class][p_method_name] = p_function;
+}
+
+void GDScriptLanguage::unregister_script_class_impl_methods_for_function(GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	for (HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::Iterator E = script_class_impl_methods.begin(); E;) {
+		HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::Iterator next = E;
+		++next;
+		HashMap<StringName, GDScriptFunction*>& methods = E->value;
+		for (HashMap<StringName, GDScriptFunction*>::Iterator M = methods.begin(); M;) {
+			HashMap<StringName, GDScriptFunction*>::Iterator next_m = M;
+			++next_m;
+			if (M->value == p_function) {
+				methods.remove(M);
+			}
+			M = next_m;
+		}
+		if (methods.is_empty()) {
+			script_class_impl_methods.remove(E);
+		}
+		E = next;
+	}
+}
+
+GDScriptFunction* GDScriptLanguage::get_script_class_impl_method(const StringName& p_script_class, const StringName& p_method_name) const {
+	MutexLock lock(mutex);
+	HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::ConstIterator E = script_class_impl_methods.find(p_script_class);
+	if (!E) {
+		return nullptr;
+	}
+	HashMap<StringName, GDScriptFunction*>::ConstIterator M = E->value.find(p_method_name);
+	return M ? M->value : nullptr;
+}
+
+GDScriptFunction* GDScriptLanguage::find_native_class_impl_method_cached(const StringName& p_concrete_class, const StringName& p_method_name) const {
+	{
+		MutexLock lock(mutex);
+		HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::ConstIterator cached_class = native_class_impl_method_cache.find(p_concrete_class);
+		if (cached_class) {
+			HashMap<StringName, GDScriptFunction*>::ConstIterator cached_method = cached_class->value.find(p_method_name);
+			if (cached_method) {
+				return cached_method->value;
+			}
+		}
+	}
+
+	StringName walk_class = p_concrete_class;
+	GDScriptFunction* found = nullptr;
+	while (walk_class != StringName()) {
+		if (has_native_class_impl_methods(walk_class)) {
+			found = get_native_class_impl_method(walk_class, p_method_name);
+			if (found != nullptr) {
+				break;
+			}
+		}
+		walk_class = ClassDB::get_parent_class(walk_class);
+	}
+
+	MutexLock lock(mutex);
+	native_class_impl_method_cache[p_concrete_class][p_method_name] = found;
+	return found;
+}
+
+bool GDScriptLanguage::has_native_class_impl_methods(const StringName& p_native_class) const {
+	MutexLock lock(mutex);
+	return native_class_impl_methods.has(p_native_class);
+}
+
+GDScriptFunction* GDScriptLanguage::get_native_class_impl_method(const StringName& p_native_class, const StringName& p_method_name) const {
+	MutexLock lock(mutex);
+	HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::ConstIterator E = native_class_impl_methods.find(p_native_class);
+	if (!E) {
+		return nullptr;
+	}
+	HashMap<StringName, GDScriptFunction*>::ConstIterator M = E->value.find(p_method_name);
+	return M ? M->value : nullptr;
+}
 
 GDScriptLanguage::CallLevel *GDScriptLanguage::_get_stack_level(uint32_t p_level) {
 	ERR_FAIL_UNSIGNED_INDEX_V(p_level, _call_stack_size, nullptr);

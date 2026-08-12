@@ -30,6 +30,8 @@
 
 #include "gdscript_compiler.h"
 
+#include "gdscript_trait_analyzer.h"
+
 #include "gdscript.h"
 #include "gdscript_analyzer.h"
 #include "gdscript_byte_codegen.h"
@@ -144,6 +146,10 @@ GDScriptDataType GDScriptCompiler::_gdtype_from_datatype(const GDScriptParser::D
 		/// But I'm sure as hell gonna pray it works until it explodes in my face.
 		case GDScriptParser::DataType::GENERIC_TYPE: {
 			return GDScriptDataType(); /// return Variant for now, just type erasure
+		} break;
+
+		case GDScriptParser::DataType::TRAIT_OBJECT: {
+			return GDScriptDataType();
 		} break;
 
 		case GDScriptParser::DataType::CLASS: {
@@ -362,6 +368,15 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 							gen->write_get_named(temp, identifier, self);
 							return temp;
 						}
+
+						if (in->type_constraint.kind == GDScriptParser::DataType::BUILTIN && in->type_constraint.builtin_type == Variant::CALLABLE) {
+							///the analyser resolved this as a trait impl method callable. remember to fetch it through
+							///GET_NAMED so the VM can build the right GDScriptImplCallable for self
+							GDScriptCodeGenerator::Address temp = codegen.add_temporary();
+							GDScriptCodeGenerator::Address self(GDScriptCodeGenerator::Address::SELF);
+							gen->write_get_named(temp, identifier, self);
+							return temp;
+						}
 					}
 				} break;
 				case GDScriptParser::IdentifierNode::MEMBER_CONSTANT:
@@ -502,6 +517,10 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				_set_error("'self' not present in static function.", p_expression);
 				r_error = ERR_COMPILATION_FAILED;
 				return GDScriptCodeGenerator::Address();
+			}
+			if (codegen.is_native_impl_method) {
+				///no GDScriptInstance* here! self is the implicit leading Variant parameter instead
+				return codegen.parameters[StringName("@impl_self")];
 			}
 			return GDScriptCodeGenerator::Address(GDScriptCodeGenerator::Address::SELF);
 		} break;
@@ -723,7 +742,14 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 										gen->write_call(result, base, call->function_name, arguments);
 									}
 								} else if (base.type.kind == GDScriptDataType::BUILTIN) {
-									gen->write_call_builtin_type(result, base, base.type.builtin_type, call->function_name, arguments);
+									if (Variant::has_builtin_method(base.type.builtin_type, call->function_name)) {
+										gen->write_call_builtin_type(result, base, base.type.builtin_type, call->function_name, arguments);
+									} else {
+										///not a real Variant builtin method, likely an `impl` method on a builtin type
+										///fallback to dynamic dispatch, which knows how to fuck with native impl methods
+										///via GDScriptLanguage::get_native_impl_method() at runtime
+										gen->write_call(result, base, call->function_name, arguments);
+									}
 								} else {
 									gen->write_call(result, base, call->function_name, arguments);
 								}
@@ -977,7 +1003,9 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				return GDScriptCodeGenerator::Address();
 			}
 
-			if (test_type.has_type()) {
+			if (type_test->trait_test_name != StringName()) {
+				gen->write_trait_test(result, operand, type_test->trait_test_name);
+			} else if (test_type.has_type()) {
 				gen->write_type_test(result, operand, test_type);
 			} else {
 				gen->write_assign_true(result);
@@ -2306,7 +2334,7 @@ Error GDScriptCompiler::_parse_block(CodeGen &codegen, const GDScriptParser::Sui
 	return OK;
 }
 
-GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_script, const GDScriptParser::ClassNode *p_class, const GDScriptParser::FunctionNode *p_func, bool p_for_ready, bool p_for_lambda) {
+GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_script, const GDScriptParser::ClassNode *p_class, const GDScriptParser::FunctionNode *p_func, bool p_for_ready, bool p_for_lambda, bool p_func_is_native_impl_method) {
 	r_error = OK;
 	CodeGen codegen;
 	codegen.generator = memnew(GDScriptByteCodeGenerator);
@@ -2356,6 +2384,17 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 
 	int optional_parameters = 0;
 	GDScriptCodeGenerator::Address vararg_addr;
+
+	if (p_func_is_native_impl_method) {
+		///implicit leading `self` slot. untyped (Variant), no default, invisible to method_info
+		///so reflection/autocomplete/error/whatever_the_fuck messages never show this. 
+		///codegen.parameters gets an entry keyed by a name no GDScript identifier 
+		///can ever collide with.
+		GDScriptDataType self_type; ///VARIANT kind by default
+		uint32_t self_addr = codegen.generator->add_parameter("@impl_self", false, self_type);
+		codegen.parameters[StringName("@impl_self")] = GDScriptCodeGenerator::Address(GDScriptCodeGenerator::Address::FUNCTION_PARAMETER, self_addr, self_type);
+		codegen.is_native_impl_method = true;
+	}
 
 	if (p_func) {
 		for (int i = 0; i < p_func->parameters.size(); i++) {
@@ -2542,7 +2581,11 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 
 	gd_function->method_info = method_info;
 
-	if (!is_implicit_initializer && !is_implicit_ready && !p_for_lambda) {
+	///native impl methods get a mangled key from the caller to avoid same-name collisions
+	///across different impl targets clobbering each other and leaking away the old pointer
+	///how'd i even realise that happened? across the course of 4 fucking hours that's how
+	///thank you valgrind thank you c++ and the non-existence of a Pin<Ptr>
+	if (!is_implicit_initializer && !is_implicit_ready && !p_for_lambda && !p_func_is_native_impl_method) {
 		p_script->member_functions[func_name] = gd_function;
 	}
 
@@ -3055,6 +3098,79 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 		}
 	}
 
+	///compile impl-provided methods!  these are funcs from `impl Trait for X` blocks, stashed by
+	///the trait analyzer onto the ImplNode itself since we've got no analyzer handle of our own :sob:
+	///what the fuck is this architecture
+	for (const GDScriptParser::ImplNode* impl_node : p_class->impls) {
+		if (impl_node == nullptr || impl_node->resolved_gd_impl.is_null()) {
+			continue; ///impl failed analysis earlier, nothing valid to compile
+		}
+
+		const GDScriptParser::DataType& impl_target = impl_node->resolved_gd_impl->impl_target_type;
+
+		bool is_builtin_target = impl_target.kind == GDScriptParser::DataType::BUILTIN;
+		bool is_native_class_target = impl_target.kind == GDScriptParser::DataType::NATIVE;
+		bool is_native_impl_target = is_builtin_target || is_native_class_target;
+		HashSet<StringName> explicit_impl_methods;
+		for (const GDScriptParser::FunctionNode* impl_method_node : impl_node->methods) {
+			if (impl_method_node == nullptr || impl_method_node->identifier == nullptr) {
+				continue;
+			}
+			const StringName method_name = impl_method_node->identifier->name;
+			explicit_impl_methods.insert(method_name);
+			Error err = OK;
+			GDScriptFunction* impl_function = _parse_function(err, p_script, p_class, impl_method_node, false, false, is_native_impl_target);
+			if (err) {
+				return err;
+			}
+
+			if (is_builtin_target) {
+				impl_function->set_is_native_impl_method(true);
+				///mangle the key so two impls of the same method for different targets
+				///don't overwrite each other in member_functions and fuckup the old pointer
+				StringName mangled_key = StringName("@impl:builtin:" + itos((int)impl_target.builtin_type) + "::" + String(method_name));
+				p_script->member_functions[mangled_key] = impl_function;
+				GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, method_name, impl_function);
+			} else if (is_native_class_target) {
+				impl_function->set_is_native_impl_method(true);
+				StringName mangled_key = StringName("@impl:native:" + String(impl_target.native_type) + "::" + String(method_name));
+				p_script->member_functions[mangled_key] = impl_function;
+				GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, method_name, impl_function);
+			}
+			///class-target impls: _parse_function() already inserted ts with func_name, which is
+			///fine since a class only ever has one impl per method name (analyzser enforces that) ((or at least it should))
+		}
+
+		if (!is_native_impl_target && impl_node->trait_name != nullptr) {
+			String trait_path = GDScriptCache::get_global_trait_path(impl_node->trait_name->name);
+			if (!trait_path.is_empty()) {
+				GDScriptParser trait_parser;
+				GDScriptAnalyzer trait_analyzer(&trait_parser);
+				trait_parser.parse(GDScriptCache::get_source_code(trait_path), trait_path, false);
+				trait_analyzer.analyze();
+				const GDScriptParser::TraitNode* trait = trait_parser.get_trait_tree();
+				if (trait != nullptr) {
+					for (const KeyValue<StringName, Ref<GDScriptTraitSignatureSnapshot>>& E : impl_node->resolved_gd_impl->provided_signatures) {
+						if (explicit_impl_methods.has(E.key)) {
+							continue;
+						}
+						for (const GDScriptParser::FunctionNode* default_method_node : trait->default_methods) {
+							if (default_method_node == nullptr || default_method_node->identifier == nullptr || default_method_node->identifier->name != E.key) {
+								continue;
+							}
+							Error err = OK;
+							_parse_function(err, p_script, p_class, default_method_node, false, false, false);
+							if (err) {
+								return err;
+							}
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+
 	{
 		// Create `@implicit_new()` special function in any case.
 		Error err = OK;
@@ -3301,7 +3417,66 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 	error = "";
 	parser = p_parser;
 	main_script = p_script;
-	const GDScriptParser::ClassNode *root = parser->get_tree();
+
+	const GDScriptParser::ClassNode* root = parser->get_tree();
+
+	///traits are contracts only, yeah, i know, so they don't get ordinary script classes,
+	///but their builtin/native/script-class-target impl methods still need bytecode registered
+	///before another script can call 3.yap(), node.yap(), or demo.yap() at runtime. make sure that happens in here
+	if (parser->is_trait_script()) {
+		const GDScriptParser::TraitNode* trait = parser->get_trait_tree();
+		if (trait != nullptr && root != nullptr) {
+			for (const GDScriptParser::ImplNode* impl_node : trait->impls) {
+				if (impl_node == nullptr || impl_node->resolved_gd_impl.is_null()) {
+					continue;
+				}
+
+				const GDScriptParser::DataType& impl_target = impl_node->resolved_gd_impl->impl_target_type;
+				bool is_builtin_target = impl_target.kind == GDScriptParser::DataType::BUILTIN;
+				bool is_native_class_target = impl_target.kind == GDScriptParser::DataType::NATIVE;
+				bool is_script_class_target = impl_target.kind == GDScriptParser::DataType::CLASS && impl_target.class_type != nullptr;
+				if (!is_builtin_target && !is_native_class_target && !is_script_class_target) {
+					continue;
+				}
+
+				for (const GDScriptParser::FunctionNode* impl_method_node : impl_node->methods) {
+					if (impl_method_node == nullptr || impl_method_node->identifier == nullptr) {
+						continue;
+					}
+					const StringName method_name = impl_method_node->identifier->name;
+					Error err = OK;
+					GDScriptFunction* impl_function = _parse_function(err, p_script, root, impl_method_node, false, false, true);
+					if (err) {
+						return err;
+					}
+					impl_function->set_is_native_impl_method(true);
+
+					///mangle format: @impl:<target>::<method>
+					String target_key_str;
+					if (is_builtin_target) {
+						target_key_str = "builtin:" + itos((int)impl_target.builtin_type);
+					} else if (is_native_class_target) {
+						target_key_str = "native:" + String(impl_target.native_type);
+					} else {
+						target_key_str = "class:" + impl_target.class_type->fqcn;
+					}
+					StringName mangled_key = StringName("@impl:" + target_key_str + "::" + String(method_name));
+					p_script->member_functions[mangled_key] = impl_function;
+
+					if (is_builtin_target) {
+						GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, method_name, impl_function);
+					} else if (is_native_class_target) {
+						GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, method_name, impl_function);
+					} else {
+						GDScriptLanguage::get_singleton()->register_script_class_impl_method(impl_target.class_type->fqcn, method_name, impl_function);
+					}
+				}
+			}
+		}
+		p_script->valid = true;
+		return OK;
+	}
+
 
 	source = p_script->get_path();
 

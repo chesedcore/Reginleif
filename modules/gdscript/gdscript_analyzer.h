@@ -32,11 +32,16 @@
 
 #include "gdscript_cache.h"
 #include "gdscript_parser.h"
+#include "gdscript_trait_analyzer.h" ///
 
 #include "core/object/ref_counted.h"
 
 class GDScriptAnalyzer {
 	GDScriptParser *parser = nullptr;
+	///
+	GDScriptTraitAnalyzer* trait_analyzer = nullptr;
+
+	friend class GDScriptTraitAnalyzer;
 
 	template <typename Fn>
 	class Finally {
@@ -55,12 +60,14 @@ class GDScriptAnalyzer {
 	List<GDScriptParser::LambdaNode *> pending_body_resolution_lambdas;
 	HashMap<const GDScriptParser::ClassNode *, Ref<GDScriptParserRef>> external_class_parser_cache;
 	bool static_context = false;
+	GDScriptParser::DataType current_impl_self_type;
 
 	// Tests for detecting invalid overloading of script members
 	static _FORCE_INLINE_ bool has_member_name_conflict_in_script_class(const StringName &p_name, const GDScriptParser::ClassNode *p_current_class_node, const GDScriptParser::Node *p_member);
 	static _FORCE_INLINE_ bool has_member_name_conflict_in_native_type(const StringName &p_name, const StringName &p_native_type_string);
 	Error check_native_member_name_conflict(const StringName &p_member_name, const GDScriptParser::Node *p_member_node, const StringName &p_native_type_string);
 	Error check_class_member_name_conflict(const GDScriptParser::ClassNode *p_class_node, const StringName &p_member_name, const GDScriptParser::Node *p_member_node);
+	Error check_symbol_name_conflicts(const StringName& p_name, const GDScriptParser::Node* p_source, const String& p_script_path); ///
 
 	void get_class_node_current_scope_classes(GDScriptParser::ClassNode *p_node, List<GDScriptParser::ClassNode *> *p_list, GDScriptParser::Node *p_source);
 
@@ -174,11 +181,15 @@ public:
 	Error resolve_dependencies();
 	Error analyze();
 
+	///(see GDScriptCache::get_cached_trait)
+	_FORCE_INLINE_ GDScriptTraitAnalyzer* get_trait_analyzer() { return trait_analyzer; }
+
 	Variant make_variable_default_value(GDScriptParser::VariableNode *p_variable);
 
-	static bool check_type_compatibility(const GDScriptParser::DataType &p_target, const GDScriptParser::DataType &p_source, bool p_allow_implicit_conversion = false, const GDScriptParser::Node *p_source_node = nullptr, const GDScriptParser::ClassNode* p_class = nullptr, const GDScriptParser::FunctionNode* p_func = nullptr);
+	static bool check_type_compatibility(const GDScriptParser::DataType &p_target, const GDScriptParser::DataType &p_source, bool p_allow_implicit_conversion = false, const GDScriptParser::Node *p_source_node = nullptr, const GDScriptParser::ClassNode* p_class = nullptr, const GDScriptParser::FunctionNode* p_func = nullptr, GDScriptTraitAnalyzer* p_trait_analyzer = nullptr);
 	static GDScriptParser::DataType type_from_metatype(const GDScriptParser::DataType &p_meta_type);
 	static bool class_exists(const StringName &p_class);
 
 	GDScriptAnalyzer(GDScriptParser *p_parser);
+	~GDScriptAnalyzer();
 };

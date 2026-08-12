@@ -38,6 +38,7 @@
 #include "core/object/class_db.h"
 #include "editor/settings/editor_settings.h"
 #include "scene/gui/text_edit.h"
+#include "modules/gdscript/gdscript_cache.h"
 
 Dictionary GDScriptSyntaxHighlighter::_get_line_syntax_highlighting_impl(int p_line) {
 	Dictionary color_map;
@@ -787,6 +788,13 @@ void GDScriptSyntaxHighlighter::_update_cache() {
 	ScriptServer::get_global_class_list(global_classes);
 	for (const StringName &class_name : global_classes) {
 		class_names[class_name] = usertype_color;
+	}
+
+	///* global traits! *///
+	List<StringName> global_traits;
+	GDScriptCache::get_global_trait_list(&global_traits);
+	for (const StringName& trait_name : global_traits) {
+		class_names[trait_name] = usertype_color;
 	}
 
 	/* Autoloads. */
