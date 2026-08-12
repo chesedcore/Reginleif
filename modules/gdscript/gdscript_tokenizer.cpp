@@ -726,10 +726,15 @@ GDScriptTokenizer::Token GDScriptTokenizerText::number() {
 		_advance();
 	}
 
-	///It might be a ".." token, or a "." starting a method call/member access
-	///(`3.method_call()`), so we check it's not either of those before treating
-	///it as a decimal point
-	if (_peek() == '.' && _peek(1) != '.' && !is_unicode_identifier_start(_peek(1))) {
+	/// It might be a ".." token, or a "." starting a method call/member access
+	/// (`3.method_call()`), so we check it's not either of those before treating
+	/// it as a decimal point. exponents are still part of the number after a
+	/// trailing decimal point (`123.e4`). if you implement a trait with a method 
+	/// e4, lowkey what the genuine fuck are you doing
+	
+	bool dot_starts_exponent = _peek() == '.' && (_peek(1) == 'e' || _peek(1) == 'E') &&
+			(is_digit(_peek(2)) || ((_peek(2) == '+' || _peek(2) == '-') && is_digit(_peek(3))));
+	if (_peek() == '.' && _peek(1) != '.' && (!is_unicode_identifier_start(_peek(1)) || dot_starts_exponent)) {
 		if (base == 10 && !has_decimal) {
 			has_decimal = true;
 		} else if (base == 10) {

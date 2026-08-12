@@ -843,7 +843,10 @@ Error GDScriptAnalyzer::check_symbol_name_conflicts(const StringName& p_name, co
 	}
 	
 	String existing_trait_path = GDScriptCache::get_global_trait_path(p_name);
-	if (!existing_trait_path.is_empty() && !GDScript::is_canonically_equal_paths(existing_trait_path, p_script_path)) {
+	String localized_script_path = ProjectSettings::get_singleton()->localize_path(p_script_path);
+	if (!existing_trait_path.is_empty() &&
+			!GDScript::is_canonically_equal_paths(existing_trait_path, p_script_path) &&
+			!GDScript::is_canonically_equal_paths(existing_trait_path, localized_script_path)) {
 		push_error(vformat(R"(Name "%s" conflicts with a trait declared in "%s".)", p_name, existing_trait_path), p_source);
 		return ERR_PARSE_ERROR;
 	}
