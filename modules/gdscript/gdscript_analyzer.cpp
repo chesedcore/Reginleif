@@ -312,6 +312,49 @@ static StringName impl_target_key_from_datatype(const GDScriptParser::DataType& 
 	return StringName();
 }
 
+static bool global_impl_claims_satisfy_trait_for_type(const GDScriptParser::DataType& p_type, const StringName& p_trait_name) {
+	GDScriptCache::ensure_global_impls_scanned();
+
+	GDScriptParser::DataType walk_type = p_type;
+	while (true) {
+		StringName walk_key = impl_target_key_from_datatype(walk_type);
+		if (walk_key != StringName()) {
+			Vector<GDScriptCache::GlobalImplClaim> claims = GDScriptCache::get_global_impl_claims(walk_key);
+			for (const GDScriptCache::GlobalImplClaim& claim : claims) {
+				if (claim.trait_name == p_trait_name) {
+					return true;
+				}
+			}
+		}
+
+		if (walk_type.kind == GDScriptParser::DataType::CLASS && walk_type.class_type != nullptr) {
+			GDScriptParser::DataType next_walk = walk_type.class_type->base_type;
+			if (next_walk.kind == GDScriptParser::DataType::UNRESOLVED) {
+				break;
+			}
+			walk_type = next_walk;
+			continue;
+		}
+
+		if (walk_type.kind == GDScriptParser::DataType::NATIVE && walk_type.native_type != StringName()) {
+			StringName parent_native = ClassDB::get_parent_class(walk_type.native_type);
+			if (parent_native == StringName()) {
+				break;
+			}
+			GDScriptParser::DataType native_walk;
+			native_walk.kind = GDScriptParser::DataType::NATIVE;
+			native_walk.builtin_type = Variant::OBJECT;
+			native_walk.native_type = parent_native;
+			walk_type = native_walk;
+			continue;
+		}
+
+		break;
+	}
+
+	return false;
+}
+
 ///a CLASS-kind base (a user script) can match a global impl claim two different ways...
 ///case 1, an impl targeting the script class itself (`impl for Bumfuck`), or an impl targeting one
 ///of its native ancestors (`impl for Node`, reachable since Bumfuck extends Node2D extends
@@ -8127,10 +8170,6 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 	ERR_FAIL_COND_V_MSG(!p_source.is_set(), true, "Parser bug (please report): Trying to check compatibility of unset value type");
 
 	if ((p_target.kind == GDScriptParser::DataType::VARIANT || p_target.kind == GDScriptParser::DataType::TRAIT_OBJECT) && !p_target.trait_bound_names.is_empty()) {
-		if (p_trait_analyzer == nullptr) {
-			return false;
-		}
-
 		if (p_source.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
 			for (const StringName& trait_name : p_target.trait_bound_names) {
 				if (!p_source.trait_bound_names.has(trait_name)) {
@@ -8141,16 +8180,25 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 		}
 		
 		for (const StringName& trait_name : p_target.trait_bound_names) {
-			Ref<GDScriptTrait> trait_ref = p_trait_analyzer->get_local_trait(trait_name);
+			Ref<GDScriptTrait> trait_ref;
+			if (p_trait_analyzer != nullptr) {
+				trait_ref = p_trait_analyzer->get_local_trait(trait_name);
+			}
 			if (trait_ref.is_null()) {
 				Error trait_err = OK;
 				String trait_path = GDScriptCache::get_global_trait_path(trait_name);
 				if (!trait_path.is_empty()) {
-					trait_ref = GDScriptCache::get_cached_trait(trait_path, trait_name, trait_err, p_trait_analyzer->get_parser()->get_script_path());
+					trait_ref = GDScriptCache::get_cached_trait(trait_path, trait_name, trait_err, p_trait_analyzer != nullptr ? p_trait_analyzer->get_parser()->get_script_path() : String());
 				}
 			}
-			bool satisfies_trait_validation = trait_ref.is_valid() && p_trait_analyzer->type_satisfies_trait(p_source, trait_ref);
-			if (trait_ref.is_null() || !satisfies_trait_validation) {
+			bool satisfies_trait_validation = false;
+			if (trait_ref.is_valid() && p_trait_analyzer != nullptr) {
+				satisfies_trait_validation = p_trait_analyzer->type_satisfies_trait(p_source, trait_ref);
+			}
+			if (!satisfies_trait_validation) {
+				satisfies_trait_validation = global_impl_claims_satisfy_trait_for_type(p_source, trait_name);
+			}
+			if (!satisfies_trait_validation) {
 				return false;
 			}
 		}
@@ -8285,7 +8333,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 						Error trait_err = OK;
 						String trait_path = GDScriptCache::get_global_trait_path(trait_name);
 						if (!trait_path.is_empty()) {
-							trait_ref = GDScriptCache::get_cached_trait(trait_path, trait_name, trait_err, p_trait_analyzer->get_parser()->get_script_path());
+							trait_ref = GDScriptCache::get_cached_trait(trait_path, trait_name, trait_err, p_trait_analyzer != nullptr ? p_trait_analyzer->get_parser()->get_script_path() : String());
 						}
 					}
 					if (trait_ref.is_null() || !p_trait_analyzer->type_satisfies_trait(p_source, trait_ref)) {
@@ -8331,7 +8379,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 					Error trait_err = OK;
 					String trait_path = GDScriptCache::get_global_trait_path(trait_name);
 					if (!trait_path.is_empty()) {
-						trait_ref = GDScriptCache::get_cached_trait(trait_path, trait_name, trait_err, p_trait_analyzer->get_parser()->get_script_path());
+						trait_ref = GDScriptCache::get_cached_trait(trait_path, trait_name, trait_err, p_trait_analyzer != nullptr ? p_trait_analyzer->get_parser()->get_script_path() : String());
 					}
 				}
 				if (trait_ref.is_null() || !p_trait_analyzer->type_satisfies_trait(p_source, trait_ref)) {
@@ -8499,7 +8547,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 								return false;
 							}
 
-							if(!check_type_compatibility(*target_bound, *source_bound, p_allow_implicit_conversion, p_source_node, p_class, p_func)) {
+							if(!check_type_compatibility(*target_bound, *source_bound, p_allow_implicit_conversion, p_source_node, p_class, p_func, p_trait_analyzer)) {
 								return false;
 							}
 						}

@@ -228,6 +228,14 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 
 	bool ok = true;
 
+	///make this impl visible while analyzing its own method bodies. this hack was done because
+	///calls that pass `self` to an `impl Trait` parameter inside the impl body can
+	///emit a transient invalid-argument error before this impl is registered below
+	///basically, passing `self` into a param that wants an `impl Trait` INSIDE the 
+	///impl block itself, leading to a nasty cyclic dependency chain
+	resolved_impls.push_back(gd_impl);
+	p_impl->resolved_gd_impl = gd_impl;
+
 	for (GDScriptParser::FunctionNode* provided : p_impl->methods) {
 		if (provided == nullptr || provided->identifier == nullptr) {
 			continue;
@@ -260,15 +268,15 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 			continue;
 		}
 
+		gd_impl->provided_methods[method_name] = provided;
+		gd_impl->provided_signatures[method_name] = _make_trait_method_signature_snapshot(provided);
+
 		GDScriptParser::DataType previous_impl_self_type = analyzer->current_impl_self_type;
 		analyzer->current_impl_self_type = target_type;
 		analyzer->current_impl_self_type.is_meta_type = false;
 		analyzer->current_impl_self_type.is_constant = false;
 		analyzer->resolve_function_body(provided);
 		analyzer->current_impl_self_type = previous_impl_self_type;
-
-		gd_impl->provided_methods[method_name] = provided;
-		gd_impl->provided_signatures[method_name] = _make_trait_method_signature_snapshot(provided);
 	}
 
 	///Anything not explicitly provided falls back to the trait's own default body(if it has one)
@@ -280,6 +288,9 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 			}
 		}
 	}
+
+	resolved_impls.erase(gd_impl);
+	p_impl->resolved_gd_impl = Ref<GDScriptImpl>();
 
 	//already got an impl for this trait+type combo? gtfo
 	for (const Ref<GDScriptImpl>& existing : resolved_impls) {
