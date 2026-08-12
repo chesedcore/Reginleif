@@ -270,6 +270,12 @@ Error GDScriptTraitAnalyzer::resolve_impl(GDScriptParser::ImplNode* p_impl) {
 
 		gd_impl->provided_methods[method_name] = provided;
 		gd_impl->provided_signatures[method_name] = _make_trait_method_signature_snapshot(provided);
+	}
+
+	for (GDScriptParser::FunctionNode* provided : p_impl->methods) {
+		if (provided == nullptr || provided->identifier == nullptr || !gd_impl->provided_methods.has(provided->identifier->name)) {
+			continue;
+		}
 
 		GDScriptParser::DataType previous_impl_self_type = analyzer->current_impl_self_type;
 		analyzer->current_impl_self_type = target_type;
