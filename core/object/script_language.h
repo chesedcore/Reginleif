@@ -281,7 +281,6 @@ public:
 		}
 	};
 
-	void get_core_type_words(List<String> *p_core_type_words) const;
 	virtual Vector<String> get_reserved_words() const = 0;
 	virtual bool is_control_flow_keyword(const String &p_string) const = 0;
 	virtual Vector<String> get_comment_delimiters() const = 0;
@@ -409,7 +408,6 @@ public:
 	virtual void reload_tool_script(const Ref<Script> &p_script) = 0;
 	/* LOADER FUNCTIONS */
 
-	virtual void get_recognized_extensions(List<String> *p_extensions) const = 0;
 	virtual void get_public_functions(List<MethodInfo> *p_functions) const = 0;
 	virtual void get_public_constants(List<Pair<String, Variant>> *p_constants) const = 0;
 	virtual void get_public_annotations(List<MethodInfo> *p_annotations) const = 0;

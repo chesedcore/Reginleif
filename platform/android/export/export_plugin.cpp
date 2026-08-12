@@ -837,10 +837,7 @@ Error EditorExportPlatformAndroid::save_apk_file(const Ref<EditorExportPreset> &
 
 	Vector<uint8_t> enc_data;
 	EditorExportPlatform::SavedData sd;
-	Error err = _store_temp_file(simplified_path, p_data, p_enc_in_filters, p_enc_ex_filters, p_key, p_seed, p_delta, enc_data, sd);
-	if (err != OK) {
-		return err;
-	}
+	RETURN_IF_ERROR(_store_temp_file(simplified_path, p_data, p_enc_in_filters, p_enc_ex_filters, p_key, p_seed, p_delta, enc_data, sd));
 
 	String dst_path;
 	if (ed->pd.salt.length() == 32) {
@@ -3820,7 +3817,7 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 		} else {
 			user_data.pd.path = "assets.sparsepck";
 			user_data.pd.use_sparse_pck = true;
-			if (p_preset->get_enc_directory()) {
+			if (p_preset->get_enc_pck() && p_preset->get_enc_directory()) {
 				RandomPCG rng = RandomPCG(p_preset->get_seed());
 				for (int i = 0; i < 32; i++) {
 					user_data.pd.salt += String::chr(1 + rng.rand() % 254);
@@ -4327,7 +4324,7 @@ Error EditorExportPlatformAndroid::export_project_helper(const Ref<EditorExportP
 		ed.apk = unaligned_apk;
 		ed.pd.path = "assets.sparsepck";
 		ed.pd.use_sparse_pck = true;
-		if (p_preset->get_enc_directory()) {
+		if (p_preset->get_enc_pck() && p_preset->get_enc_directory()) {
 			RandomPCG rng = RandomPCG(p_preset->get_seed());
 			for (int i = 0; i < 32; i++) {
 				ed.pd.salt += String::chr(1 + rng.rand() % 254);
