@@ -27,7 +27,6 @@ If you don't want to go through the hassle of all that, I periodically throw a f
 
 ## Shit I want to add
 - type unifier
-- traits (holy shit!!!)
 - structs
 - sum types
 - errors as values
@@ -37,6 +36,7 @@ If you don't want to go through the hassle of all that, I periodically throw a f
 - generics (currently only type-erased)
 - nested types
 - completely optional braces {} based scoping
+- traits (first pass)
 
 ## How to use the shit I added
 
@@ -194,11 +194,119 @@ func _ready() -> void {
 
 have fuuun with that!
 
+### Traits
+Traits are a feature that let you specify compile-time contracts of behaviour to either your own types or (as a form of ad-hoc polymorphism) apply them to Godot's existent types. This feature is extremely similar to what is known as 'interfaces' in other languages, and is heavily inspired by a certain other programming language's implementation of traits.
+
+#### how to declare a trait
+you can only declare a trait in a new file. create a new gdscript file (a new extension is not required), and write `trait` followed by the name of the trait:
+```gdscript
+trait Rollable
+```
+you can then specify the "contract" associated with this trait, i.e, the required signature that a type implementing this trait must have:
+
+```gdscript
+trait Rollable
+
+func roll() -> void
+func is_rolling() -> bool
+```
+
+now any type that wants to implement this trait must necessarily implement a `roll()` method and a `is_rolling()` method, as was specified by the trait contract.
+
+
+#### how to implement a trait
+you can 'implement'(`impl`) a trait `for` a target type with this syntax: `impl TraitName for TargetType:`
+```gdscript
+class_name Balls
+
+impl Rollable for Balls:
+	func roll() -> void: print("ow")
+	func is_rolling() -> bool: return false
+```
+
+this allows you to call `x.roll()` on an `x` that is of the type `Balls`. 
+
+you can only implement a trait in:
+- the file that the trait is declared in, or
+- the target class' file that the trait targets
+
+you can target *any* type in the engine for a trait. 
+this quite literally means you can implement a trait for very commonly used built-in types, like `int`.
+
+as an example:
+```gdscript
+trait ExtInt
+func min(other: int) -> int
+
+impl ExtInt for int:
+	func min(other: int) -> int:
+		return mini(self, other)
+```
+this code grants any `int` the ability to call the method `min`:
+```gdscript
+func _ready() -> void:
+	print(3.min(2)) #prints 2
+```
+of course, you can use this to confer methods to anything in the engine, such as `String` or `Node`.
+
+#### trait bounds
+you can narrow the parameters that a function can accept by "bounding" its inputs or outputs by a trait using the `impl Trait` bound syntax:
+```gdscript
+func only_rollables[T: impl Rollable](x: T) -> T:
+```
+now this function accepts and returns any T that implements `Rollable`. multiple bounds can be described as such: `impl Rollable + ExtInt`.
+
+to have a variable that accepts any type that implements a trait:
+```gdscript
+var t: impl Rollable
+```
+this bounds `t` to only accepting values that `impl Rollable`.
+
+#### type tests
+you can test for traits at runtime using `is TraitName` as you would with `is` checks for classes.
+```gdscript
+func _on_body_entered(body: PhysicsBody2D) -> void:
+	if body is Rollable: body.roll()
+```
+
+#### impl shorthands
+for convenience, if you are implementing a trait in its trait file, you can omit the name of the trait in the `impl` block.
+```gdscript
+trait Rollable
+impl for Balls:
+	pass
+```
+this is the same as `impl Rollable for Balls`.
+
+similarly, you can omit the name of the type target that the trait is being implemented for (along with the `for` keyword) when you are implementing a trait for a class in its own class file.
+```gdscript
+class_name Balls
+impl Rollable:
+	pass
+```
+this is the same as `impl Rollable for Balls`, of course.
+
+#### static vs dynamic dispatch
+using a generic to bound a trait counts as static dispatch:
+```gdscript
+func thing[T: impl Rollable](y: T) -> void:
+	var x: T
+```
+this forces y and x to become the same type concrete in actual code. this is recommended over dynamic dispatch for performance reasons.
+
+however, using the `impl Rollable` itself as a type parameter results in it being counted as dynamic dispatch.
+```gdscript
+func thing(y: impl Rollable) -> void:
+	var x: impl Rollable
+```
+these are both dynamically dispatched types, so x and y are allowed to be different concrete types. it is more flexible but owing to dyn dispatch is less performant.
+
+i invite you to read the source in modules/gdscript/gdscript_trait_analyzer for a more thorough rundown on how this works. behind the hood, dynamic trait dispatch creates a hidden generic to facilitate passing generic args. of course, you can always ask me for implementation details too.
 
 ### Some more caveats
 - Godot's `core` is rotten. Generics can LIE to you at runtime because static analysis is turned off for Variant-typed variables!!! (I didn't add this, this is Godot's default behaviour) Use static typing everywhere lest you want to run into undefined behaviour with generics.
+- Dynamic trait dispatch as a return position is not supported. `-> impl Trait` specifically. you should bound this to a generic and return that generic type instead. this will be fixed in future passes.
 - I'm not fucking omniscient bro. There might be bugs, and I ask you to REPORT THEM!! catch my ass on discord at monarch_zero or open an issue here.
-
 
 ## Backwards compat breaks
 There are none known so far that have not been fixed. Yay!
