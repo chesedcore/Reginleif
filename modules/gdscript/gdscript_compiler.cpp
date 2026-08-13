@@ -3439,13 +3439,10 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 					continue;
 				}
 
-				for (const GDScriptParser::FunctionNode* impl_method_node : impl_node->methods) {
-					if (impl_method_node == nullptr || impl_method_node->identifier == nullptr) {
-						continue;
-					}
-					const StringName method_name = impl_method_node->identifier->name;
+				HashSet<StringName> explicit_impl_methods;
+				auto compile_and_register_impl_method = [&](const GDScriptParser::FunctionNode* p_impl_method_node, const StringName& p_method_name) -> Error {
 					Error err = OK;
-					GDScriptFunction* impl_function = _parse_function(err, p_script, root, impl_method_node, false, false, true);
+					GDScriptFunction* impl_function = _parse_function(err, p_script, root, p_impl_method_node, false, false, true);
 					if (err) {
 						return err;
 					}
@@ -3460,15 +3457,38 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 					} else {
 						target_key_str = "class:" + impl_target.class_type->fqcn;
 					}
-					StringName mangled_key = StringName("@impl:" + target_key_str + "::" + String(method_name));
+					StringName mangled_key = StringName("@impl:" + target_key_str + "::" + String(p_method_name));
 					p_script->member_functions[mangled_key] = impl_function;
 
 					if (is_builtin_target) {
-						GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, method_name, impl_function);
+						GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, p_method_name, impl_function);
 					} else if (is_native_class_target) {
-						GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, method_name, impl_function);
+						GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, p_method_name, impl_function);
 					} else {
-						GDScriptLanguage::get_singleton()->register_script_class_impl_method(impl_target.class_type->fqcn, method_name, impl_function);
+						GDScriptLanguage::get_singleton()->register_script_class_impl_method(impl_target.class_type->fqcn, p_method_name, impl_function);
+					}
+					return OK;
+				};
+
+				for (const GDScriptParser::FunctionNode* impl_method_node : impl_node->methods) {
+					if (impl_method_node == nullptr || impl_method_node->identifier == nullptr) {
+						continue;
+					}
+					const StringName method_name = impl_method_node->identifier->name;
+					explicit_impl_methods.insert(method_name);
+					RETURN_IF_ERROR(compile_and_register_impl_method(impl_method_node, method_name));
+				}
+
+				for (const KeyValue<StringName, Ref<GDScriptTraitSignatureSnapshot>>& E : impl_node->resolved_gd_impl->provided_signatures) {
+					if (explicit_impl_methods.has(E.key)) {
+						continue;
+					}
+					for (const GDScriptParser::FunctionNode* default_method_node : trait->default_methods) {
+						if (default_method_node == nullptr || default_method_node->identifier == nullptr || default_method_node->identifier->name != E.key) {
+							continue;
+						}
+						RETURN_IF_ERROR(compile_and_register_impl_method(default_method_node, E.key));
+						break;
 					}
 				}
 			}

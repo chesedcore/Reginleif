@@ -35,6 +35,7 @@
 
 #include "core/object/ref_counted.h"
 #include "core/os/safe_binary_mutex.h"
+#include "core/templates/safe_refcount.h"
 #include "core/templates/hash_map.h"
 #include "core/templates/hash_set.h"
 
@@ -122,7 +123,7 @@ private:
 
 	///impl stuff, for cross-file collision detection
 	HashMap<StringName, Vector<GlobalImplClaim>> global_impls; ///target_type_key -> claims on that type
-	bool global_impls_project_scanned = false;
+	SafeFlag global_impls_project_scanned;
 	bool global_impls_project_scanning = false;
 
 	friend class GDScript;

@@ -2955,7 +2955,8 @@ void GDScriptLanguage::unregister_native_impl_methods_for_function(GDScriptFunct
 
 bool GDScriptLanguage::has_native_impl_methods(Variant::Type p_type) const {
 	MutexLock lock(mutex);
-	return native_impl_methods.has(p_type);
+	bool found = native_impl_methods.has(p_type);
+	return found;
 }
 
 GDScriptFunction* GDScriptLanguage::get_native_impl_method(Variant::Type p_type, const StringName& p_method_name) const {
@@ -3048,11 +3049,9 @@ GDScriptFunction* GDScriptLanguage::find_native_class_impl_method_cached(const S
 	StringName walk_class = p_concrete_class;
 	GDScriptFunction* found = nullptr;
 	while (walk_class != StringName()) {
-		if (has_native_class_impl_methods(walk_class)) {
-			found = get_native_class_impl_method(walk_class, p_method_name);
-			if (found != nullptr) {
-				break;
-			}
+		found = get_native_class_impl_method(walk_class, p_method_name);
+		if (found != nullptr) {
+			break;
 		}
 		walk_class = ClassDB::get_parent_class(walk_class);
 	}

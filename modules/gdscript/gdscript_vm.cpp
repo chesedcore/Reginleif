@@ -2286,12 +2286,14 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				Variant::Type base_type = base->get_type();
 
 				GDScriptFunction* native_impl_function = nullptr;
-				if (base_type != Variant::OBJECT && !Variant::has_builtin_method(base_type, *methodname) && GDScriptLanguage::get_singleton()->has_native_impl_methods(base_type)) {
+				if (base_type != Variant::OBJECT && !Variant::has_builtin_method(base_type, *methodname)) {
+					GDScriptCache::ensure_global_impls_scanned();
 					native_impl_function = GDScriptLanguage::get_singleton()->get_native_impl_method(base_type, *methodname);
 				} else if (base_type == Variant::OBJECT) {
 					bool was_freed = false;
 					Object* obj = base->get_validated_object_with_check(was_freed);
 					if (obj != nullptr && !was_freed && !ClassDB::has_method(obj->get_class_name(), *methodname, false)) {
+						GDScriptCache::ensure_global_impls_scanned();
 						///check whether some `impl for native` up the inheritance chain provides it...
 						///the walk itself is memoised per (class, method), so repeated calls don't rewalk the entire fucking
 						///ClassDB::get_parent_class type tree every time you need to peek into an impl method 

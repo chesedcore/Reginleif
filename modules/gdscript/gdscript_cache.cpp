@@ -304,6 +304,7 @@ static void _scan_trait_scripts_in_dir(const String& p_dir) {
 						GDScriptCache::add_global_trait(trait->identifier->name, script_path);
 					}
 				}
+			} else {
 			}
 		}
 		file_name = dir->get_next();
@@ -441,9 +442,13 @@ bool GDScriptCache::has_global_impl_method_claim(const StringName& p_target_type
 }
 
 void GDScriptCache::ensure_global_impls_scanned() {
+	if (singleton->global_impls_project_scanned.is_set()) {
+		return;
+	}
+
 	{
 		MutexLock lock(singleton->mutex);
-		if (singleton->global_impls_project_scanned || singleton->global_impls_project_scanning) {
+		if (singleton->global_impls_project_scanned.is_set() || singleton->global_impls_project_scanning) {
 			return;
 		}
 		singleton->global_impls_project_scanning = true;
@@ -461,11 +466,11 @@ void GDScriptCache::ensure_global_impls_scanned() {
 
 	for (const String& path : trait_paths) {
 		Error err = OK;
-		get_full_script(path, err);
+		Ref<GDScript> script = get_full_script(path, err);
 	}
 
 	MutexLock lock(singleton->mutex);
-	singleton->global_impls_project_scanned = true;
+	singleton->global_impls_project_scanned.set();
 	singleton->global_impls_project_scanning = false;
 }
 
@@ -804,7 +809,7 @@ void GDScriptCache::clear() {
 	singleton->global_traits.clear();
 	singleton->global_traits_project_scanned = false;
 	singleton->global_impls.clear();
-	singleton->global_impls_project_scanned = false;
+	singleton->global_impls_project_scanned.clear();
 	singleton->global_impls_project_scanning = false;
 }
 
