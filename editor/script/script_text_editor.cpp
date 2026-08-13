@@ -1684,11 +1684,7 @@ void ScriptTextEditor::shortcut_input(const Ref<InputEvent> &p_event) {
 			return;
 		}
 #endif
-		EditorContextMenuPlugin::OptionsData context_data;
-		context_data["code_edit"] = code_editor->get_text_editor();
-		context_data["file_path"] = get_edited_resource()->get_path();
-
-		EditorContextMenuPluginManager::get_singleton()->invoke_callback(custom_callback, context_data);
+		EditorContextMenuPluginManager::get_singleton()->invoke_callback(custom_callback, _get_context_data());
 		accept_event();
 	}
 }
@@ -1789,7 +1785,7 @@ bool ScriptTextEditor::_edit_option(int p_op) {
 				// Auto indent all lines that have a caret or selection on it.
 				Vector<Point2i> line_ranges = tx->get_line_ranges_from_carets();
 				for (Point2i line_range : line_ranges) {
-					scr->get_language()->auto_indent_code(text, line_range.x, line_range.y);
+					scr->get_language()->get_editor_language()->format_code(text, line_range.x, line_range.y);
 					if (line_range.x < begin) {
 						begin = line_range.x;
 					}
@@ -1801,7 +1797,7 @@ bool ScriptTextEditor::_edit_option(int p_op) {
 				// Auto indent entire text.
 				begin = 0;
 				end = tx->get_line_count() - 1;
-				scr->get_language()->auto_indent_code(text, begin, end);
+				scr->get_language()->get_editor_language()->format_code(text, begin, end);
 			}
 
 			// Apply auto indented code.
@@ -2532,12 +2528,7 @@ void ScriptTextEditor::_make_ste_context_menu(bool p_selection, bool p_color, bo
 	}
 
 	if (EditorContextMenuPluginManager::get_singleton()->has_plugins_for_slot(EditorContextMenuPlugin::CONTEXT_SLOT_SCRIPT_EDITOR_CODE)) {
-		EditorContextMenuPlugin::OptionsData context_data;
-		context_data["code_edit"] = code_editor->get_text_editor();
-		context_data["file_path"] = get_edited_resource()->get_path();
-
-		EditorContextMenuPluginManager::get_singleton()->add_options_from_plugins(context_menu, EditorContextMenuPlugin::CONTEXT_SLOT_SCRIPT_EDITOR_CODE, context_data);
-
+		EditorContextMenuPluginManager::get_singleton()->add_options_from_plugins(context_menu, EditorContextMenuPlugin::CONTEXT_SLOT_SCRIPT_EDITOR_CODE, _get_context_data());
 #ifndef DISABLE_DEPRECATED
 		const PackedStringArray paths = { String(code_editor->get_text_editor()->get_path()) };
 		Ref<Script> edited_script = get_edited_resource();
@@ -2546,6 +2537,13 @@ void ScriptTextEditor::_make_ste_context_menu(bool p_selection, bool p_color, bo
 	}
 
 	_show_context_menu(p_position);
+}
+
+Dictionary ScriptTextEditor::_get_context_data() const {
+	EditorContextMenuPlugin::OptionsData context_data;
+	context_data["code_edit"] = code_editor->get_text_editor();
+	context_data["file_path"] = get_edited_resource()->get_path();
+	return context_data;
 }
 
 void ScriptTextEditor::register_editor() {
