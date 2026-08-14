@@ -112,14 +112,7 @@ struct [[nodiscard]] Color {
 		return 0.2126f * r + 0.7152f * g + 0.0722f * b;
 	}
 
-	_FORCE_INLINE_ Color lerp(const Color &p_to, float p_weight) const {
-		Color res = *this;
-		res.r = Math::lerp(res.r, p_to.r, p_weight);
-		res.g = Math::lerp(res.g, p_to.g, p_weight);
-		res.b = Math::lerp(res.b, p_to.b, p_weight);
-		res.a = Math::lerp(res.a, p_to.a, p_weight);
-		return res;
-	}
+	Color lerp(const Color &p_to, float p_weight) const;
 
 	_FORCE_INLINE_ Color darkened(float p_amount) const {
 		Color res = *this;

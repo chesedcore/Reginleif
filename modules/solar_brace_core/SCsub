@@ -1,5 +1,5 @@
+# SCsub
 Import("env")
 
-env_sb = env.Clone()
-
-env_sb.add_source_files(env.modules_sources, "*.cpp")
+# Add source files directly to the main env
+env.add_source_files(env.modules_sources, "*.cpp")

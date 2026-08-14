@@ -26,5 +26,6 @@ def configure(env):
     env.Append(LIBPATH=[lib_dir])
     if env["platform"] == "windows":
         env.Append(LINKFLAGS=[f"/LIBPATH:{lib_dir}", "solar_brace.lib"])
+        env.Append(LINKFLAGS=["/FORCE:MULTIPLE"])
     else:
         env.Append(LIBS=["solar_brace"])

@@ -530,3 +530,13 @@ float Color::get_ok_hsl_l() const {
 	}
 	return CLAMP(ok_hsl.l, 0.0f, 1.0f);
 }
+
+
+#include "modules\solar_brace_core\color_bridge.h"
+
+Color Color::lerp(const Color& p_to, float p_weight) const {
+	Colour from{r, g, b, a};
+	Colour to{p_to.r, p_to.g, p_to.b, p_to.a};
+	Colour out = color_lerp(from, to, p_weight);
+	return Color(out.r, out.g, out.b, out.a);
+}
