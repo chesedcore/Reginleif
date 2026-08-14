@@ -396,3 +396,4 @@ $RECYCLE.BIN/
 *.msp
 *.lnk
 *.generated.props
+/modules/solar_brace_core/solar_brace/target
