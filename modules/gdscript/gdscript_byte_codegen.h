@@ -115,6 +115,7 @@ class GDScriptByteCodeGenerator : public GDScriptCodeGenerator {
 	RBMap<GDScriptUtilityFunctions::FunctionPtr, int> gds_utilities_map;
 	RBMap<MethodBind *, int> method_bind_map;
 	RBMap<GDScriptFunction *, int> lambdas_map;
+	RBMap<GDScriptFunction*, int> native_impl_call_function_map;
 
 #ifdef DEBUG_ENABLED
 	// Keep method and property names for pointer and validated operations.
@@ -337,6 +338,15 @@ class GDScriptByteCodeGenerator : public GDScriptCodeGenerator {
 		return pos;
 	}
 
+	int get_native_impl_call_function_pos(GDScriptFunction* p_function) {
+		if (native_impl_call_function_map.has(p_function)) {
+			return native_impl_call_function_map[p_function];
+		}
+		int pos = native_impl_call_function_map.size();
+		native_impl_call_function_map[p_function] = pos;
+		return pos;
+	}
+
 	int get_lambda_function_pos(GDScriptFunction *p_lambda_function) {
 		if (lambdas_map.has(p_lambda_function)) {
 			return lambdas_map[p_lambda_function];
@@ -440,8 +450,12 @@ class GDScriptByteCodeGenerator : public GDScriptCodeGenerator {
 		opcodes.push_back(get_method_bind_pos(p_method));
 	}
 
-	void append(GDScriptFunction *p_lambda_function) {
+	void append_lambda(GDScriptFunction *p_lambda_function) {
 		opcodes.push_back(get_lambda_function_pos(p_lambda_function));
+	}
+
+	void append_native_impl_call_function(GDScriptFunction* p_function) {
+		opcodes.push_back(get_native_impl_call_function_pos(p_function));
 	}
 
 	void patch_jump(int p_address) {
@@ -519,6 +533,7 @@ public:
 	virtual void write_call_native_static_validated(const Address &p_target, MethodBind *p_method, const Vector<Address> &p_arguments) override;
 	virtual void write_call_method_bind(const Address &p_target, const Address &p_base, MethodBind *p_method, const Vector<Address> &p_arguments) override;
 	virtual void write_call_method_bind_validated(const Address &p_target, const Address &p_base, MethodBind *p_method, const Vector<Address> &p_arguments) override;
+	virtual void write_call_native_impl_cached(const Address& p_target, const Address& p_base, GDScriptFunction* p_function, const Vector<Address>& p_arguments) override;
 	virtual void write_call_self(const Address &p_target, const StringName &p_function_name, const Vector<Address> &p_arguments) override;
 	virtual void write_call_self_async(const Address &p_target, const StringName &p_function_name, const Vector<Address> &p_arguments) override;
 	virtual void write_lambda(const Address &p_target, GDScriptFunction *p_function, const Vector<Address> &p_captures, bool p_use_self) override;

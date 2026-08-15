@@ -832,7 +832,7 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 					text += DADDR(1 + i);
 				}
 				text += ")";
-				incr = 4 + argc;
+				incr = 5 + argc;
 			} break;
 
 			case OPCODE_CALL_NATIVE_STATIC_VALIDATED_NO_RETURN: {
@@ -892,6 +892,31 @@ void GDScriptFunction::disassemble(const Vector<String> &p_code_lines) const {
 				text += method->get_name();
 				text += "(";
 
+				for (int i = 0; i < argc; i++) {
+					if (i > 0) {
+						text += ", ";
+					}
+					text += DADDR(1 + i);
+				}
+				text += ")";
+
+				incr = 5 + argc;
+			} break;
+
+			case OPCODE_CALL_NATIVE_IMPL_CACHED:
+			case OPCODE_CALL_NATIVE_IMPL_CACHED_RET: {
+				bool call_ret = _code_ptr[ip] == OPCODE_CALL_NATIVE_IMPL_CACHED_RET;
+				int instr_var_args = _code_ptr[++ip];
+				int argc = _code_ptr[ip + 1 + instr_var_args];
+				GDScriptFunction* function = _native_impl_call_functions_ptr[_code_ptr[ip + 2 + instr_var_args]];
+
+				text += call_ret ? "call native-impl cached (return) " : "call native-impl cached (no return) ";
+				if (call_ret) {
+					text += DADDR(2 + argc) + " = ";
+				}
+				text += DADDR(1 + argc) + ".";
+				text += function != nullptr ? String(function->get_name()) : String("<null>");
+				text += "(";
 				for (int i = 0; i < argc; i++) {
 					if (i > 0) {
 						text += ", ";
