@@ -30,12 +30,11 @@
 
 #include "gdscript_compiler.h"
 
-#include "gdscript_trait_analyzer.h"
-
 #include "gdscript.h"
 #include "gdscript_analyzer.h"
 #include "gdscript_byte_codegen.h"
 #include "gdscript_cache.h"
+#include "gdscript_trait_analyzer.h"
 #include "gdscript_utility_functions.h"
 
 #include "core/config/engine.h"
@@ -739,16 +738,26 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 											gen->write_call_method_bind(result, base, method, arguments);
 										}
 									} else {
-										gen->write_call(result, base, call->function_name, arguments);
+										GDScriptCache::ensure_global_impls_scanned();
+										if (GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->find_native_class_impl_method_cached(class_name, call->function_name)) {
+											gen->write_call_native_impl_cached(result, base, impl_function, arguments);
+										} else {
+											gen->write_call(result, base, call->function_name, arguments);
+										}
 									}
 								} else if (base.type.kind == GDScriptDataType::BUILTIN) {
 									if (Variant::has_builtin_method(base.type.builtin_type, call->function_name)) {
 										gen->write_call_builtin_type(result, base, base.type.builtin_type, call->function_name, arguments);
 									} else {
-										///not a real Variant builtin method, likely an `impl` method on a builtin type
-										///fallback to dynamic dispatch, which knows how to fuck with native impl methods
-										///via GDScriptLanguage::get_native_impl_method() at runtime
-										gen->write_call(result, base, call->function_name, arguments);
+										GDScriptCache::ensure_global_impls_scanned();
+										if (GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->get_native_impl_method(base.type.builtin_type, call->function_name)) {
+											gen->write_call_native_impl_cached(result, base, impl_function, arguments);
+										} else {
+											///not a real Variant builtin method, likely an `impl` method on a builtin type.
+											///fallback to dynamic dispatch, which knows how to fuck with native impl methods
+											///via GDScriptLanguage::get_native_impl_method() at runtime
+											gen->write_call(result, base, call->function_name, arguments);
+										}
 									}
 								} else {
 									gen->write_call(result, base, call->function_name, arguments);
@@ -2941,7 +2950,7 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 						}
 						prop_info.usage |= resolved_type_info.usage;
 					}
-					
+
 				} else {
 					// Enum hint doesn't really belong to the data type information, so we don't want to add it to
 					// `GDScriptParser::DataType::to_property_info()`. However, we still want to add this metadata
