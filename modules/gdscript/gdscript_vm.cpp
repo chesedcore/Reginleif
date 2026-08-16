@@ -31,8 +31,8 @@
 #include "gdscript.h"
 #include "gdscript_cache.h"
 #include "gdscript_function.h"
-#include "gdscript_lambda_callable.h"
 #include "gdscript_impl_callable.h"
+#include "gdscript_lambda_callable.h"
 
 #include "core/object/class_db.h"
 #include "core/os/os.h"
@@ -426,6 +426,9 @@ void (*type_init_function_table[])(Variant *) = {
 		&&OPCODE_CALL_NATIVE_STATIC_VALIDATED_NO_RETURN, \
 		&&OPCODE_CALL_METHOD_BIND_VALIDATED_RETURN, \
 		&&OPCODE_CALL_METHOD_BIND_VALIDATED_NO_RETURN, \
+		&&OPCODE_CALL_NATIVE_IMPL_CACHED, \
+		&&OPCODE_CALL_NATIVE_IMPL_CACHED_RET, \
+		&&OPCODE_GET_NAMED_ENUM_IMPL_CACHED, \
 		&&OPCODE_AWAIT, \
 		&&OPCODE_AWAIT_RESUME, \
 		&&OPCODE_CREATE_LAMBDA, \
@@ -1500,6 +1503,28 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 			}
 			DISPATCH_OPCODE;
 
+			OPCODE(OPCODE_GET_NAMED_ENUM_IMPL_CACHED) {
+				CHECK_SPACE(4);
+
+				GET_VARIANT_PTR(src, 0);
+				GET_VARIANT_PTR(dst, 1);
+
+				int function_idx = _code_ptr[ip + 3];
+				GD_ERR_BREAK(function_idx < 0 || function_idx >= _native_impl_call_functions_count);
+				GDScriptFunction* impl_function = _native_impl_call_functions_ptr[function_idx];
+#ifdef DEBUG_ENABLED
+				if (impl_function == nullptr) {
+					err_text = "[Reginleif] compiler bug!!, cached enum-impl GET_NAMED function is null?!";
+					OPCODE_BREAK;
+				}
+#endif
+				GDScriptImplCallable* callable = memnew(GDScriptImplCallable(*src, impl_function));
+				*dst = Callable(callable);
+
+				ip += 4;
+			}
+			DISPATCH_OPCODE;
+
 			OPCODE(OPCODE_SET_MEMBER) {
 				CHECK_SPACE(3);
 				GET_VARIANT_PTR(src, 0);
@@ -2311,7 +2336,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 						///uses to prepend captures ahead of the real call arguments
 						///i love being unoriginal
 						const int total_argc = argc + 1;
-						const Variant** impl_argptrs = (const Variant**)alloca(sizeof(Variant*)* total_argc);
+						const Variant* small_impl_argptrs[5];
+						const Variant** impl_argptrs = total_argc <= 5 ? small_impl_argptrs : (const Variant** )alloca(sizeof(Variant*)* total_argc);
 						impl_argptrs[0] = base;
 						for (int i = 0; i < argc; i++) {
 							impl_argptrs[i + 1] = argptrs[i];
@@ -2356,7 +2382,8 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				} else {
 					if (native_impl_function != nullptr) {
 						const int total_argc = argc + 1;
-						const Variant** impl_argptrs = (const Variant**)alloca(sizeof(Variant*)* total_argc);
+						const Variant* small_impl_argptrs[5];
+						const Variant** impl_argptrs = total_argc <= 5 ? small_impl_argptrs : (const Variant**) alloca(sizeof(Variant*)* total_argc);
 						impl_argptrs[0] = base;
 						for (int i = 0; i < argc; i++) {
 							impl_argptrs[i + 1] = argptrs[i];
@@ -2420,6 +2447,58 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				}
 #endif // DEBUG_ENABLED
 
+				ip += 3;
+			}
+			DISPATCH_OPCODE;
+
+			OPCODE(OPCODE_CALL_NATIVE_IMPL_CACHED)
+			OPCODE(OPCODE_CALL_NATIVE_IMPL_CACHED_RET) {
+				bool call_ret = (_code_ptr[ip]) == OPCODE_CALL_NATIVE_IMPL_CACHED_RET;
+				LOAD_INSTRUCTION_ARGS
+				CHECK_SPACE(3 + instr_arg_count);
+
+				ip += instr_arg_count;
+
+				int argc = _code_ptr[ip + 1];
+				GD_ERR_BREAK(argc < 0);
+				GD_ERR_BREAK(_code_ptr[ip + 2] < 0 || _code_ptr[ip + 2] >= _native_impl_call_functions_count);
+				GDScriptFunction* native_impl_function = _native_impl_call_functions_ptr[_code_ptr[ip + 2]];
+#ifdef DEBUG_ENABLED
+				if (native_impl_function == nullptr) {
+					err_text = "[Reginleif] compiler bug!!, cached native impl function is null?!";
+					OPCODE_BREAK;
+				}
+#endif
+
+				GET_INSTRUCTION_ARG(base, argc);
+				Variant** argptrs = instruction_args;
+
+				const int total_argc = argc + 1;
+				const Variant* small_impl_argptrs[5];
+				const Variant** impl_argptrs = total_argc <= 5 ? small_impl_argptrs : (const Variant**) alloca(sizeof(Variant*)* total_argc);
+				impl_argptrs[0] = base;
+				for (int i = 0; i < argc; i++) {
+					impl_argptrs[i + 1] = argptrs[i];
+				}
+
+				Variant temp_ret;
+				Callable::CallError err;
+				if (call_ret) {
+					GET_INSTRUCTION_ARG(ret, argc + 1);
+					temp_ret = native_impl_function->call(nullptr, impl_argptrs, total_argc, err);
+					*ret = temp_ret;
+				} else {
+					temp_ret = native_impl_function->call(nullptr, impl_argptrs, total_argc, err);
+				}
+
+#ifdef DEBUG_ENABLED
+				if (err.error != Callable::CallError::CALL_OK) {
+					String methodstr = native_impl_function->get_name();
+					String basestr = _get_var_type(base);
+					err_text = _get_call_error("impl function '" + methodstr + "' in base '" + basestr + "'", impl_argptrs, total_argc, temp_ret, err);
+					OPCODE_BREAK;
+				}
+#endif
 				ip += 3;
 			}
 			DISPATCH_OPCODE;

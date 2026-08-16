@@ -407,6 +407,18 @@ GDScriptFunction *GDScriptByteCodeGenerator::write_end() {
 		function->_methods_count = 0;
 	}
 
+	if (native_impl_call_function_map.size()) {
+		function->native_impl_call_functions.resize(native_impl_call_function_map.size());
+		function->_native_impl_call_functions_ptr = function->native_impl_call_functions.ptrw();
+		function->_native_impl_call_functions_count = native_impl_call_function_map.size();
+		for (const KeyValue<GDScriptFunction*, int>& E : native_impl_call_function_map) {
+			function->native_impl_call_functions.write[E.value] = E.key;
+		}
+	} else {
+		function->_native_impl_call_functions_ptr = nullptr;
+		function->_native_impl_call_functions_count = 0;
+	}
+
 	if (lambdas_map.size()) {
 		function->lambdas.resize(lambdas_map.size());
 		function->_lambdas_ptr = function->lambdas.ptrw();
@@ -913,6 +925,14 @@ void GDScriptByteCodeGenerator::write_get_named(const Address &p_target, const S
 	append(p_name);
 }
 
+void GDScriptByteCodeGenerator::write_get_named_enum_impl_cached(const Address& p_target, const StringName& p_name, const Address& p_source, GDScriptFunction* p_function) {
+	DEV_ASSERT(p_function != nullptr);
+	append_opcode(GDScriptFunction::OPCODE_GET_NAMED_ENUM_IMPL_CACHED);
+	append(p_source);
+	append(p_target);
+	append_native_impl_call_function(p_function);
+}
+
 void GDScriptByteCodeGenerator::write_set_member(const Address &p_value, const StringName &p_name) {
 	append_opcode(GDScriptFunction::OPCODE_SET_MEMBER);
 	append(p_value);
@@ -1410,7 +1430,21 @@ void GDScriptByteCodeGenerator::write_call_method_bind_validated(const Address &
 	ct.cleanup();
 }
 
-void GDScriptByteCodeGenerator::write_call_self(const Address &p_target, const StringName &p_function_name, const Vector<Address> &p_arguments) {
+void GDScriptByteCodeGenerator::write_call_native_impl_cached(const Address& p_target, const Address& p_base, GDScriptFunction* p_function, const Vector<Address>& p_arguments) {
+	DEV_ASSERT(p_function != nullptr);
+	append_opcode_and_argcount(p_target.mode == Address::NIL ? GDScriptFunction::OPCODE_CALL_NATIVE_IMPL_CACHED : GDScriptFunction::OPCODE_CALL_NATIVE_IMPL_CACHED_RET, 2 + p_arguments.size());
+	for (int i = 0; i < p_arguments.size(); i++) {
+		append(p_arguments[i]);
+	}
+	append(p_base);
+	CallTarget ct = get_call_target(p_target);
+	append(ct.target);
+	append(p_arguments.size());
+	append_native_impl_call_function(p_function);
+	ct.cleanup();
+}
+
+void GDScriptByteCodeGenerator::write_call_self(const Address& p_target, const StringName& p_function_name, const Vector<Address>& p_arguments) {
 	if (p_target.mode == Address::NIL) {
 		append_opcode_and_argcount(GDScriptFunction::OPCODE_CALL, 2 + p_arguments.size());
 		for (int i = 0; i < p_arguments.size(); i++) {
@@ -1456,7 +1490,7 @@ void GDScriptByteCodeGenerator::write_lambda(const Address &p_target, GDScriptFu
 	CallTarget ct = get_call_target(p_target);
 	append(ct.target);
 	append(p_captures.size());
-	append(p_function);
+	append_lambda(p_function);
 	ct.cleanup();
 }
 

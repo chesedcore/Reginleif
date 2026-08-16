@@ -30,12 +30,11 @@
 
 #include "gdscript_compiler.h"
 
-#include "gdscript_trait_analyzer.h"
-
 #include "gdscript.h"
 #include "gdscript_analyzer.h"
 #include "gdscript_byte_codegen.h"
 #include "gdscript_cache.h"
+#include "gdscript_trait_analyzer.h"
 #include "gdscript_utility_functions.h"
 
 #include "core/config/engine.h"
@@ -204,6 +203,7 @@ GDScriptDataType GDScriptCompiler::_gdtype_from_datatype(const GDScriptParser::D
 
 			result.kind = GDScriptDataType::BUILTIN;
 			result.builtin_type = p_datatype.builtin_type;
+			result.enum_native_type = p_datatype.native_type;
 			break;
 		case GDScriptParser::DataType::RESOLVING:
 		case GDScriptParser::DataType::UNRESOLVED: {
@@ -739,16 +739,38 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 											gen->write_call_method_bind(result, base, method, arguments);
 										}
 									} else {
-										gen->write_call(result, base, call->function_name, arguments);
+										GDScriptCache::ensure_global_impls_scanned();
+										if (GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->find_native_class_impl_method_cached(class_name, call->function_name)) {
+											gen->write_call_native_impl_cached(result, base, impl_function, arguments);
+										} else {
+											gen->write_call(result, base, call->function_name, arguments);
+										}
 									}
 								} else if (base.type.kind == GDScriptDataType::BUILTIN) {
+									GDScriptDataType base_enum_type = base.type;
+									if (base_enum_type.enum_native_type == StringName() && subscript->base->type_constraint.kind == GDScriptParser::DataType::ENUM) {
+										base_enum_type = _gdtype_from_datatype(subscript->base->type_constraint, codegen.script);
+									}
+
 									if (Variant::has_builtin_method(base.type.builtin_type, call->function_name)) {
 										gen->write_call_builtin_type(result, base, base.type.builtin_type, call->function_name, arguments);
+									} else if (base_enum_type.enum_native_type != StringName()) {
+										GDScriptCache::ensure_global_impls_scanned();
+										if (GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->get_enum_impl_method(base_enum_type.enum_native_type, call->function_name)) {
+											gen->write_call_native_impl_cached(result, base, impl_function, arguments);
+										} else {
+											gen->write_call(result, base, call->function_name, arguments);
+										}
 									} else {
-										///not a real Variant builtin method, likely an `impl` method on a builtin type
-										///fallback to dynamic dispatch, which knows how to fuck with native impl methods
-										///via GDScriptLanguage::get_native_impl_method() at runtime
-										gen->write_call(result, base, call->function_name, arguments);
+										GDScriptCache::ensure_global_impls_scanned();
+										if (GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->get_native_impl_method(base.type.builtin_type, call->function_name)) {
+											gen->write_call_native_impl_cached(result, base, impl_function, arguments);
+										} else {
+											///not a real Variant builtin method, likely an `impl` method on a builtin type.
+											///fallback to dynamic dispatch, which knows how to fuck with native impl methods
+											///via GDScriptLanguage::get_singleton()->get_native_impl_method() at runtime
+											gen->write_call(result, base, call->function_name, arguments);
+										}
 									}
 								} else {
 									gen->write_call(result, base, call->function_name, arguments);
@@ -868,7 +890,31 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 			}
 
 			if (named) {
-				gen->write_get_named(result, name, base);
+				bool wrote_enum_impl_cached = false;
+
+				///constants lose their enum type info when compiled to bare values, so uhh
+				///fish the enum type directly from the subscript base lmfao :sob:
+
+				GDScriptDataType base_enum_type = base.type;
+				if (base_enum_type.enum_native_type == StringName() && subscript->base->type_constraint.kind == GDScriptParser::DataType::ENUM) {
+					base_enum_type = _gdtype_from_datatype(subscript->base->type_constraint, codegen.script);
+				}
+				if (base_enum_type.kind == GDScriptDataType::BUILTIN && base_enum_type.enum_native_type != StringName()) {
+
+					///bare `x.method_name` (no call, but instead callable access) on an enum 
+					///runtime can't disambiguate which enum a plain int came from, 
+					///so resolve the impl function now, at compile time
+					///while we still have the enum's identity, same shit as above
+
+					GDScriptCache::ensure_global_impls_scanned();
+					if (GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->get_enum_impl_method(base_enum_type.enum_native_type, name)) {
+						gen->write_get_named_enum_impl_cached(result, name, base, impl_function);
+						wrote_enum_impl_cached = true;
+					}
+				}
+				if (!wrote_enum_impl_cached) {
+					gen->write_get_named(result, name, base);
+				}
 			} else {
 				gen->write_get(result, index, base);
 			}
@@ -2941,7 +2987,7 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 						}
 						prop_info.usage |= resolved_type_info.usage;
 					}
-					
+
 				} else {
 					// Enum hint doesn't really belong to the data type information, so we don't want to add it to
 					// `GDScriptParser::DataType::to_property_info()`. However, we still want to add this metadata
@@ -3109,8 +3155,9 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 		const GDScriptParser::DataType& impl_target = impl_node->resolved_gd_impl->impl_target_type;
 
 		bool is_builtin_target = impl_target.kind == GDScriptParser::DataType::BUILTIN;
+		bool is_enum_target = impl_target.kind == GDScriptParser::DataType::ENUM;
 		bool is_native_class_target = impl_target.kind == GDScriptParser::DataType::NATIVE;
-		bool is_native_impl_target = is_builtin_target || is_native_class_target;
+		bool is_native_impl_target = is_builtin_target || is_enum_target || is_native_class_target;
 		HashSet<StringName> explicit_impl_methods;
 		for (const GDScriptParser::FunctionNode* impl_method_node : impl_node->methods) {
 			if (impl_method_node == nullptr || impl_method_node->identifier == nullptr) {
@@ -3131,6 +3178,11 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 				StringName mangled_key = StringName("@impl:builtin:" + itos((int)impl_target.builtin_type) + "::" + String(method_name));
 				p_script->member_functions[mangled_key] = impl_function;
 				GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, method_name, impl_function);
+			} else if (is_enum_target) {
+				impl_function->set_is_native_impl_method(true);
+				StringName mangled_key = StringName("@impl:enum:" + String(impl_target.native_type) + "::" + String(method_name));
+				p_script->member_functions[mangled_key] = impl_function;
+				GDScriptLanguage::get_singleton()->register_enum_impl_method(impl_target.native_type, method_name, impl_function);
 			} else if (is_native_class_target) {
 				impl_function->set_is_native_impl_method(true);
 				StringName mangled_key = StringName("@impl:native:" + String(impl_target.native_type) + "::" + String(method_name));
@@ -3433,9 +3485,10 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 
 				const GDScriptParser::DataType& impl_target = impl_node->resolved_gd_impl->impl_target_type;
 				bool is_builtin_target = impl_target.kind == GDScriptParser::DataType::BUILTIN;
+				bool is_enum_target = impl_target.kind == GDScriptParser::DataType::ENUM;
 				bool is_native_class_target = impl_target.kind == GDScriptParser::DataType::NATIVE;
 				bool is_script_class_target = impl_target.kind == GDScriptParser::DataType::CLASS && impl_target.class_type != nullptr;
-				if (!is_builtin_target && !is_native_class_target && !is_script_class_target) {
+				if (!is_builtin_target && !is_enum_target && !is_native_class_target && !is_script_class_target) {
 					continue;
 				}
 
@@ -3452,6 +3505,8 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 					String target_key_str;
 					if (is_builtin_target) {
 						target_key_str = "builtin:" + itos((int)impl_target.builtin_type);
+					} else if (is_enum_target) {
+						target_key_str = "enum:" + String(impl_target.native_type);
 					} else if (is_native_class_target) {
 						target_key_str = "native:" + String(impl_target.native_type);
 					} else {
@@ -3462,6 +3517,8 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 
 					if (is_builtin_target) {
 						GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, p_method_name, impl_function);
+					} else if (is_enum_target) {
+						GDScriptLanguage::get_singleton()->register_enum_impl_method(impl_target.native_type, p_method_name, impl_function);
 					} else if (is_native_class_target) {
 						GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, p_method_name, impl_function);
 					} else {

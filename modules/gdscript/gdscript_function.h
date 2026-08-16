@@ -59,6 +59,7 @@ public:
 
 	Variant::Type builtin_type = Variant::NIL;
 	StringName native_type;
+	StringName enum_native_type;
 	Script *script_type = nullptr;
 	Ref<Script> script_type_ref;
 
@@ -123,6 +124,7 @@ public:
 		return kind == p_other.kind &&
 				builtin_type == p_other.builtin_type &&
 				native_type == p_other.native_type &&
+				enum_native_type == p_other.enum_native_type &&
 				(script_type == p_other.script_type || script_type_ref == p_other.script_type_ref) &&
 				container_element_types == p_other.container_element_types;
 	}
@@ -135,6 +137,7 @@ public:
 		kind = p_other.kind;
 		builtin_type = p_other.builtin_type;
 		native_type = p_other.native_type;
+		enum_native_type = p_other.enum_native_type;
 		script_type = p_other.script_type;
 		script_type_ref = p_other.script_type_ref;
 		container_element_types = p_other.container_element_types;
@@ -206,6 +209,9 @@ public:
 		OPCODE_CALL_NATIVE_STATIC_VALIDATED_NO_RETURN,
 		OPCODE_CALL_METHOD_BIND_VALIDATED_RETURN,
 		OPCODE_CALL_METHOD_BIND_VALIDATED_NO_RETURN,
+		OPCODE_CALL_NATIVE_IMPL_CACHED,
+		OPCODE_CALL_NATIVE_IMPL_CACHED_RET,
+		OPCODE_GET_NAMED_ENUM_IMPL_CACHED,
 		OPCODE_AWAIT,
 		OPCODE_AWAIT_RESUME,
 		OPCODE_CREATE_LAMBDA,
@@ -404,6 +410,7 @@ private:
 	Vector<GDScriptUtilityFunctions::FunctionPtr> gds_utilities;
 	Vector<MethodBind *> methods;
 	Vector<GDScriptFunction *> lambdas;
+	Vector<GDScriptFunction*> native_impl_call_functions;
 
 	int _code_size = 0;
 	int _default_arg_count = 0;
@@ -421,6 +428,7 @@ private:
 	int _utilities_count = 0;
 	int _gds_utilities_count = 0;
 	int _methods_count = 0;
+	int _native_impl_call_functions_count = 0;
 	int _lambdas_count = 0;
 
 	int *_code_ptr = nullptr;
@@ -440,6 +448,7 @@ private:
 	const GDScriptUtilityFunctions::FunctionPtr *_gds_utilities_ptr = nullptr;
 	MethodBind **_methods_ptr = nullptr;
 	GDScriptFunction **_lambdas_ptr = nullptr;
+	GDScriptFunction** _native_impl_call_functions_ptr = nullptr;
 
 #ifdef DEBUG_ENABLED
 	CharString func_cname;

@@ -462,12 +462,16 @@ bool GDScriptTraitAnalyzer::check_orphan_rule(const Ref<GDScriptTrait>& p_trait,
 
 	///we don't own the trait atp, so we can only impl it if we own the target
 	///BUILTIN/NATIVE/SCRIPT targets can never be owned by us
-	///only a CLASS declared in this file counts for ownership by us
-	if (p_target_type.kind != GDScriptParser::DataType::CLASS) {
-		return false;
+	///CLASS declared in this file, or an ENUM declared inside a class we own, counts
+	if (p_target_type.kind == GDScriptParser::DataType::CLASS) {
+		return p_target_type.class_type != nullptr && parser->has_class(p_target_type.class_type);
 	}
 
-	return p_target_type.class_type != nullptr && parser->has_class(p_target_type.class_type);
+	if (p_target_type.kind == GDScriptParser::DataType::ENUM) {
+		return p_target_type.class_type != nullptr && parser->has_class(p_target_type.class_type);
+	}
+
+	return false;
 }
 
 Ref<GDScriptTrait> GDScriptTraitAnalyzer::get_local_trait(const StringName& p_name) const {
@@ -531,6 +535,10 @@ bool GDScriptTraitAnalyzer::_type_is_or_inherits(const GDScriptParser::DataType&
 		return p_type.kind == GDScriptParser::DataType::BUILTIN && p_type.builtin_type == p_target_type.builtin_type;
 	}
 
+	if (p_target_type.kind == GDScriptParser::DataType::ENUM) {
+		return p_type.kind == GDScriptParser::DataType::ENUM && p_type.native_type == p_target_type.native_type;
+	}
+
 	if (p_target_type.kind == GDScriptParser::DataType::CLASS) {
 		///walk up the CLASS inheritance chain looking for p_target_type's class...
 		GDScriptParser::ClassNode* current = p_type.kind == GDScriptParser::DataType::CLASS ? p_type.class_type : nullptr;
@@ -581,6 +589,9 @@ StringName GDScriptTraitAnalyzer::_impl_target_key(const GDScriptParser::DataTyp
 	}
 	if (p_type.kind == GDScriptParser::DataType::CLASS && p_type.class_type != nullptr) {
 		return StringName("class::" + p_type.class_type->fqcn);
+	}
+	if (p_type.kind == GDScriptParser::DataType::ENUM) {
+		return StringName("enum::" + String(p_type.native_type));
 	}
 	return StringName(); ///not a type we do cross-file impl tracking for
 }

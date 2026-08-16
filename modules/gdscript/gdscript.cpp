@@ -2969,6 +2969,47 @@ GDScriptFunction* GDScriptLanguage::get_native_impl_method(Variant::Type p_type,
 	return M ? M->value : nullptr;
 }
 
+void GDScriptLanguage::register_enum_impl_method(const StringName& p_enum_key, const StringName& p_method_name, GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	enum_impl_methods[p_enum_key][p_method_name] = p_function;
+}
+
+void GDScriptLanguage::unregister_enum_impl_methods_for_function(GDScriptFunction* p_function) {
+	MutexLock lock(mutex);
+	for (HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::Iterator E = enum_impl_methods.begin(); E;) {
+		HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::Iterator next = E;
+		++next;
+		HashMap<StringName, GDScriptFunction*>& methods = E->value;
+		for (HashMap<StringName, GDScriptFunction*>::Iterator M = methods.begin(); M;) {
+			HashMap<StringName, GDScriptFunction*>::Iterator next_m = M;
+			++next_m;
+			if (M->value == p_function) {
+				methods.remove(M);
+			}
+			M = next_m;
+		}
+		if (methods.is_empty()) {
+			enum_impl_methods.remove(E);
+		}
+		E = next;
+	}
+}
+
+bool GDScriptLanguage::has_enum_impl_methods(const StringName& p_enum_key) const {
+	MutexLock lock(mutex);
+	return enum_impl_methods.has(p_enum_key);
+}
+
+GDScriptFunction* GDScriptLanguage::get_enum_impl_method(const StringName& p_enum_key, const StringName& p_method_name) const {
+	MutexLock lock(mutex);
+	HashMap<StringName, HashMap<StringName, GDScriptFunction*>>::ConstIterator E = enum_impl_methods.find(p_enum_key);
+	if (!E) {
+		return nullptr;
+	}
+	HashMap<StringName, GDScriptFunction*>::ConstIterator M = E->value.find(p_method_name);
+	return M ? M->value : nullptr;
+}
+
 void GDScriptLanguage::register_native_class_impl_method(const StringName& p_native_class, const StringName& p_method_name, GDScriptFunction* p_function) {
 	MutexLock lock(mutex);
 	native_class_impl_methods[p_native_class][p_method_name] = p_function;

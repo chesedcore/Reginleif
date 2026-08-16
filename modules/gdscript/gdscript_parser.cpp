@@ -2230,7 +2230,6 @@ GDScriptParser::SuiteNode *GDScriptParser::parse_suite(const String &p_context, 
 		///than "{", we get a real INDENT/DEDENT pair queued up around it...
 		///gotta track if we actually saw that INDENT come through, so we know whether we OWE a DEDENT
 		///back before we leave
-		bool opened_implicit_indent = false;
 		int depth = 0;
 
 		int error_count = 0;
@@ -2238,18 +2237,11 @@ GDScriptParser::SuiteNode *GDScriptParser::parse_suite(const String &p_context, 
 
 			while (true) {
 				if (match(GDScriptTokenizer::Token::INDENT)) {
-					if (!opened_implicit_indent) {
-						opened_implicit_indent = true;
-					}
 					depth += 1;
 					continue;
 				}
-				if (match(GDScriptTokenizer::Token::DEDENT)) {
-					
+				if (depth > 0 && match(GDScriptTokenizer::Token::DEDENT)) {
 					depth -= 1;
-					if (depth == 0) {
-        				opened_implicit_indent = false; /// only reset when we've closed ALL indents
-    				}
 					continue;
 				}
 				if (match(GDScriptTokenizer::Token::NEWLINE)) {
@@ -2303,21 +2295,13 @@ GDScriptParser::SuiteNode *GDScriptParser::parse_suite(const String &p_context, 
 		complete_extents(suite);
 		consume(GDScriptTokenizer::Token::BRACE_CLOSE, vformat(R"([Reginleif] Expected "}" at end of %s.)", p_context));
 
-		///we already accounted for any INDENT/DEDENT pair belonging to THIS suite's body while
-		///gobbling inside the loop above. so by the time we're here, opened_implicit_indent tells us if
-		///we still owe a DEDENT, or did it already get eaten before the "}"
-		///so an outer indent-based block (like a property's "get:"/"set:" wrapper) 
-		///still gets its own DEDENT intact when this suite is done
 		match(GDScriptTokenizer::Token::NEWLINE);
-		if (opened_implicit_indent) {
-			while (depth > 0) {
-				if (!match(GDScriptTokenizer::Token::DEDENT)) {
-					///this shouldn't happen... i hope?
-					push_error("[Reginleif] Expected DEDENT to close implicit indent?! please report!", suite);
-					break;
-				}
-				depth -= 1;
+		while (depth > 0) {
+			if (!match(GDScriptTokenizer::Token::DEDENT)) {
+				push_error(vformat(R"([Reginleif] Unexpected "%s" while closing %s. Note: check your script for a missing or extra "{" or "}".)", current.get_name(), p_context), suite);
+				break;
 			}
+			depth -= 1;
 		}
 
 		if (p_for_lambda) {
