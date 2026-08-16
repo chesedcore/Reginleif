@@ -1477,6 +1477,9 @@ static StringName _get_trait_impl_target_key_for_completion(const GDScriptParser
 	if (p_type.kind == GDScriptParser::DataType::CLASS && p_type.class_type != nullptr) {
 		return StringName("class::" + p_type.class_type->fqcn);
 	}
+	if (p_type.kind == GDScriptParser::DataType::ENUM) {
+		return StringName("enum::" + String(p_type.native_type));
+	}
 	return StringName();
 }
 

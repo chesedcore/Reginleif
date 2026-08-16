@@ -463,11 +463,8 @@ class GDScriptLanguage : public ScriptLanguage {
 
 	HashMap<String, ObjectID> orphan_subclasses;
 
-	///impl stuff, native-type dispatch for `impl for <native>` methods.
-	///keyed by Variant::Type first so a type with zero impls is a single cheap has() check
-	///
 	HashMap<Variant::Type, HashMap<StringName, GDScriptFunction*>> native_impl_methods;
-
+	HashMap<StringName, HashMap<StringName, GDScriptFunction*>> enum_impl_methods;
 
 	HashMap<StringName, HashMap<StringName, GDScriptFunction*>> native_class_impl_methods;
 
@@ -499,6 +496,11 @@ public:
 	GDScriptFunction* get_script_class_impl_method(const StringName& p_script_class, const StringName& p_method_name) const;
 
 	GDScriptFunction* find_native_class_impl_method_cached(const StringName& p_concrete_class, const StringName& p_method_name) const;
+
+	void register_enum_impl_method(const StringName& p_enum_key, const StringName& p_method_name, GDScriptFunction* p_function);
+	void unregister_enum_impl_methods_for_function(GDScriptFunction* p_function);
+	bool has_enum_impl_methods(const StringName& p_enum_key) const;
+	GDScriptFunction* get_enum_impl_method(const StringName& p_enum_key, const StringName& p_method_name) const;
 
 	bool debug_break(const String &p_error, bool p_allow_continue = true);
 	bool debug_break_parse(const String &p_file, int p_line, const String &p_error);

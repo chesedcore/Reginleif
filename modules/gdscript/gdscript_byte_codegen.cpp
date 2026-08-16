@@ -925,6 +925,14 @@ void GDScriptByteCodeGenerator::write_get_named(const Address &p_target, const S
 	append(p_name);
 }
 
+void GDScriptByteCodeGenerator::write_get_named_enum_impl_cached(const Address& p_target, const StringName& p_name, const Address& p_source, GDScriptFunction* p_function) {
+	DEV_ASSERT(p_function != nullptr);
+	append_opcode(GDScriptFunction::OPCODE_GET_NAMED_ENUM_IMPL_CACHED);
+	append(p_source);
+	append(p_target);
+	append_native_impl_call_function(p_function);
+}
+
 void GDScriptByteCodeGenerator::write_set_member(const Address &p_value, const StringName &p_name) {
 	append_opcode(GDScriptFunction::OPCODE_SET_MEMBER);
 	append(p_value);

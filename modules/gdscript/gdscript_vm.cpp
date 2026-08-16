@@ -428,6 +428,7 @@ void (*type_init_function_table[])(Variant *) = {
 		&&OPCODE_CALL_METHOD_BIND_VALIDATED_NO_RETURN, \
 		&&OPCODE_CALL_NATIVE_IMPL_CACHED, \
 		&&OPCODE_CALL_NATIVE_IMPL_CACHED_RET, \
+		&&OPCODE_GET_NAMED_ENUM_IMPL_CACHED, \
 		&&OPCODE_AWAIT, \
 		&&OPCODE_AWAIT_RESUME, \
 		&&OPCODE_CREATE_LAMBDA, \
@@ -1498,6 +1499,28 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				const Variant::ValidatedGetter getter = _getters_ptr[index_getter];
 
 				getter(src, dst);
+				ip += 4;
+			}
+			DISPATCH_OPCODE;
+
+			OPCODE(OPCODE_GET_NAMED_ENUM_IMPL_CACHED) {
+				CHECK_SPACE(4);
+
+				GET_VARIANT_PTR(src, 0);
+				GET_VARIANT_PTR(dst, 1);
+
+				int function_idx = _code_ptr[ip + 3];
+				GD_ERR_BREAK(function_idx < 0 || function_idx >= _native_impl_call_functions_count);
+				GDScriptFunction* impl_function = _native_impl_call_functions_ptr[function_idx];
+#ifdef DEBUG_ENABLED
+				if (impl_function == nullptr) {
+					err_text = "[Reginleif] compiler bug!!, cached enum-impl GET_NAMED function is null?!";
+					OPCODE_BREAK;
+				}
+#endif
+				GDScriptImplCallable* callable = memnew(GDScriptImplCallable(*src, impl_function));
+				*dst = Callable(callable);
+
 				ip += 4;
 			}
 			DISPATCH_OPCODE;

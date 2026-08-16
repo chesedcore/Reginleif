@@ -109,6 +109,7 @@ public:
 	virtual void write_get(const Address &p_target, const Address &p_index, const Address &p_source) = 0;
 	virtual void write_set_named(const Address &p_target, const StringName &p_name, const Address &p_source) = 0;
 	virtual void write_get_named(const Address &p_target, const StringName &p_name, const Address &p_source) = 0;
+	virtual void write_get_named_enum_impl_cached(const Address& p_target, const StringName& p_name, const Address& p_source, GDScriptFunction* p_function) = 0;
 	virtual void write_set_member(const Address &p_value, const StringName &p_name) = 0;
 	virtual void write_get_member(const Address &p_target, const StringName &p_name) = 0;
 	virtual void write_set_static_variable(const Address &p_value, const Address &p_class, int p_index) = 0;
