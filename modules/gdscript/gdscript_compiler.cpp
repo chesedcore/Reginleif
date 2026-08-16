@@ -715,7 +715,23 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 									gen->write_call_native_static(result, class_name, subscript->attribute->name, arguments);
 								}
 							} else {
-								GDScriptCodeGenerator::Address base = _parse_expression(codegen, r_error, subscript->base);
+								GDScriptCodeGenerator::Address base;
+								if (call->is_static && subscript->base->type == GDScriptParser::Node::IDENTIFIER) {
+									const StringName base_identifier = static_cast<GDScriptParser::IdentifierNode*>(subscript->base)->name;
+									if (ScriptServer::is_global_class(base_identifier)) {
+										const String global_class_path = ScriptServer::get_global_class_path(base_identifier);
+										if (ResourceLoader::get_resource_type(global_class_path) == "GDScript") {
+											Error err = OK;
+											Ref<GDScript> script = GDScriptCache::get_full_script(global_class_path, err);
+											if (err == OK && script.is_valid()) {
+												base = codegen.add_constant(script);
+											}
+										}
+									}
+								}
+								if (base.mode == GDScriptCodeGenerator::Address::NIL) {
+									base = _parse_expression(codegen, r_error, subscript->base);
+								}
 								if (r_error) {
 									return GDScriptCodeGenerator::Address();
 								}
