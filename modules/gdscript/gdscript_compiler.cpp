@@ -747,11 +747,16 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 										}
 									}
 								} else if (base.type.kind == GDScriptDataType::BUILTIN) {
+									GDScriptDataType base_enum_type = base.type;
+									if (base_enum_type.enum_native_type == StringName() && subscript->base->type_constraint.kind == GDScriptParser::DataType::ENUM) {
+										base_enum_type = _gdtype_from_datatype(subscript->base->type_constraint, codegen.script);
+									}
+
 									if (Variant::has_builtin_method(base.type.builtin_type, call->function_name)) {
 										gen->write_call_builtin_type(result, base, base.type.builtin_type, call->function_name, arguments);
-									} else if (base.type.enum_native_type != StringName()) {
+									} else if (base_enum_type.enum_native_type != StringName()) {
 										GDScriptCache::ensure_global_impls_scanned();
-										if (GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->get_enum_impl_method(base.type.enum_native_type, call->function_name)) {
+										if (GDScriptFunction* impl_function = GDScriptLanguage::get_singleton()->get_enum_impl_method(base_enum_type.enum_native_type, call->function_name)) {
 											gen->write_call_native_impl_cached(result, base, impl_function, arguments);
 										} else {
 											gen->write_call(result, base, call->function_name, arguments);
