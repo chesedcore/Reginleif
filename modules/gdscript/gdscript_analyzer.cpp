@@ -309,6 +309,9 @@ static StringName impl_target_key_from_datatype(const GDScriptParser::DataType& 
 	if (p_type.kind == GDScriptParser::DataType::CLASS && p_type.class_type != nullptr) {
 		return StringName("class::" + p_type.class_type->fqcn);
 	}
+	if (p_type.kind == GDScriptParser::DataType::ENUM) {
+		return StringName("enum::" + String(p_type.native_type));
+	}
 	return StringName();
 }
 
@@ -5749,6 +5752,27 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 			// Enum does not have this value, return.
 			return;
 		} else {
+			///hey maybe it's a trait impl method before we start yelling
+			GDScriptCache::GlobalImplClaim impl_claim;
+			if (get_global_impl_method_claim_for_type(base, name, &impl_claim)) {
+				GDScriptParser::DataType callable_type;
+				callable_type.kind = GDScriptParser::DataType::BUILTIN;
+				callable_type.builtin_type = Variant::CALLABLE;
+				callable_type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+				p_identifier->type_constraint = callable_type;
+				return;
+			}
+			if (trait_analyzer != nullptr) {
+				GDScriptParser::FunctionNode* local_impl = trait_analyzer->find_impl_method(base, name);
+				if (local_impl != nullptr) {
+					GDScriptParser::DataType callable_type;
+					callable_type.kind = GDScriptParser::DataType::BUILTIN;
+					callable_type.builtin_type = Variant::CALLABLE;
+					callable_type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+					p_identifier->type_constraint = callable_type;
+					return;
+				}
+			}
 			push_error(R"(Cannot get property from enum value.)", p_identifier);
 			return;
 		}
@@ -6656,11 +6680,14 @@ void GDScriptAnalyzer::reduce_subscript(GDScriptParser::SubscriptNode *p_subscri
 					p_subscript->reduced_value = p_subscript->attribute->reduced_value;
 				}
 			} else if (!base_type.is_meta_type || !base_type.is_constant) {
-				GDScriptParser::FunctionNode* impl_method = (trait_analyzer != nullptr && base_type.kind == GDScriptParser::DataType::BUILTIN) ?
+				GDScriptParser::FunctionNode* impl_method = (trait_analyzer != nullptr &&
+							(base_type.kind == GDScriptParser::DataType::BUILTIN ||
+							base_type.kind == GDScriptParser::DataType::ENUM)) ?
 						trait_analyzer->find_impl_method(base_type, p_subscript->attribute->name) :
 						nullptr;
 
-				if (impl_method != nullptr) {
+				GDScriptCache::GlobalImplClaim dummy_claim;
+				if (impl_method != nullptr || get_global_impl_method_claim_for_type(base_type, p_subscript->attribute->name, &dummy_claim)) {
 					valid = true;
 					result_type.kind = GDScriptParser::DataType::BUILTIN;
 					result_type.builtin_type = Variant::CALLABLE;
@@ -7711,7 +7738,6 @@ bool GDScriptAnalyzer::get_function_signature(GDScriptParser::Node *p_source, bo
 			p_base_type.kind = GDScriptParser::DataType::BUILTIN;
 			p_base_type.is_meta_type = false;
 		} else {
-			push_error("Cannot call function on enum value.", p_source);
 			return false;
 		}
 	}

@@ -59,6 +59,7 @@ public:
 
 	Variant::Type builtin_type = Variant::NIL;
 	StringName native_type;
+	StringName enum_native_type;
 	Script *script_type = nullptr;
 	Ref<Script> script_type_ref;
 
@@ -123,6 +124,7 @@ public:
 		return kind == p_other.kind &&
 				builtin_type == p_other.builtin_type &&
 				native_type == p_other.native_type &&
+				enum_native_type == p_other.enum_native_type &&
 				(script_type == p_other.script_type || script_type_ref == p_other.script_type_ref) &&
 				container_element_types == p_other.container_element_types;
 	}
@@ -135,6 +137,7 @@ public:
 		kind = p_other.kind;
 		builtin_type = p_other.builtin_type;
 		native_type = p_other.native_type;
+		enum_native_type = p_other.enum_native_type;
 		script_type = p_other.script_type;
 		script_type_ref = p_other.script_type_ref;
 		container_element_types = p_other.container_element_types;
@@ -208,6 +211,7 @@ public:
 		OPCODE_CALL_METHOD_BIND_VALIDATED_NO_RETURN,
 		OPCODE_CALL_NATIVE_IMPL_CACHED,
 		OPCODE_CALL_NATIVE_IMPL_CACHED_RET,
+		OPCODE_GET_NAMED_ENUM_IMPL_CACHED,
 		OPCODE_AWAIT,
 		OPCODE_AWAIT_RESUME,
 		OPCODE_CREATE_LAMBDA,
