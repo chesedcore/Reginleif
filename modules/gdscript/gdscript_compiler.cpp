@@ -2462,13 +2462,6 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 		GDScriptDataType self_type; ///VARIANT kind by default
 		uint32_t self_addr = codegen.generator->add_parameter("@impl_self", false, self_type);
 		codegen.parameters[StringName("@impl_self")] = GDScriptCodeGenerator::Address(GDScriptCodeGenerator::Address::FUNCTION_PARAMETER, self_addr, self_type);
-
-		// For some ungodly reason. Some reason that no human mind can comprehend, printing literally anything fixes a crash related to traits. See: https://github.com/chesedcore/Reginleif/issues/52
-		// I have no idea. - Bubba.
-		// Hypothesis is doing some useless logic will cause some delay, which then lets the GDScript code gen from being null which then causes the seg fault or sumthing idefk fml lmfao fr
-		// TODO: Fix this shit immediately, this line is not permanent.
-		print_line("");
-
 		codegen.is_native_impl_method = true;
 	}
 
