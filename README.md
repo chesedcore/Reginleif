@@ -36,7 +36,8 @@ If you don't want to go through the hassle of all that, I periodically throw a f
 - generics (currently only type-erased)
 - nested types
 - completely optional braces {} based scoping
-- traits (first pass)
+- traits (first pass + optimisation passes)
+- some minor syntax niceties
 
 ## How to use the shit I added
 
@@ -314,6 +315,26 @@ func thing(y: impl Rollable) -> void:
 these are both dynamically dispatched types, so x and y are allowed to be different concrete types. it is more flexible but owing to dyn dispatch is less performant.
 
 i invite you to read the source in modules/gdscript/gdscript_trait_analyzer for a more thorough rundown on how this works. behind the hood, dynamic trait dispatch creates a hidden generic to facilitate passing generic args. of course, you can always ask me for implementation details too.
+
+### syntactical sugar
+
+#### fluent multiline chaining
+in vanilla gdscript, you needed `\` if you were chaining methods across multiple lines:
+```gdscript
+stage                          \
+  .query()                     \
+  .both_sides()                \
+  .and_then(draw_2)
+```
+
+i have removed the need for this ugly `\`. you can now chain methods freely across multiple lines:
+```gdscript
+stage                          
+  .query()                     
+  .both_sides()                
+  .and_then(draw_2)
+```
+and things shall simply work.
 
 ### Some more caveats
 - Godot's `core` is rotten. Generics can LIE to you at runtime because static analysis is turned off for Variant-typed variables!!! (I didn't add this, this is Godot's default behaviour) Use static typing everywhere lest you want to run into undefined behaviour with generics.
