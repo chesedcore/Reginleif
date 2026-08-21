@@ -635,7 +635,7 @@ DocumentList::DocumentList(ScriptEditor *p_script_editor) {
 
 	item_list = memnew(ItemList);
 	item_list->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
-	item_list->set_custom_minimum_size(Size2(100, 60) * EDSCALE);
+	item_list->set_custom_minimum_size(Size2(60, 40) * EDSCALE);
 	item_list->set_v_size_flags(SIZE_EXPAND_FILL);
 	item_list->set_theme_type_variation("ItemListSecondary");
 	item_list->set_allow_rmb_select(true);
@@ -853,7 +853,7 @@ DocumentOutline::DocumentOutline(ScriptEditor *p_script_editor) {
 	tree->set_allow_rmb_select(true);
 	tree->set_hide_root(true);
 	tree->set_hide_folding(true);
-	tree->set_custom_minimum_size(Size2(0, 60) * EDSCALE);
+	tree->set_custom_minimum_size(Size2(0, 40 * EDSCALE));
 	tree->set_v_size_flags(SIZE_EXPAND_FILL);
 	tree->connect(SceneStringName(item_selected), callable_mp(this, &DocumentOutline::_tree_selected));
 	add_child(tree);
@@ -3295,13 +3295,25 @@ void ScriptEditor::shortcut_input(const Ref<InputEvent> &p_event) {
 		document_list->goto_next_document(true);
 		accept_event();
 	}
-	if (ED_IS_SHORTCUT("script_editor/move_document_up", p_event)) {
-		_menu_option(FILE_MENU_MOVE_UP);
-		accept_event();
-	}
-	if (ED_IS_SHORTCUT("script_editor/move_document_down", p_event)) {
-		_menu_option(FILE_MENU_MOVE_DOWN);
-		accept_event();
+
+	static const HashMap<String, int> shortcut_mappings = {
+		{ "script_editor/close_other_tabs", FILE_MENU_CLOSE_OTHER_TABS },
+		{ "script_editor/close_tabs_below", FILE_MENU_CLOSE_TABS_BELOW },
+		{ "script_editor/close_docs", FILE_MENU_CLOSE_DOCS },
+		{ "script_editor/copy_path", FILE_MENU_COPY_PATH },
+		{ "script_editor/copy_uid", FILE_MENU_COPY_UID },
+		{ "script_editor/show_in_file_system", FILE_MENU_SHOW_IN_FILE_SYSTEM },
+		{ "script_editor/move_document_up", FILE_MENU_MOVE_UP },
+		{ "script_editor/move_document_down", FILE_MENU_MOVE_DOWN },
+		{ "script_editor/sort_documents", FILE_MENU_SORT },
+	};
+
+	for (const KeyValue<String, int> &E : shortcut_mappings) {
+		if (ED_IS_SHORTCUT(E.key, p_event)) {
+			_menu_option(E.value);
+			accept_event();
+			break;
+		}
 	}
 
 	if (p_event->is_echo()) {
@@ -3944,7 +3956,7 @@ void ScriptEditor::_on_find_in_files_result_selected(const String &fpath, int li
 		if (fpath.has_extension("gdshader") || fpath.has_extension("gdshaderinc")) {
 			ShaderEditorPlugin *shader_editor = Object::cast_to<ShaderEditorPlugin>(EditorNode::get_editor_data().get_editor_by_name("Shader"));
 			shader_editor->edit(res.ptr());
-			shader_editor->make_visible(true);
+			shader_editor->set_current();
 			if (ShaderTextEditor *shader_te = Object::cast_to<ShaderTextEditor>(ScriptEditor::get_bottom_script_editor()->get_resource_editor(res))) {
 				shader_te->goto_line_selection(line_number - 1, begin, end);
 			}
@@ -4229,9 +4241,11 @@ ScriptEditor::ScriptEditor(const String &p_config_section, const String &p_cache
 	file_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_editor/close_file"), FILE_MENU_CLOSE);
 	file_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_editor/close_all"), FILE_MENU_CLOSE_ALL);
 	file_menu->get_popup()->add_separator();
-	file_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_editor/reload_script_soft"), FILE_MENU_SOFT_RELOAD_TOOL);
-	file_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_editor/run_file"), FILE_MENU_RUN);
-	file_menu->get_popup()->add_separator();
+	if (this == script_editor) {
+		file_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_editor/reload_script_soft"), FILE_MENU_SOFT_RELOAD_TOOL);
+		file_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_editor/run_file"), FILE_MENU_RUN);
+		file_menu->get_popup()->add_separator();
+	}
 	file_menu->get_popup()->add_submenu_node_item(TTRC("Theme"), theme_submenu, FILE_MENU_THEME_SUBMENU);
 	file_menu->get_popup()->add_separator();
 	file_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_editor/toggle_files_panel"), FILE_MENU_TOGGLE_FILES_PANEL);

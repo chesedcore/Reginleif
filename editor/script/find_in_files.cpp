@@ -594,8 +594,7 @@ FindInFilesSearchPanel::FindInFilesSearchPanel() {
 
 	{
 		Label *find_label = memnew(Label);
-		find_label->set_text("Find");
-		find_label->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+		find_label->set_text(TTRC("Find"));
 		vbc->add_child(find_label);
 
 		HBoxContainer *search_hbc = memnew(HBoxContainer);
@@ -1052,7 +1051,7 @@ void FindInFilesResultsPanel::_on_result_selected() {
 	TreeItem *item = results_display->get_selected();
 	HashMap<TreeItem *, Result>::Iterator E = result_items.find(item);
 
-	if (!E) {
+	if (!E || (results_display->get_selected_column() == 0 && with_replace)) {
 		return;
 	}
 	Result r = E->value;

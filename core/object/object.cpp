@@ -114,39 +114,6 @@ Object::Connection::operator Variant() const {
 	return d;
 }
 
-void ObjectGDExtension::create_gdtype() {
-	ERR_FAIL_COND(gdtype);
-
-	gdtype = memnew(GDType(ClassDB::get_gdtype(parent_class_name), class_name));
-	gdtype->initialize();
-}
-
-void ObjectGDExtension::destroy_gdtype() {
-	ERR_FAIL_COND(!gdtype);
-
-#ifdef TOOLS_ENABLED
-	if (!is_placeholder) {
-#endif
-		memdelete(const_cast<GDType *>(gdtype));
-#ifdef TOOLS_ENABLED
-	}
-#endif
-
-	gdtype = nullptr;
-}
-
-ObjectGDExtension::~ObjectGDExtension() {
-	if (gdtype) {
-#ifdef TOOLS_ENABLED
-		if (!is_placeholder) {
-#endif
-			memdelete(const_cast<GDType *>(gdtype));
-#ifdef TOOLS_ENABLED
-		}
-#endif
-	}
-}
-
 bool Object::Connection::operator<(const Connection &p_conn) const {
 	if (signal == p_conn.signal) {
 		return callable < p_conn.callable;
@@ -658,8 +625,7 @@ bool Object::has_method(const StringName &p_method) const {
 		return true;
 	}
 
-	MethodBind *method = ClassDB::get_method(get_class_name(), p_method);
-	if (method != nullptr) {
+	if (get_gdtype().get_method_map(false).has(p_method)) {
 		return true;
 	}
 
@@ -814,10 +780,10 @@ Variant Object::callp(const StringName &p_method, const Variant **p_args, int p_
 
 	//extension does not need this, because all methods are registered in MethodBind
 
-	MethodBind *method = ClassDB::get_method(get_class_name(), p_method);
+	const MethodBind *const *method = get_gdtype().get_method_map(false).getptr(p_method);
 
 	if (method) {
-		ret = method->call(this, p_args, p_argcount, r_error);
+		ret = (*method)->call(this, p_args, p_argcount, r_error);
 	} else {
 		r_error.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
 	}
@@ -858,14 +824,14 @@ Variant Object::call_const(const StringName &p_method, const Variant **p_args, i
 
 	//extension does not need this, because all methods are registered in MethodBind
 
-	MethodBind *method = ClassDB::get_method(get_class_name(), p_method);
+	const MethodBind *const *method = get_gdtype().get_method_map(false).getptr(p_method);
 
 	if (method) {
-		if (!method->is_const()) {
+		if (!(*method)->is_const()) {
 			r_error.error = Callable::CallError::CALL_ERROR_METHOD_NOT_CONST;
 			return ret;
 		}
-		ret = method->call(this, p_args, p_argcount, r_error);
+		ret = (*method)->call(this, p_args, p_argcount, r_error);
 	} else {
 		r_error.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
 	}
@@ -1229,16 +1195,11 @@ Error Object::emit_signalp(const StringName &p_name, const Variant **p_args, int
 
 	OBJ_DEBUG_LOCK
 
-	// If this is a ref-counted object, prevent it from being destroyed during signal
-	// emission, which is needed in certain edge cases; e.g., GH-73889 and GH-109471.
-	// Moreover, since signals can be emitted from constructors (classic example being
-	// notify_property_list_changed), we must be careful not to do the ref init ourselves,
-	// which would lead to the object being destroyed at the end of this function.
-	bool pending_unref = Object::cast_to<RefCounted>(this) ? ((RefCounted *)this)->reference() : false;
-
 	Error err = OK;
 
-	Vector<const Variant *> append_source_mem;
+	LocalVector<const Variant *> append_source_mem;
+	// If this is a ref-counted object, `source` also prevents it from being destroyed during
+	// signal emission, which is needed in certain edge cases; e.g., GH-73889 and GH-109471.
 	Variant source = this;
 
 	for (uint32_t i = 0; i < slot_count; ++i) {
@@ -1259,7 +1220,7 @@ Error Object::emit_signalp(const StringName &p_name, const Variant **p_args, int
 			int source_index = p_argcount - callable.get_unbound_arguments_count();
 			if (source_index >= 0) {
 				append_source_mem.resize(p_argcount + 1);
-				const Variant **args_mem = append_source_mem.ptrw();
+				const Variant **args_mem = append_source_mem.ptr();
 
 				for (int j = 0; j < source_index; j++) {
 					args_mem[j] = p_args[j];
@@ -1317,14 +1278,7 @@ Error Object::emit_signalp(const StringName &p_name, const Variant **p_args, int
 		memfree(slot_flags);
 	}
 
-	if (pending_unref) {
-		// We have to do the same Ref<T> would do. We can't just use Ref<T>
-		// because it would do the init ref logic, which is something this function
-		// shouldn't do, as explained above.
-		if (((RefCounted *)this)->unreference()) {
-			memdelete(this);
-		}
-	}
+	(void)source; // Ensure it's scoped to the function so it lives up to the end.
 
 	return err;
 }
@@ -2529,8 +2483,8 @@ void ObjectDB::cleanup() {
 			// Ensure calling the native classes because if a leaked instance has a script
 			// that overrides any of those methods, it'd not be OK to call them at this point,
 			// now the scripting languages have already been terminated.
-			MethodBind *node_get_path = ClassDB::get_method("Node", "get_path");
-			MethodBind *resource_get_path = ClassDB::get_method("Resource", "get_path");
+			const MethodBind *node_get_path = ClassDB::get_method("Node", "get_path");
+			const MethodBind *resource_get_path = ClassDB::get_method("Resource", "get_path");
 			Callable::CallError call_error;
 
 			for (uint32_t i = 0, count = slot_count; i < slot_max && count != 0; i++) {

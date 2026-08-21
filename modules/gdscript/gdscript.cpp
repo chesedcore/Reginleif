@@ -34,7 +34,6 @@
 #include "gdscript_cache.h"
 #include "gdscript_compiler.h"
 #include "gdscript_parser.h"
-#include "gdscript_rpc_callable.h"
 #include "gdscript_tokenizer_buffer.h"
 #include "gdscript_warning.h"
 
@@ -80,7 +79,7 @@ bool GDScriptNativeClass::_get(const StringName &p_name, Variant &r_ret) const {
 		return true;
 	}
 
-	MethodBind *method = ClassDB::get_method(name, p_name);
+	const MethodBind *method = ClassDB::get_method(name, p_name);
 	if (method && method->is_static()) {
 		// Native static method.
 		r_ret = Callable(this, p_name);
@@ -116,7 +115,7 @@ Variant GDScriptNativeClass::callp(const StringName &p_method, const Variant **p
 		return Object::callp(p_method, p_args, p_argcount, r_error);
 	}
 
-	MethodBind *method = ClassDB::get_method(name, p_method);
+	const MethodBind *method = ClassDB::get_method(name, p_method);
 	if (method && method->is_static()) {
 		// Native static method.
 		return method->call(nullptr, p_args, p_argcount, r_error);
@@ -1018,11 +1017,7 @@ bool GDScript::_get(const StringName &p_name, Variant &r_ret) const {
 		if (likely(top->valid)) {
 			HashMap<StringName, GDScriptFunction *>::ConstIterator E = top->member_functions.find(p_name);
 			if (E && E->value->is_static()) {
-				if (top->rpc_config.has(p_name)) {
-					r_ret = Callable(memnew(GDScriptRPCCallable(const_cast<GDScript *>(top), E->key)));
-				} else {
-					r_ret = Callable(const_cast<GDScript *>(top), E->key);
-				}
+				r_ret = Callable(const_cast<GDScript *>(top), E->key);
 				return true;
 			}
 		}
@@ -1688,11 +1683,7 @@ bool GDScriptInstance::get(const StringName &p_name, Variant &r_ret) const {
 		if (likely(sptr->valid)) {
 			HashMap<StringName, GDScriptFunction *>::ConstIterator E = sptr->member_functions.find(p_name);
 			if (E) {
-				if (sptr->rpc_config.has(p_name)) {
-					r_ret = Callable(memnew(GDScriptRPCCallable(owner, E->key)));
-				} else {
-					r_ret = Callable(owner, E->key);
-				}
+				r_ret = Callable(owner, E->key);
 				return true;
 			}
 		}

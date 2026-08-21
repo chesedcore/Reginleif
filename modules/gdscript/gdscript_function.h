@@ -408,7 +408,7 @@ private:
 	Vector<Variant::ValidatedConstructor> constructors;
 	Vector<Variant::ValidatedUtilityFunction> utilities;
 	Vector<GDScriptUtilityFunctions::FunctionPtr> gds_utilities;
-	Vector<MethodBind *> methods;
+	Vector<const MethodBind *> methods;
 	Vector<GDScriptFunction *> lambdas;
 	Vector<GDScriptFunction*> native_impl_call_functions;
 
@@ -446,7 +446,7 @@ private:
 	const Variant::ValidatedConstructor *_constructors_ptr = nullptr;
 	const Variant::ValidatedUtilityFunction *_utilities_ptr = nullptr;
 	const GDScriptUtilityFunctions::FunctionPtr *_gds_utilities_ptr = nullptr;
-	MethodBind **_methods_ptr = nullptr;
+	const MethodBind *const *_methods_ptr = nullptr;
 	GDScriptFunction **_lambdas_ptr = nullptr;
 	GDScriptFunction** _native_impl_call_functions_ptr = nullptr;
 
