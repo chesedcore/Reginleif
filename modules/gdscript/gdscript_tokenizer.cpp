@@ -1320,6 +1320,39 @@ String GDScriptTokenizerText::_get_indent_char_name(char32_t ch) {
 	return ch == ' ' ? "space" : "tab";
 }
 
+bool GDScriptTokenizerText::_peek_next_line_starts_with_period() {
+	int offset = 0;
+	for (;;) {
+		char32_t c = _peek(offset);
+		if (c == ' ' || c == '\t' || c == '\r') {
+			offset++;
+			continue;
+		}
+		if (c == '\n') {
+			offset++;
+			continue;
+		}
+		if (c == '#') {
+			while (true) {
+				char32_t cc = _peek(offset);
+				if (cc == '\0' || cc == '\n') {
+					break;
+				}
+				offset++;
+			}
+			continue;
+		}
+		if (c == '.') {
+			char32_t c1 = _peek(offset + 1);
+			if (c1 == '.') {
+				return false;
+			}
+			return is_unicode_identifier_start(c1);
+		}
+		return false;
+	}
+}
+
 void GDScriptTokenizerText::_skip_whitespace() {
 	if (pending_indents != 0) {
 		// Still have some indent/dedent tokens to give.
@@ -1349,6 +1382,12 @@ void GDScriptTokenizerText::_skip_whitespace() {
 				break;
 			case '\n':
 				_advance();
+				if (!is_bol && _peek_next_line_starts_with_period()) {
+					newline(false);
+					line_continuation = true;
+					continuation_lines.push_back(line);
+					break;
+				}
 				newline(!is_bol); // Don't create new line token if line is empty.
 				check_indent();
 				break;
