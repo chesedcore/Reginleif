@@ -274,6 +274,7 @@ class GDScriptTokenizerText : public GDScriptTokenizer {
 	char32_t _advance();
 	String _get_indent_char_name(char32_t ch);
 	void _skip_whitespace();
+	bool _peek_next_line_starts_with_period();
 	void check_indent();
 
 #ifdef DEBUG_ENABLED

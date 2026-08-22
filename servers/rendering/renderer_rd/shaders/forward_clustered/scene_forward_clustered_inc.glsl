@@ -146,6 +146,10 @@ bool sc_cluster_has_area_light() {
 	return ((sc_packed_1() >> 5) & 1U) != 0;
 }
 
+bool sc_use_lightmap_specular() {
+	return ((sc_packed_1() >> 6) & 1U) != 0;
+}
+
 float sc_luminance_multiplier() {
 	// Not used in clustered renderer but we share some code with the mobile renderer that requires this.
 	return 1.0;
@@ -228,7 +232,7 @@ directional_lights;
 #define LIGHTMAP_SHADOWMASK_MODE_ONLY 3
 
 struct Lightmap {
-	mat3 normal_xform;
+	mat3x4 normal_xform_and_specular_intensity; // "normal_xform" is the 3x3 matrix. "specular_intensity" is the 4th row of the 1st column.
 	vec2 light_texture_size;
 	float exposure_normalization;
 	uint flags;

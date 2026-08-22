@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 6: [Reginleif] Method "test" does not match the signature required by trait "VoidReturnMismatch".

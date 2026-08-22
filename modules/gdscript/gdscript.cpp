@@ -34,7 +34,6 @@
 #include "gdscript_cache.h"
 #include "gdscript_compiler.h"
 #include "gdscript_parser.h"
-#include "gdscript_rpc_callable.h"
 #include "gdscript_tokenizer_buffer.h"
 #include "gdscript_warning.h"
 
@@ -80,7 +79,7 @@ bool GDScriptNativeClass::_get(const StringName &p_name, Variant &r_ret) const {
 		return true;
 	}
 
-	MethodBind *method = ClassDB::get_method(name, p_name);
+	const MethodBind *method = ClassDB::get_method(name, p_name);
 	if (method && method->is_static()) {
 		// Native static method.
 		r_ret = Callable(this, p_name);
@@ -116,7 +115,7 @@ Variant GDScriptNativeClass::callp(const StringName &p_method, const Variant **p
 		return Object::callp(p_method, p_args, p_argcount, r_error);
 	}
 
-	MethodBind *method = ClassDB::get_method(name, p_method);
+	const MethodBind *method = ClassDB::get_method(name, p_method);
 	if (method && method->is_static()) {
 		// Native static method.
 		return method->call(nullptr, p_args, p_argcount, r_error);
@@ -572,9 +571,7 @@ bool GDScript::_update_exports(bool *r_err, bool p_recursive_call, PlaceHolderSc
 
 			members_cache.push_back(get_class_category());
 
-			for (int i = 0; i < c->members.size(); i++) {
-				const GDScriptParser::ClassNode::Member &member = c->members[i];
-
+			for (const GDScriptParser::ClassNode::Member &member : c->members) {
 				switch (member.type) {
 					case GDScriptParser::ClassNode::Member::VARIABLE: {
 						if (!member.variable->exported) {
@@ -1018,11 +1015,7 @@ bool GDScript::_get(const StringName &p_name, Variant &r_ret) const {
 		if (likely(top->valid)) {
 			HashMap<StringName, GDScriptFunction *>::ConstIterator E = top->member_functions.find(p_name);
 			if (E && E->value->is_static()) {
-				if (top->rpc_config.has(p_name)) {
-					r_ret = Callable(memnew(GDScriptRPCCallable(const_cast<GDScript *>(top), E->key)));
-				} else {
-					r_ret = Callable(const_cast<GDScript *>(top), E->key);
-				}
+				r_ret = Callable(const_cast<GDScript *>(top), E->key);
 				return true;
 			}
 		}
@@ -1688,11 +1681,7 @@ bool GDScriptInstance::get(const StringName &p_name, Variant &r_ret) const {
 		if (likely(sptr->valid)) {
 			HashMap<StringName, GDScriptFunction *>::ConstIterator E = sptr->member_functions.find(p_name);
 			if (E) {
-				if (sptr->rpc_config.has(p_name)) {
-					r_ret = Callable(memnew(GDScriptRPCCallable(owner, E->key)));
-				} else {
-					r_ret = Callable(owner, E->key);
-				}
+				r_ret = Callable(owner, E->key);
 				return true;
 			}
 		}
@@ -2622,6 +2611,9 @@ void GDScriptLanguage::reload_scripts(const Array &p_scripts) {
 	for (KeyValue<Ref<GDScript>, HashMap<ObjectID, List<Pair<StringName, Variant>>>> &E : to_reload) {
 		Ref<GDScript> scr = E.key;
 		print_verbose("GDScript: Reloading: " + scr->get_path());
+#ifdef TOOLS_ENABLED
+		bool was_tool = scr->is_tool();
+#endif
 		if (scr->is_built_in()) {
 			// TODO: It would be nice to do it more efficiently than loading the whole scene again.
 			Ref<PackedScene> scene = ResourceLoader::load(scr->get_path().get_slice("::", 0), "", ResourceFormatLoader::CACHE_MODE_IGNORE_DEEP);
@@ -2636,6 +2628,15 @@ void GDScriptLanguage::reload_scripts(const Array &p_scripts) {
 			scr->load_source_code(scr->get_path());
 		}
 		scr->reload(true);
+
+#ifdef TOOLS_ENABLED
+		// If @tool is added/removed, or an existing tool script is changed, we will force a reload.
+		// On add/removal, changes placeholder instance to an actual instance or vice versa.
+		// On Tool Script change, replaces a stale instance with an up-to-date GDscriptInstance for consistent behavior.
+		if (scr->is_tool() || was_tool) {
+			_prepare_script_for_reload(scr, to_reload[scr]);
+		}
+#endif
 
 		//restore state if saved
 		for (KeyValue<ObjectID, List<Pair<StringName, Variant>>> &F : E.value) {
@@ -2677,6 +2678,43 @@ void GDScriptLanguage::reload_scripts(const Array &p_scripts) {
 
 #endif // DEBUG_ENABLED
 }
+
+#ifdef DEBUG_ENABLED
+void GDScriptLanguage::_prepare_script_for_reload(const Ref<GDScript> &p_script, HashMap<ObjectID, List<Pair<StringName, Variant>>> &p_map) {
+	while (p_script->instances.first()) {
+		GDScriptInstance *instance = p_script->instances.first()->self();
+		// Save instance info.
+		List<Pair<StringName, Variant>> state;
+		instance->get_property_state(state);
+		p_map[instance->get_owner()->get_instance_id()] = state;
+		instance->get_owner()->set_script(Variant());
+	}
+
+	// Same thing for placeholders.
+#ifdef TOOLS_ENABLED
+
+	while (p_script->placeholders.size()) {
+		Object *obj = (*p_script->placeholders.begin())->get_owner();
+
+		// Save instance info.
+		if (obj->get_script_instance()) {
+			p_map.insert(obj->get_instance_id(), List<Pair<StringName, Variant>>());
+			List<Pair<StringName, Variant>> &state = p_map[obj->get_instance_id()];
+			obj->get_script_instance()->get_property_state(state);
+			obj->set_script(Variant());
+		} else {
+			// No instance found. Let's remove it so we don't loop forever.
+			p_script->placeholders.erase(*p_script->placeholders.begin());
+		}
+	}
+
+#endif // TOOLS_ENABLED
+
+	for (const KeyValue<ObjectID, List<Pair<StringName, Variant>>> &F : p_script->pending_reload_state) {
+		p_map[F.key] = F.value; // Pending to reload, use this one instead.
+	}
+}
+#endif
 
 void GDScriptLanguage::reload_tool_script(const Ref<Script> &p_script) {
 	Array scripts = { p_script };
@@ -2881,7 +2919,7 @@ String GDScriptLanguage::_get_global_class_name(const String &p_path, String *r_
 
 						while (extend_classes.size() > 0) {
 							bool found = false;
-							for (int i = 0; i < subclass->members.size(); i++) {
+							for (uint32_t i = 0; i < subclass->members.size(); i++) {
 								if (subclass->members[i].type != GDScriptParser::ClassNode::Member::CLASS) {
 									continue;
 								}

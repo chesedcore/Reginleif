@@ -509,6 +509,12 @@ bool GDScriptTraitAnalyzer::_signatures_match(const Ref<GDScriptTraitSignatureSn
 	GDScriptParser::DataType required_return = p_required->return_type;
 	GDScriptParser::DataType provided_return = p_provided->return_type_constraint;
 
+	const bool required_return_is_void = required_return.kind == GDScriptParser::DataType::BUILTIN && required_return.builtin_type == Variant::NIL && required_return.is_hard_type();
+	const bool provided_return_is_void = provided_return.kind == GDScriptParser::DataType::BUILTIN && provided_return.builtin_type == Variant::NIL && provided_return.is_hard_type();
+	if (required_return_is_void || provided_return_is_void) {
+		return required_return_is_void && provided_return_is_void;
+	}
+
 	///don't allow a Variant return to slip through when a required return is specified
 	if (!required_return.is_variant() && provided_return.is_variant()) {
 		return false;
