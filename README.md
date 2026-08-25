@@ -1,5 +1,5 @@
 # Reginleif Engine
-hello hello! this is a little fork made for me and my friends! 'twas made because GDScript was a *little* lacking, and i discovered i had the free will to do things my way! what *is* my way, you ask? well, i've always had a love-hate relationship with GDScript. i truly love the rapid iteration capabilities it offers, but ah well, but it lacks a *few* features, *ahem*, to help build the kind of systems heavy games i want to make.
+hello hello! this is a little fork made for me and my friends! 'twas made because GDScript was a *little* lacking, and i discovered i had the free will to do things my way! what *is* my way, you ask? well, i've always had a love-hate relationship with GDScript. i truly love the rapid iteration capabilities it offers, but ah well, it lacks a *few* features, *ahem*, to help build the kind of systems heavy games i want to make.
 
 tell ya what, mate. while writing gdscript across half a decade, it felt like my dumbass was being forced to accept a tradeoff that the developers had made. the tradeoff being that the language optimised the developer experience for the first fifty hours of gamedev, and did so by horribly compromising on the next thousand.
 
