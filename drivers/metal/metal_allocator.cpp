@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  gdscript_editor_language.h                                            */
+/*  metal_allocator.cpp                                                   */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -28,33 +28,48 @@
 /* SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.                 */
 /**************************************************************************/
 
-#pragma once
+#include "drivers/metal/metal_allocator.h"
 
-#include "core/object/editor_language.h"
+#pragma mark - MetalAllocator
 
-class GDScriptEditorLanguage final : public EditorLanguage {
-	static GDScriptEditorLanguage *singleton;
+MetalAllocator *MetalAllocator::create(MTL::Device *p_device, bool p_use_heaps) {
+	return memnew(MetalDeviceAllocator(p_device));
+}
 
-public:
-	_FORCE_INLINE_ static GDScriptEditorLanguage *get_singleton() { return singleton; }
+#pragma mark - MetalDeviceAllocator
 
-	virtual Error complete_code(const String &p_code, const String &p_path, Object *p_owner, List<ScriptLanguage::CodeCompletionOption> *r_options, bool &r_force, String &r_call_hint) override;
+MetalBuffer MetalDeviceAllocator::new_buffer(NS::UInteger p_length, MTL::ResourceOptions p_options) {
+	MetalBuffer result;
+	result.buffer = NS::TransferPtr(device->newBuffer(p_length, p_options));
+	return result;
+}
 
-	virtual Error lookup_code(const String &p_code, const String &p_symbol, const String &p_path, Object *p_owner, LookupResult &r_result) override;
+MetalTexture MetalDeviceAllocator::new_texture(const MTL::TextureDescriptor *p_desc) {
+	MetalTexture result;
+	result.texture = NS::TransferPtr(device->newTexture(p_desc));
+	return result;
+}
 
-	virtual int32_t find_function(const String &p_function, const String &p_code) const override;
+void MetalDeviceAllocator::free_buffer(MetalBuffer &p_buffer) {
+	DEV_ASSERT(!p_buffer.allocation.is_valid());
+	p_buffer.buffer.reset();
+}
 
-	virtual void format_code(String &r_code, uint32_t p_from_line, uint32_t p_to_line) const override;
+void MetalDeviceAllocator::free_texture(MetalTexture &p_texture) {
+	DEV_ASSERT(!p_texture.allocation.is_valid());
+	p_texture.texture.reset();
+}
 
-	virtual bool validate(const String &p_code, const String &p_path, List<ScriptError> *r_errors, List<Warning> *r_warnings, List<String> *r_functions, HashSet<int> *r_safe_lines) const override;
+uint64_t MetalDeviceAllocator::get_heaps(LocalVector<MTL::Heap *> &r_heaps) {
+	return 0;
+}
 
-	GDScriptEditorLanguage() {
-		ERR_FAIL_COND(singleton != nullptr);
-		singleton = this;
-	}
-	~GDScriptEditorLanguage() {
-		if (singleton == this) {
-			singleton = nullptr;
-		}
-	}
-};
+uint64_t MetalDeviceAllocator::get_heap_generation() const {
+	return 0;
+}
+
+#ifdef DEBUG_ENABLED
+void MetalDeviceAllocator::get_stats(MetalAllocatorStats &r_stats) {
+	r_stats = MetalAllocatorStats();
+}
+#endif
