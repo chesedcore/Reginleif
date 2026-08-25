@@ -33,6 +33,7 @@ If you don't want to go through the hassle of all that, I periodically throw a f
 - exhaustive pattern matching
 
 ## Shit I added
+- type narrowing
 - generics (currently only type-erased)
 - nested types
 - completely optional braces {} based scoping
@@ -40,6 +41,37 @@ If you don't want to go through the hassle of all that, I periodically throw a f
 - some minor syntax niceties
 
 ## How to use the shit I added
+
+### Type Narrowing
+Not a feature you 'use' per se, but static analysis now becomes smarter.
+`is Type` type checks now 'narrow' the type in their branch.
+
+```gdscript
+var node := get_node(...)
+if x is Node2D:
+    print(x.position)
+```
+This marks the third line to be type unsafe in vanilla GDScript, and this can even be seen in the editor, as the line number on the left side of the code editor becomes unlit, showing that the analyser could not prove type safety. It even triggers UNSAFE_PROPERTY_ACCESS and related warnings! However, this operation provably IS safe! it only executes if x is that type, and thus, x's type gets 'narrowed.'
+
+This fork is narrowing aware! It does indeed narrow the above case, along with the following cases:
+
+```gdscript
+if x is Node2D and x.get_position().x > 20:
+                  #^^^^^^^^^^^^^^^^^^^^^^^ safe!
+```
+
+```gdscript
+if x is not Node2D: return
+print(x.position)
+```
+
+```gdscript
+if x is not Node2D:
+    pass
+else:
+    print(x.position)
+```
+All the above cases become narrow-aware and thus type safe. This extends to `is Trait` style checks too (discussed soon in this doc).
 
 ### Generics
 
