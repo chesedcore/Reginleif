@@ -3467,10 +3467,14 @@ void GDScriptAnalyzer::collect_type_narrowing(GDScriptParser::ExpressionNode* p_
 				if (p_positive) {
 					r_narrowed.iterators.insert(id->bind_source, type_test->test_datatype);
 				}
+			} else if (id->source == GDScriptParser::IdentifierNode::FUNCTION_PARAMETER && id->parameter_source != nullptr) {
+				if (p_positive) {
+					r_narrowed.parameters.insert(id->parameter_source, type_test->test_datatype);
+				}
 			}
 
-			///only local variables and for iterators are narrowed.
-			///member/static/param narrowing is unsafe here
+			///local variables, for iterators, and function parameters are narrowed
+			///member/static narrowing is still unsafe here
 			///negative narrowing (`x is not Foo`) just literally can't produce a concrete narrower
 			///type in general (the complement of a type isn't expressible as a DataType lmao, fuck CFG semantics)
 			///so no entryfor p_positive == false beyond what NOT/AND compose right below
@@ -4267,6 +4271,8 @@ void GDScriptAnalyzer::reduce_assignment(GDScriptParser::AssignmentNode *p_assig
 			narrowed_types.variables.erase(narrow_check_id->variable_source);
 		} else if (narrow_check_id->source == GDScriptParser::IdentifierNode::LOCAL_ITERATOR && narrow_check_id->bind_source) {
 			narrowed_types.iterators.erase(narrow_check_id->bind_source);
+		} else if (narrow_check_id->source == GDScriptParser::IdentifierNode::FUNCTION_PARAMETER && narrow_check_id->parameter_source) {
+			narrowed_types.parameters.erase(narrow_check_id->parameter_source);
 		}
 	}
 
@@ -6324,9 +6330,17 @@ void GDScriptAnalyzer::reduce_identifier(GDScriptParser::IdentifierNode *p_ident
 	// If that's the case, the declaration already was solved before.
 	switch (p_identifier->source) {
 		case GDScriptParser::IdentifierNode::FUNCTION_PARAMETER:
+			p_identifier->parameter_source->usages++;
+
+			///use narrows if found
+			if (const GDScriptParser::DataType* narrowed = narrowed_types.parameters.getptr(p_identifier->parameter_source)) {
+				p_identifier->type_constraint = *narrowed;
+				found_source = true;
+				break;
+			}
+
 			p_identifier->type_constraint = p_identifier->parameter_source->type_constraint;
 			found_source = true;
-			p_identifier->parameter_source->usages++;
 			break;
 		case GDScriptParser::IdentifierNode::LOCAL_CONSTANT:
 			p_identifier->constant_source->usages++;

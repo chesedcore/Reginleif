@@ -2772,6 +2772,83 @@ static bool _guess_expression_type(GDScriptParser::CompletionContext &p_context,
 	return found;
 }
 
+static bool _completion_suite_always_exits(const GDScriptParser::SuiteNode* p_suite) {
+	if (p_suite == nullptr || p_suite->statements.is_empty()) {
+		return false;
+	}
+
+	const GDScriptParser::Node* last = p_suite->statements[p_suite->statements.size() - 1];
+	if (last->type == GDScriptParser::Node::RETURN || last->type == GDScriptParser::Node::BREAK || last->type == GDScriptParser::Node::CONTINUE) {
+		return true;
+	}
+	if (last->type == GDScriptParser::Node::IF) {
+		const GDScriptParser::IfNode* if_node = static_cast<const GDScriptParser::IfNode*>(last);
+		return if_node->false_block != nullptr && _completion_suite_always_exits(if_node->true_block) && _completion_suite_always_exits(if_node->false_block);
+	}
+
+	return false;
+}
+
+static void _completion_collect_type_narrowing(const GDScriptParser::ExpressionNode* p_expr, bool p_positive, const GDScriptParser::IdentifierNode* p_identifier, GDScriptParser::DataType& r_type) {
+	if (p_expr == nullptr || p_identifier == nullptr) {
+		return;
+	}
+
+	switch (p_expr->type) {
+		case GDScriptParser::Node::TYPE_TEST: {
+			const GDScriptParser::TypeTestNode* type_test = static_cast<const GDScriptParser::TypeTestNode*>(p_expr);
+			if (!p_positive || type_test->operand == nullptr || type_test->operand->type != GDScriptParser::Node::IDENTIFIER || !type_test->test_datatype.is_hard_type()) {
+				break;
+			}
+
+			const GDScriptParser::IdentifierNode* id = static_cast<const GDScriptParser::IdentifierNode*>(type_test->operand);
+			if (id->name == p_identifier->name && id->source == p_identifier->source) {
+				r_type = type_test->test_datatype;
+			}
+		} break;
+		case GDScriptParser::Node::UNARY_OPERATOR: {
+			const GDScriptParser::UnaryOpNode* unary = static_cast<const GDScriptParser::UnaryOpNode*>(p_expr);
+			if (unary->operation == GDScriptParser::UnaryOpNode::OP_LOGIC_NOT) {
+				_completion_collect_type_narrowing(unary->operand, !p_positive, p_identifier, r_type);
+			}
+		} break;
+		case GDScriptParser::Node::BINARY_OPERATOR: {
+			const GDScriptParser::BinaryOpNode* binary = static_cast<const GDScriptParser::BinaryOpNode*>(p_expr);
+			if (binary->operation == GDScriptParser::BinaryOpNode::OP_LOGIC_AND && p_positive) {
+				_completion_collect_type_narrowing(binary->left_operand, true, p_identifier, r_type);
+				_completion_collect_type_narrowing(binary->right_operand, true, p_identifier, r_type);
+			}
+		} break;
+		default:
+			break;
+	}
+}
+
+static const GDScriptParser::IfNode* _completion_find_parent_if_for_suite(const GDScriptParser::SuiteNode* p_suite) {
+	if (p_suite == nullptr) {
+		return nullptr;
+	}
+	if (p_suite->parent_if != nullptr) {
+		return p_suite->parent_if;
+	}
+	if (p_suite->parent_block == nullptr) {
+		return nullptr;
+	}
+
+	for (const GDScriptParser::Node* stmt : p_suite->parent_block->statements) {
+		if (stmt->type != GDScriptParser::Node::IF) {
+			continue;
+		}
+
+		const GDScriptParser::IfNode* if_node = static_cast<const GDScriptParser::IfNode*>(stmt);
+		if (if_node->true_block == p_suite || if_node->false_block == p_suite) {
+			return if_node;
+		}
+	}
+
+	return nullptr;
+}
+
 static bool _guess_identifier_type(GDScriptParser::CompletionContext &p_context, const GDScriptParser::IdentifierNode *p_identifier, GDScriptCompletionIdentifier &r_type) {
 	static int recursion_depth = 0;
 	RecursionCheck recursion(&recursion_depth);
@@ -2851,6 +2928,12 @@ static bool _guess_identifier_type(GDScriptParser::CompletionContext &p_context,
 	while (suite) {
 		for (const GDScriptParser::Node *stmt : suite->statements) {
 			if (stmt->end_line >= p_context.current_line) {
+				if (stmt->type == GDScriptParser::Node::IF) {
+					const GDScriptParser::IfNode* if_node = static_cast<const GDScriptParser::IfNode*>(stmt);
+					if (if_node->condition != nullptr && if_node->condition->start_line <= p_context.current_line && if_node->condition->end_line >= p_context.current_line) {
+						_completion_collect_type_narrowing(if_node->condition, true, p_identifier, id_type.type);
+					}
+				}
 				break;
 			}
 
@@ -2865,30 +2948,31 @@ static bool _guess_identifier_type(GDScriptParser::CompletionContext &p_context,
 						}
 					}
 				} break;
+				case GDScriptParser::Node::IF: {
+					const GDScriptParser::IfNode* if_node = static_cast<const GDScriptParser::IfNode*>(stmt);
+					if (if_node->false_block == nullptr && _completion_suite_always_exits(if_node->true_block)) {
+						_completion_collect_type_narrowing(if_node->condition, false, p_identifier, id_type.type);
+					}
+				} break;
 				default:
 					// TODO: Check sub blocks (control flow statements) as they might also reassign stuff.
 					break;
 			}
 		}
 
-		if (suite->parent_if && suite->parent_if->condition && suite->parent_if->condition->type == GDScriptParser::Node::TYPE_TEST) {
-			// Operator `is` used, check if identifier is in there! this helps resolve in blocks that are (if (identifier is value)): which are very common..
-			// Super dirty hack, but very useful.
-			// Credit: Zylann.
-			// TODO: this could be hacked to detect AND-ed conditions too...
-			const GDScriptParser::TypeTestNode *type_test = static_cast<const GDScriptParser::TypeTestNode *>(suite->parent_if->condition);
-			if (type_test->operand && type_test->test_type && type_test->operand->type == GDScriptParser::Node::IDENTIFIER && static_cast<const GDScriptParser::IdentifierNode *>(type_test->operand)->name == p_identifier->name && static_cast<const GDScriptParser::IdentifierNode *>(type_test->operand)->source == p_identifier->source) {
-				// Bingo.
-				GDScriptParser::CompletionContext c = p_context;
-				c.current_line = type_test->operand->start_line;
-				c.current_suite = suite;
-				if (type_test->test_datatype.is_hard_type()) {
-					id_type.type = type_test->test_datatype;
-					if (last_assign_line < c.current_line) {
-						// Override last assignment.
-						last_assign_line = c.current_line;
-						last_assigned_expression = nullptr;
-					}
+		const GDScriptParser::IfNode* parent_if = _completion_find_parent_if_for_suite(suite);
+		if (parent_if != nullptr && parent_if->condition != nullptr) {
+			GDScriptParser::DataType narrowed_type;
+			const bool in_true_block = parent_if->true_block == suite;
+			const bool in_false_block = parent_if->false_block == suite;
+			if (in_true_block || in_false_block) {
+				_completion_collect_type_narrowing(parent_if->condition, in_true_block, p_identifier, narrowed_type);
+			}
+			if (narrowed_type.is_hard_type()) {
+				id_type.type = narrowed_type;
+				if (last_assign_line < parent_if->condition->start_line) {
+					last_assign_line = parent_if->condition->start_line;
+					last_assigned_expression = nullptr;
 				}
 			}
 		}

@@ -68,6 +68,7 @@ class GDScriptAnalyzer {
 	struct NarrowingScope {
 		HashMap<GDScriptParser::VariableNode*, GDScriptParser::DataType> variables;
 		HashMap<GDScriptParser::IdentifierNode*, GDScriptParser::DataType> iterators;
+		HashMap<GDScriptParser::ParameterNode*, GDScriptParser::DataType> parameters;
 	};
 	NarrowingScope narrowed_types;
 
