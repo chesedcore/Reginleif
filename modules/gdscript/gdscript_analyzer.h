@@ -62,6 +62,15 @@ class GDScriptAnalyzer {
 	bool static_context = false;
 	GDScriptParser::DataType current_impl_self_type;
 
+	///who the FUCK thought it was a brilliant idea to make the iterator its own identifier node
+	///COMPLETELY disjoint from a local variable
+	///(seriously though, what does this get you :sob:)
+	struct NarrowingScope {
+		HashMap<GDScriptParser::VariableNode*, GDScriptParser::DataType> variables;
+		HashMap<GDScriptParser::IdentifierNode*, GDScriptParser::DataType> iterators;
+	};
+	NarrowingScope narrowed_types;
+
 	// Tests for detecting invalid overloading of script members
 	static _FORCE_INLINE_ bool has_member_name_conflict_in_script_class(const StringName &p_name, const GDScriptParser::ClassNode *p_current_class_node, const GDScriptParser::Node *p_member);
 	static _FORCE_INLINE_ bool has_member_name_conflict_in_native_type(const StringName &p_name, const StringName &p_native_type_string);
@@ -93,6 +102,7 @@ class GDScriptAnalyzer {
 	void resolve_constant(GDScriptParser::ConstantNode *p_constant, bool p_is_local);
 	void resolve_parameter(GDScriptParser::ParameterNode *p_parameter);
 	void resolve_if(GDScriptParser::IfNode *p_if);
+	void collect_type_narrowing(GDScriptParser::ExpressionNode* p_expr, bool p_positive, NarrowingScope& r_narrowed);
 	void resolve_for(GDScriptParser::ForNode *p_for);
 	void resolve_while(GDScriptParser::WhileNode *p_while);
 	void resolve_assert(GDScriptParser::AssertNode *p_assert);
