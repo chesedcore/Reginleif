@@ -340,6 +340,7 @@
 #endif // PHYSICS_2D_DISABLED
 
 #ifndef PHYSICS_3D_DISABLED
+#include "scene/3d/bone_spreader_3d.h"
 #include "scene/3d/physics/animatable_body_3d.h"
 #include "scene/3d/physics/area_3d.h"
 #include "scene/3d/physics/character_body_3d.h"
@@ -596,10 +597,12 @@ void register_scene_types() {
 	GDREGISTER_CLASS(AnimationPlayer);
 	GDREGISTER_CLASS(AnimationTree);
 	GDREGISTER_CLASS(AnimationNode);
+	GDREGISTER_ABSTRACT_CLASS(AnimationNodeObserver);
 	GDREGISTER_CLASS(AnimationRootNode);
 	GDREGISTER_CLASS(AnimationNodeBlendTree);
 	GDREGISTER_CLASS(AnimationNodeBlendSpace1D);
 	GDREGISTER_CLASS(AnimationNodeBlendSpace2D);
+	GDREGISTER_CLASS(AnimationNodeObserverBlendSpace);
 	GDREGISTER_CLASS(AnimationNodeStateMachine);
 	GDREGISTER_CLASS(AnimationNodeStateMachinePlayback);
 	GDREGISTER_VIRTUAL_CLASS(AnimationNodeExtension);
@@ -608,6 +611,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(AnimationNodeStateMachineTransition);
 	GDREGISTER_CLASS(AnimationNodeOutput);
 	GDREGISTER_CLASS(AnimationNodeOneShot);
+	GDREGISTER_CLASS(AnimationNodeObserverOneShot);
 	GDREGISTER_CLASS(AnimationNodeAnimation);
 	GDREGISTER_CLASS(AnimationNodeAdd2);
 	GDREGISTER_CLASS(AnimationNodeAdd3);
@@ -617,6 +621,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(AnimationNodeTimeScale);
 	GDREGISTER_CLASS(AnimationNodeTimeSeek);
 	GDREGISTER_CLASS(AnimationNodeTransition);
+	GDREGISTER_CLASS(AnimationNodeObserverTransition);
 
 	GDREGISTER_CLASS(ShaderGlobalsOverride); // can be used in any shader
 
@@ -734,6 +739,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(SoftBody3D);
 #endif // PHYSICS_3D_DISABLED
 
+	GDREGISTER_CLASS(BoneSpreader3D);
 	GDREGISTER_CLASS(BoneAttachment3D);
 	GDREGISTER_CLASS(LookAtModifier3D);
 #ifndef DISABLE_DEPRECATED

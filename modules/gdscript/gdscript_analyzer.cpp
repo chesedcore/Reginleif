@@ -2662,10 +2662,14 @@ void GDScriptAnalyzer::resolve_function_signature(GDScriptParser::FunctionNode *
 		}
 	} else if (!p_is_lambda && function_name == GDScriptLanguage::get_singleton()->strings._static_init) {
 		// Static constructor.
+
 		GDScriptParser::DataType return_type;
 		return_type.kind = GDScriptParser::DataType::BUILTIN;
 		return_type.builtin_type = Variant::NIL;
+		return_type.type_source = GDScriptParser::DataType::ANNOTATED_INFERRED;
+
 		p_function->return_type_constraint = return_type;
+
 		if (p_function->return_type) {
 			GDScriptParser::DataType declared_return = resolve_datatype(p_function->return_type);
 			if (declared_return.kind != GDScriptParser::DataType::BUILTIN || declared_return.builtin_type != Variant::NIL) {
@@ -3417,13 +3421,113 @@ bool GDScriptAnalyzer::resolve_generic_bound_chain(const StringName& p_generic_p
     return true; ///chased something concrete and constrained! yay!
 }
 
+///returns true iff every control flow path through this ends in a return
+static bool suite_always_exits(const GDScriptParser::SuiteNode* p_suite) {
+	if (p_suite == nullptr || p_suite->statements.is_empty()) {
+		return false;
+	}
+	const GDScriptParser::Node* last = p_suite->statements[p_suite->statements.size() - 1];
+	if (last->type == GDScriptParser::Node::RETURN || last->type == GDScriptParser::Node::BREAK || last->type == GDScriptParser::Node::CONTINUE) {
+		return true;
+	}
+	if (last->type == GDScriptParser::Node::IF) {
+		const GDScriptParser::IfNode* if_node = static_cast<const GDScriptParser::IfNode*>(last); ///just let me auto...
+		if (if_node->false_block == nullptr) {
+			return false;
+		}
+		return suite_always_exits(if_node->true_block) && suite_always_exits(if_node->false_block);
+	}
+	return false;
+}
+
+void GDScriptAnalyzer::collect_type_narrowing(GDScriptParser::ExpressionNode* p_expr, bool p_positive, NarrowingScope& r_narrowed) {
+	if (p_expr == nullptr) {
+		return;
+	}
+
+	switch (p_expr->type) {
+		case GDScriptParser::Node::TYPE_TEST: {
+
+			GDScriptParser::TypeTestNode *type_test = static_cast<GDScriptParser::TypeTestNode*>(p_expr);
+
+			if (type_test->operand == nullptr || type_test->operand->type != GDScriptParser::Node::IDENTIFIER || !type_test->test_datatype.is_set()) {
+				break;
+			}
+
+			///my fucking blood boils each time i have to do this. 
+			///why can't there be a nuanced auto ban instead of 'nope, no auto!!'
+			///come on man...
+			GDScriptParser::IdentifierNode* id = static_cast<GDScriptParser::IdentifierNode*>(type_test->operand);
+
+			if (id->source == GDScriptParser::IdentifierNode::LOCAL_VARIABLE && id->variable_source != nullptr) {
+				if (p_positive) {
+					r_narrowed.variables.insert(id->variable_source, type_test->test_datatype);
+				}
+			} else if (id->source == GDScriptParser::IdentifierNode::LOCAL_ITERATOR && id->bind_source != nullptr) {
+				if (p_positive) {
+					r_narrowed.iterators.insert(id->bind_source, type_test->test_datatype);
+				}
+			}
+
+			///only local variables and for iterators are narrowed.
+			///member/static/param narrowing is unsafe here
+			///negative narrowing (`x is not Foo`) just literally can't produce a concrete narrower
+			///type in general (the complement of a type isn't expressible as a DataType lmao, fuck CFG semantics)
+			///so no entryfor p_positive == false beyond what NOT/AND compose right below
+			break;
+		}
+
+		case GDScriptParser::Node::UNARY_OPERATOR: {
+			GDScriptParser::UnaryOpNode* unary = static_cast<GDScriptParser::UnaryOpNode*>(p_expr);
+			if (unary->operation == GDScriptParser::UnaryOpNode::OP_LOGIC_NOT) {
+				collect_type_narrowing(unary->operand, !p_positive, r_narrowed);
+			}
+			break;
+		}
+		case GDScriptParser::Node::BINARY_OPERATOR: {
+			GDScriptParser::BinaryOpNode* binary = static_cast<GDScriptParser::BinaryOpNode*>(p_expr);
+			if (binary->operation == GDScriptParser::BinaryOpNode::OP_LOGIC_AND && p_positive) {
+				///`if x is Shit and ...`: narrowing from Shit holds while evaluating '...' and then both hold true
+				collect_type_narrowing(binary->left_operand, true, r_narrowed);
+				collect_type_narrowing(binary->right_operand, true, r_narrowed);
+			}
+			///`Shit or Ass`, and the nonpositive case for `and`, don't yield a sound single
+			///narrowed type, so i genuinely can't be fucked to handle that case
+			break;
+		}
+		default:
+			break;
+	}
+}
+
 void GDScriptAnalyzer::resolve_if(GDScriptParser::IfNode *p_if) {
 	reduce_expression(p_if->condition);
 
-	resolve_suite(p_if->true_block);
+	{
+		NarrowingScope true_narrowed(narrowed_types);
+		collect_type_narrowing(p_if->condition, true, true_narrowed);
+		NarrowingScope saved(narrowed_types);
+
+		///hmm, i wonder why i sneezed while writing this?
+		Finally restore_narrowing([&]() { narrowed_types = saved; }); 
+
+		narrowed_types = true_narrowed;
+		resolve_suite(p_if->true_block);
+	}
 
 	if (p_if->false_block != nullptr) {
+		NarrowingScope false_narrowed(narrowed_types);
+		collect_type_narrowing(p_if->condition, false, false_narrowed);
+		NarrowingScope saved(narrowed_types);
+		Finally restore_narrowing([&]() { narrowed_types = saved; }); 
+		narrowed_types = false_narrowed;
 		resolve_suite(p_if->false_block);
+	}
+
+	///early return propagation case
+	///`if shit is not Ass: return` should narrow shit to Ass here
+	if (p_if->false_block == nullptr && suite_always_exits(p_if->true_block)) {
+		collect_type_narrowing(p_if->condition, false, narrowed_types);
 	}
 }
 
@@ -3539,7 +3643,12 @@ void GDScriptAnalyzer::resolve_for(GDScriptParser::ForNode *p_for) {
 		}
 	}
 
-	resolve_suite(p_for->loop);
+	{
+		NarrowingScope saved(narrowed_types);
+		Finally restore_narrowing([&]() { narrowed_types = saved; });
+		resolve_suite(p_for->loop);
+	}
+
 #ifdef DEBUG_ENABLED
 	if (p_for->variable) {
 		is_shadowing(p_for->variable, R"("for" iterator variable)", true);
@@ -3549,6 +3658,13 @@ void GDScriptAnalyzer::resolve_for(GDScriptParser::ForNode *p_for) {
 
 void GDScriptAnalyzer::resolve_while(GDScriptParser::WhileNode *p_while) {
 	reduce_expression(p_while->condition);
+
+	NarrowingScope loop_narrowed(narrowed_types);
+	collect_type_narrowing(p_while->condition, true, loop_narrowed);
+	NarrowingScope saved(narrowed_types);
+	Finally restore_narrowing([&]() { narrowed_types = saved; });
+	narrowed_types = loop_narrowed;
+
 	resolve_suite(p_while->loop);
 }
 
@@ -4144,6 +4260,16 @@ void GDScriptAnalyzer::update_dictionary_literal_element_type(GDScriptParser::Di
 void GDScriptAnalyzer::reduce_assignment(GDScriptParser::AssignmentNode *p_assignment) {
 	reduce_expression(p_assignment->assigned_value);
 
+	///invalidate narrowing on reassignment
+	if (p_assignment->assignee->type == GDScriptParser::Node::IDENTIFIER) {
+		GDScriptParser::IdentifierNode* narrow_check_id = static_cast<GDScriptParser::IdentifierNode*>(p_assignment->assignee);
+		if (narrow_check_id->source == GDScriptParser::IdentifierNode::LOCAL_VARIABLE && narrow_check_id->variable_source) {
+			narrowed_types.variables.erase(narrow_check_id->variable_source);
+		} else if (narrow_check_id->source == GDScriptParser::IdentifierNode::LOCAL_ITERATOR && narrow_check_id->bind_source) {
+			narrowed_types.iterators.erase(narrow_check_id->bind_source);
+		}
+	}
+
 #ifdef DEBUG_ENABLED
 	// Increment assignment count for local variables.
 	// Before we reduce the assignee because we don't want to warn about not being assigned when performing the assignment.
@@ -4393,7 +4519,19 @@ void GDScriptAnalyzer::reduce_await(GDScriptParser::AwaitNode *p_await) {
 
 void GDScriptAnalyzer::reduce_binary_op(GDScriptParser::BinaryOpNode *p_binary_op) {
 	reduce_expression(p_binary_op->left_operand);
-	reduce_expression(p_binary_op->right_operand);
+
+	///push a temporary narrow ONLY for the right operand's reduction
+	///this is so that `if shit is Ass and shit.ass()` can be narrowed
+	if (p_binary_op->operation == GDScriptParser::BinaryOpNode::OP_LOGIC_AND) {
+		NarrowingScope right_narrowed(narrowed_types);
+		collect_type_narrowing(p_binary_op->left_operand, true, right_narrowed);
+		NarrowingScope saved(narrowed_types);
+		Finally restore_narrowing([&]() { narrowed_types = saved; });
+		narrowed_types = right_narrowed;
+		reduce_expression(p_binary_op->right_operand);
+	} else {
+		reduce_expression(p_binary_op->right_operand);
+	}
 
 	GDScriptParser::DataType left_type;
 	if (p_binary_op->left_operand) {
@@ -6211,6 +6349,14 @@ void GDScriptAnalyzer::reduce_identifier(GDScriptParser::IdentifierNode *p_ident
 			[[fallthrough]];
 		case GDScriptParser::IdentifierNode::LOCAL_VARIABLE:
 			p_identifier->variable_source->usages++;
+
+			///use narrows if found
+			if (const GDScriptParser::DataType* narrowed = narrowed_types.variables.getptr(p_identifier->variable_source)) {
+				p_identifier->type_constraint = *narrowed;
+				found_source = true;
+				break;
+			}
+
 			[[fallthrough]];
 		case GDScriptParser::IdentifierNode::STATIC_VARIABLE:
 			p_identifier->type_constraint = p_identifier->variable_source->type_constraint;
@@ -6222,9 +6368,16 @@ void GDScriptAnalyzer::reduce_identifier(GDScriptParser::IdentifierNode *p_ident
 #endif // DEBUG_ENABLED
 			break;
 		case GDScriptParser::IdentifierNode::LOCAL_ITERATOR:
+		
+			p_identifier->bind_source->usages++;	
+			if (const GDScriptParser::DataType* narrowed = narrowed_types.iterators.getptr(p_identifier->bind_source)) {
+				p_identifier->type_constraint = *narrowed;
+				found_source = true;
+				break;
+			}
+			
 			p_identifier->type_constraint = p_identifier->bind_source->type_constraint;
 			found_source = true;
-			p_identifier->bind_source->usages++;
 			break;
 		case GDScriptParser::IdentifierNode::LOCAL_BIND: {
 			GDScriptParser::DataType result = p_identifier->bind_source->type_constraint;
