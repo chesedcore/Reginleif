@@ -51,13 +51,13 @@ var node := get_node(...)
 if x is Node2D:
     print(x.position)
 ```
-This marks the third line to be type unsafe in vanilla GDScript, and this can even be seen in the editor, as the line number on the left side of the code editor becomes unlit, showing that the analyser could not prove type safety. It even triggers UNSAFE_PROPERTY_ACCESS and related warnings! However, this operation provably IS safe! it only executes if x is that type, and thus, x's type gets 'narrowed.'
+This marks the third line to be type unsafe in vanilla GDScript, and this can even be seen in the editor, as the line number on the left side of the code editor becomes unlit, showing that the analyser could not prove type safety. It even triggers UNSAFE_PROPERTY_ACCESS and related warnings! 
+But this is a problem, because, this operation provably IS safe, so the warning is misleading! it only executes if x is that type, and thus, x's type gets 'narrowed.'
 
 This fork is narrowing aware! It does indeed narrow the above case, along with the following cases:
 
 ```gdscript
 if x is Node2D and x.get_position().x > 20:
-                  #^^^^^^^^^^^^^^^^^^^^^^^ safe!
 ```
 
 ```gdscript
@@ -71,7 +71,7 @@ if x is not Node2D:
 else:
     print(x.position)
 ```
-All the above cases become narrow-aware and thus type safe. This extends to `is Trait` style checks too (discussed soon in this doc).
+All the above cases become narrow-aware and thus type safe, along with full code complete! This extends to `is Trait` style checks too (discussed soon in this doc).
 
 ### Generics
 
