@@ -32,12 +32,15 @@
 #include "gdscript_cache.h"
 
 #include "gdscript.h"
+#include "gdscript_tokenizer.h"
 #include "gdscript_tokenizer_buffer.h"
 
 #include "core/config/project_settings.h"
 #include "core/io/resource_loader.h"
 #include "core/math/math_defs.h"
 #include "core/object/class_db.h"
+#include "core/object/property_info.h"
+#include "core/variant/variant.h"
 #include "scene/main/multiplayer_api.h"
 
 #ifdef DEBUG_ENABLED
@@ -4275,20 +4278,38 @@ GDScriptParser::TypeNode *GDScriptParser::parse_type(bool p_allow_void) {
 
 	if (match(GDScriptTokenizer::Token::BRACKET_OPEN)) {
 		// Typed collection (like Array[int], Dictionary[String, int]).
-		bool first_pass = true;
-		do {
-			TypeNode *container_type = parse_type(false); // Don't allow void for element type.
-			if (container_type == nullptr) {
-				push_error(vformat(R"(Expected type for collection after "%s".)", first_pass ? "[" : ","));
-				complete_extents(type);
-				type = nullptr;
-				break;
-			} else {
-				type->container_types.push_back(container_type);
-			}
-			first_pass = false;
-		} while (match(GDScriptTokenizer::Token::COMMA));
+		/// and now, typed callables!! hell yeah!! i think!!
+
+		const bool is_callable = type_element->name == SNAME("Callable");
+		if (is_callable) {
+			type->is_callable_signature = true;
+		}
+		if (!is_callable || !check(GDScriptTokenizer::Token::BRACKET_CLOSE)) {
+			
+			bool first_pass = true;
+			do {
+				TypeNode *container_type = parse_type(false); // Don't allow void for element type.
+				if (container_type == nullptr) {
+					push_error(vformat(R"(Expected type for collection after "%s".)", first_pass ? "[" : ","));
+					complete_extents(type);
+					type = nullptr;
+					break;
+				} else {
+					type->container_types.push_back(container_type);
+				}
+				first_pass = false;
+			} while (match(GDScriptTokenizer::Token::COMMA));
+		}
+
 		consume(GDScriptTokenizer::Token::BRACKET_CLOSE, R"(Expected closing "]" after collection type.)");
+		if (type != nullptr && is_callable && match(GDScriptTokenizer::Token::FORWARD_ARROW)) {
+			type->callable_return_type = parse_type(false);
+			if (type->callable_return_type == nullptr) {
+				push_error(R"(Expected a return type after "->" in typed Callable type. Note: Consider adding a type, or delete the "->" if it returns nothing.)");
+			}
+		}
+		
+		
 		if (type != nullptr) {
 			complete_extents(type);
 		}
@@ -6039,6 +6060,19 @@ String GDScriptParser::DataType::to_string() const {
 			}
 			if (builtin_type == Variant::DICTIONARY && has_container_element_types()) {
 				return vformat("Dictionary[%s, %s]", get_container_element_type_or_variant(0).to_string(), get_container_element_type_or_variant(1).to_string());
+			}
+			if (builtin_type == Variant::CALLABLE && has_callable_signature) {
+				String args;
+				for (int i = 0; i < method_info.arguments.size(); i++) {
+					if (i > 0) { args += ", "; }
+					args += Variant::get_type_name(method_info.arguments[i].type);
+				}
+				String text = vformat("Callable[%s]", args);
+				if (method_info.return_val.type != Variant::NIL || (method_info.return_val.usage & PROPERTY_USAGE_NIL_IS_VARIANT)) {
+					text += "->";
+					text += Variant::get_type_name(method_info.return_val.type);
+				}
+				return text;
 			}
 			return Variant::get_type_name(builtin_type);
 		

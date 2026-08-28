@@ -42,9 +42,12 @@
 #include "core/io/file_access.h"
 #include "core/io/resource_loader.h"
 #include "core/object/class_db.h"
+#include "core/object/property_info.h"
 #include "scene/main/node.h"
 
 #include "modules/gdscript/gdscript_parser.h"
+#include <cstddef>
+#include <cstdint>
 
 #if defined(TOOLS_ENABLED) && !defined(DISABLE_DEPRECATED)
 #define SUGGEST_GODOT4_RENAMES
@@ -91,6 +94,9 @@ static GDScriptParser::DataType make_callable_type(const MethodInfo &p_info) {
 	type.builtin_type = Variant::CALLABLE;
 	type.is_constant = true;
 	type.method_info = p_info;
+	type.has_callable_signature = !p_info.arguments.is_empty() || 
+								   p_info.return_val.type != Variant::NIL || 
+								   (p_info.return_val.usage & PROPERTY_USAGE_NIL_IS_VARIANT);
 	return type;
 }
 
@@ -1644,7 +1650,31 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 		}
 	}
 
-	if (!p_type->container_types.is_empty()) {
+	if (p_type->is_callable_signature) {
+		if (result.kind != GDScriptParser::DataType::BUILTIN || result.builtin_type != Variant::CALLABLE) {
+			push_error(R"(Only Callable types can use the Callable signature syntax.)", p_type);
+			return bad_type;
+		}
+
+		result.has_callable_signature = true;
+		result.method_info = MethodInfo();
+
+		for (uint32_t i = 0; i < p_type->container_types.size(); i++) {
+			GDScriptParser::DataType arg_type = type_from_metatype(resolve_datatype(p_type->container_types[i]));
+			arg_type.is_constant = false;
+			result.method_info.arguments.push_back(arg_type.to_property_info("arg"+ itos(i+1)));
+		}
+
+		if (p_type->callable_return_type != nullptr) {
+			GDScriptParser::DataType return_type = type_from_metatype(resolve_datatype(p_type->callable_return_type));
+			return_type.is_constant = false;
+			result.method_info.return_val = return_type.to_property_info("");
+		} else {
+			result.method_info.return_val.type = Variant::NIL;
+		}
+	}
+
+	if (!p_type->container_types.is_empty() && !p_type->is_callable_signature) {
 		if (result.builtin_type == Variant::ARRAY) {
 			if (p_type->container_types.size() != 1) {
 				push_error(R"(Typed arrays require exactly one collection element type.)", p_type);
@@ -5065,6 +5095,13 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 	List<GDScriptParser::DataType> par_types;
 
 	bool is_constructor = (base_type.is_meta_type || (p_call->callee && p_call->callee->type == GDScriptParser::Node::IDENTIFIER)) && p_call->function_name == SNAME("new");
+	if (base_type.kind == GDScriptParser::DataType::BUILTIN && 
+		base_type.builtin_type == Variant::CALLABLE && 
+		base_type.has_callable_signature && 
+		(p_call->function_name == SNAME("call"))
+		/// TODO: implement special handling for 'call', 'bind' and 'unbind'
+	)
+
 
 	if (is_constructor) {
 		if (Engine::get_singleton()->has_singleton(base_type.native_type)) {

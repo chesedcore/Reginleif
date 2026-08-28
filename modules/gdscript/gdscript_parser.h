@@ -151,6 +151,7 @@ public:
 
 		MethodInfo method_info; // For callable/signals.
 		HashMap<StringName, int64_t> enum_values; // For enums.
+		bool has_callable_signature = false;
 
 		///trait names this type must satisfy
 		Vector<StringName> trait_bound_names;
@@ -238,8 +239,23 @@ public:
 			switch (kind) {
 				case VARIANT:
 					return true; // All variants are the same.
-				case BUILTIN:
-					return builtin_type == p_other.builtin_type;
+				case BUILTIN: {
+					if (builtin_type != p_other.builtin_type) { return false; }
+					if (builtin_type == Variant::CALLABLE && has_callable_signature && p_other.has_callable_signature) {
+						if (method_info.arguments.size() != p_other.method_info.arguments.size()) { return false; }
+
+						for (int i = 0; i < method_info.arguments.size(); i++) {
+							if (method_info.arguments[i].type != p_other.method_info.arguments[i].type ||
+								method_info.arguments[i].class_name != p_other.method_info.arguments[i].class_name) {
+								return false;
+							}
+						}
+						
+						return method_info.return_val.type == p_other.method_info.return_val.type &&
+							   method_info.return_val.class_name == p_other.method_info.return_val.class_name;
+					}
+					return true;
+				}
 				case NATIVE:
 				case ENUM: // Enums use native_type to identify the enum and its base class.
 					return native_type == p_other.native_type;
@@ -306,6 +322,7 @@ public:
 			script_path = p_other.script_path;
 			class_type = p_other.class_type;
 			method_info = p_other.method_info;
+			has_callable_signature = p_other.has_callable_signature;
 			enum_values = p_other.enum_values;
 			container_element_types = p_other.container_element_types;
 			trait_bound_names = p_other.trait_bound_names;
@@ -1375,6 +1392,8 @@ public:
 	struct TypeNode : public Node {
 		LocalVector<IdentifierNode *> type_chain;
 		LocalVector<TypeNode *> container_types;
+		TypeNode* callable_return_type = nullptr;
+		bool is_callable_signature = false;
 
 		Vector<IdentifierNode*> trait_bounds;
 
