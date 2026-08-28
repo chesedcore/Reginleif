@@ -424,7 +424,7 @@ Ref<PackedScene> ResourceLoaderText::_parse_node_tag(VariantParser::ResourcePars
 			if (!next_tag.fields.has("path")) {
 				error = ERR_FILE_CORRUPT;
 				error_text = "missing 'path' field from exposed tag";
-				_printerr();
+				ERR_PRINT(_get_error_string());
 				return Ref<PackedScene>();
 			}
 
@@ -436,7 +436,7 @@ Ref<PackedScene> ResourceLoaderText::_parse_node_tag(VariantParser::ResourcePars
 
 			if (error) {
 				if (error != ERR_FILE_EOF) {
-					_printerr();
+					ERR_PRINT(_get_error_string());
 					return Ref<PackedScene>();
 				} else {
 					error = OK;
