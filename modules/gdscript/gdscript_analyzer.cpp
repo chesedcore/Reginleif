@@ -6897,7 +6897,7 @@ void GDScriptAnalyzer::reduce_subscript(GDScriptParser::SubscriptNode *p_subscri
 			} else {
 				if (base_type.kind == GDScriptParser::DataType::BUILTIN && !index_type.is_variant()) {
 					// Check if indexing is valid.
-					bool error = index_type.kind != GDScriptParser::DataType::BUILTIN && base_type.builtin_type != Variant::DICTIONARY;
+					bool error = index_type.kind != GDScriptParser::DataType::BUILTIN && base_type.builtin_type != Variant::DICTIONARY && index_type.kind != GDScriptParser::DataType::GENERIC_TYPE;
 					if (!error) {
 						switch (base_type.builtin_type) {
 							// Expect int or real as index.
@@ -6958,6 +6958,30 @@ void GDScriptAnalyzer::reduce_subscript(GDScriptParser::SubscriptNode *p_subscri
 								if (base_type.has_container_element_type(0)) {
 									GDScriptParser::DataType key_type = base_type.get_container_element_type(0);
 									if (!key_type.is_variant() && key_type.is_hard_type()) {
+										if (index_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+											GDScriptParser::DataType resolved_index_bound;
+											StringName terminal;
+											if (resolve_generic_bound_chain(index_type.generic_param, resolved_index_bound, terminal)) {
+												if (key_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+													GDScriptParser::DataType resolved_key_bound;
+													StringName key_terminal;
+													if (resolve_generic_bound_chain(key_type.generic_param, resolved_key_bound, key_terminal)) {
+														error = !is_type_compatible(resolved_key_bound, resolved_index_bound, true);
+													} else {
+														error = false;
+													}
+												} else {
+													error = !is_type_compatible(key_type, resolved_index_bound, true);
+												}
+											} else {
+												if (key_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+													error = key_type.generic_param != index_type.generic_param;
+												} else {
+													error = false;
+												}
+											}
+											break;
+										}
 										switch (index_type.builtin_type) {
 											// Null value will be treated as an empty object, allow.
 											case Variant::NIL:
