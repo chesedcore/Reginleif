@@ -43,10 +43,11 @@
 #include "core/io/resource_loader.h"
 #include "core/object/class_db.h"
 #include "core/object/property_info.h"
+#include "core/string/string_name.h"
+#include "core/variant/variant.h"
 #include "scene/main/node.h"
 
 #include "modules/gdscript/gdscript_parser.h"
-#include <cstddef>
 #include <cstdint>
 
 #if defined(TOOLS_ENABLED) && !defined(DISABLE_DEPRECATED)
@@ -5098,9 +5099,50 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 	if (base_type.kind == GDScriptParser::DataType::BUILTIN && 
 		base_type.builtin_type == Variant::CALLABLE && 
 		base_type.has_callable_signature && 
-		(p_call->function_name == SNAME("call"))
-		/// TODO: implement special handling for 'call', 'bind' and 'unbind'
-	)
+		(p_call->function_name == SNAME("call") ||
+		 p_call->function_name == SNAME("bind") ||
+		 p_call->function_name == SNAME("unbind")))
+		{
+			for (uint32_t i = 0; i < p_call->arguments.size(); i++) {
+				reduce_expression(p_call->arguments[i]);
+			}
+			function_signature_from_info(base_type.method_info, return_type, par_types, default_arg_count, method_flags, p_call);
+
+			///should probably add handling for varargs here...?
+			if (p_call->function_name == SNAME("call")) {
+				validate_call_arg(par_types, default_arg_count, false, p_call);
+				p_call->type_constraint = return_type;
+				return;
+			}
+
+			GDScriptParser::DataType morphed_callable = base_type;
+			morphed_callable.method_info = base_type.method_info;
+
+			if (p_call->function_name == SNAME("bind")) {
+				if (p_call->arguments.size() > (uint32_t)par_types.size()) {
+					push_error(vformat(R"*([Reginleif] Too many arguments for bind(). Expected at most %d arguments but received %d instead.)*", par_types.size(), p_call->arguments.size()), p_call);
+					p_call->type_constraint = morphed_callable;
+					return;
+				}
+				const int first_bound_arg = par_types.size() - p_call->arguments.size();
+				for (uint32_t i = 0; i < p_call->arguments.size(); i++) {
+					GDScriptParser::DataType bind_arg_type = p_call->arguments[i]->type_constraint;
+					GDScriptParser::DataType expected_type = par_types.get(first_bound_arg + i);
+					if (!is_type_compatible(expected_type, bind_arg_type, true, p_call->arguments[i])) {
+						push_error(vformat(R"([Reginleif] Cannot bind value of type %s to Callable argument of type %s.)", bind_arg_type.to_string(), expected_type.to_string()), p_call->arguments[i]);
+					}
+				}
+
+				for (uint32_t i = 0; i < p_call->arguments.size(); i++) {
+					morphed_callable.method_info.arguments.remove_at(morphed_callable.method_info.arguments.size() - 1);
+				}
+				p_call->type_constraint = morphed_callable;
+				return;
+			}
+
+			///handles unbind
+			
+		}
 
 
 	if (is_constructor) {
