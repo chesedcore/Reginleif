@@ -4935,17 +4935,30 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 				if (trait_bound_type != nullptr) {
 					for (const StringName& trait_name : trait_bound_type->trait_bound_names) {
 						Ref<GDScriptTrait> trait_ref = _get_trait_for_completion(trait_name, nullptr);
-						if (trait_ref.is_valid() && trait_ref->required_signatures.has(p_symbol)) {
-							r_result.type = EditorLanguage::LookupResult::Type::SCRIPT_LOCATION;
+						if (trait_ref.is_valid() && trait_ref->has_method(p_symbol)) {
+							String trait_path = GDScriptCache::get_global_trait_path(trait_name);
+							if (trait_path.is_empty()) {
+								trait_path = trait_ref->script_path;
+							}
+							if (trait_path.is_empty()) { continue; }
+							int line = 0;
+							if (trait_ref->required_methods.has(p_symbol) && trait_ref->required_methods[p_symbol] != nullptr) {
+								line = trait_ref->required_methods[p_symbol]->start_line;
+							} else if (trait_ref->default_methods.has(p_symbol) && trait_ref->default_methods[p_symbol] != nullptr) {
+								line = trait_ref->default_methods[p_symbol]->start_line;
+							}
+							r_result.type = EditorLanguage::LookupResult::Type::CLASS;
 							r_result.class_name = trait_name;
 							r_result.class_member = p_symbol;
+							r_result.script_path = trait_path;
+							r_result.location = line;
 							return OK;
 						}
 					}
 				}
 
 				r_result.type = EditorLanguage::LookupResult::Type::SCRIPT_LOCATION;
-				r_result.class_name = "Generic";
+				r_result.class_name = base_type.generic_param;
 				r_result.class_member = base_type.generic_param;
 				return OK;
 			} break;
@@ -4954,10 +4967,23 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 				const GDScriptParser::DataType* trait_bound_type = _get_trait_bound_type_for_completion(base_type);
 				for (const StringName& trait_name : trait_bound_type->trait_bound_names) {
 					Ref<GDScriptTrait> trait_ref = _get_trait_for_completion(trait_name, nullptr);
-					if (trait_ref.is_valid() && trait_ref->required_signatures.has(p_symbol)) {
-						r_result.type = EditorLanguage::LookupResult::Type::SCRIPT_LOCATION;
+					if (trait_ref.is_valid() && trait_ref->has_method(p_symbol)) {
+						String trait_path = GDScriptCache::get_global_trait_path(trait_name);
+						if (trait_path.is_empty()) {
+							trait_path = trait_ref->script_path;
+						}
+						if (trait_path.is_empty()) { continue; }
+						int line = 0;
+						if (trait_ref->required_methods.has(p_symbol) && trait_ref->required_methods[p_symbol] != nullptr) {
+							line = trait_ref->required_methods[p_symbol]->start_line;
+						} else if (trait_ref->default_methods.has(p_symbol) && trait_ref->default_methods[p_symbol] != nullptr) {
+							line = trait_ref->default_methods[p_symbol]->start_line;
+						}
+						r_result.type = EditorLanguage::LookupResult::Type::CLASS;
 						r_result.class_name = trait_name;
 						r_result.class_member = p_symbol;
+						r_result.script_path = trait_path;
+						r_result.location = line;
 						return OK;
 					}
 				}
@@ -4992,6 +5018,17 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 		r_result.type = LookupResult::Type::CLASS;
 		r_result.class_name = "Variant";
 		return OK;
+	}
+
+	{
+		String trait_path = GDScriptCache::get_global_trait_path(p_symbol);
+		if (!trait_path.is_empty()) {
+			r_result.type = LookupResult::Type::CLASS;
+			r_result.class_name = p_symbol;
+			r_result.script_path = trait_path;
+			r_result.location = 0;
+			return OK;
+		}
 	}
 
 	GDScriptParser parser;
@@ -5065,6 +5102,16 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 	bool is_function = false;
 
 	switch (context.type) {
+		case GDScriptParser::COMPLETION_TRAIT_NAME: {
+			String trait_path = GDScriptCache::get_global_trait_path(p_symbol);
+			if (!trait_path.is_empty()) {
+				r_result.type = LookupResult::Type::CLASS;
+				r_result.class_name = p_symbol;
+				r_result.script_path = trait_path;
+				r_result.location = 0;
+				return OK;
+			}
+		} break;
 		case GDScriptParser::COMPLETION_BUILT_IN_TYPE_CONSTANT_OR_STATIC_METHOD: {
 			GDScriptParser::DataType base_type;
 			base_type.kind = GDScriptParser::DataType::BUILTIN;
