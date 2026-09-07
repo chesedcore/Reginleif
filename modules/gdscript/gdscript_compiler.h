@@ -35,6 +35,7 @@
 #include "gdscript_function.h"
 #include "gdscript_parser.h"
 
+#include "core/object/gdtype.h"
 #include "core/templates/hash_set.h"
 
 class GDScriptCompiler {
@@ -146,6 +147,7 @@ class GDScriptCompiler {
 
 	bool _is_class_member_property(CodeGen &codegen, const StringName &p_name);
 	bool _is_class_member_property(GDScript *owner, const StringName &p_name);
+	const GDType::Member* _get_native_member_property(GDScript* owner, const StringName &p_name);
 	bool _is_local_or_parameter(CodeGen &codegen, const StringName &p_name);
 
 	void _set_error(const String &p_error, const GDScriptParser::Node *p_node);
