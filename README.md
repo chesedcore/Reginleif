@@ -39,6 +39,7 @@ If you don't want to go through the hassle of all that, I periodically throw a f
 - completely optional braces {} based scoping
 - traits (first pass + optimisation passes)
 - some minor syntax niceties
+- some optimisations
 
 ## How to use the shit I added
 
@@ -367,6 +368,13 @@ stage
   .and_then(draw_2)
 ```
 and things shall simply work.
+
+#### optimisations
+Though not the express goal of Reginleif, performance is always good, so we take what we can get.
+most people aren't really interested in the technical side of perf, so I'll keep this brief:
+- local variables in function calls now reuse previously used, and now assuredly free stack slots instead of naively allocating new ones
+- compiler discarded away property access type info... the runtime had no idea what it was accessing and thus had to query classDB on every set/get. this info is now baked into the compile-time whenever sufficient type info is available, skipping a bunch of runtime bullshit. property set/get is now a lot faster!
+
 
 ### Some more caveats
 - Godot's `core` is rotten. Generics can LIE to you at runtime because static analysis is turned off for Variant-typed variables!!! (I didn't add this, this is Godot's default behaviour) Use static typing everywhere lest you want to run into undefined behaviour with generics.
