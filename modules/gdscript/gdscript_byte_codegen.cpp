@@ -968,6 +968,22 @@ void GDScriptByteCodeGenerator::write_get_member_validated(const Address& p_targ
 	append(p_index);
 }
 
+void GDScriptByteCodeGenerator::write_set_named_member_validated(const Address& p_base, const Address& p_value, const MethodBind* p_setter, int p_index) {
+	append_opcode(GDScriptFunction::OPCODE_SET_NAMED_MEMBER_VALIDATED);
+	append(p_base);
+	append(p_value);
+	append(p_setter);
+	append(p_index);
+}
+
+void GDScriptByteCodeGenerator::write_get_named_member_validated(const Address& p_target, const Address& p_base, const MethodBind* p_getter, int p_index) {
+	append_opcode(GDScriptFunction::OPCODE_GET_NAMED_MEMBER_VALIDATED);
+	append(p_base);
+	append(p_target);
+	append(p_getter);
+	append(p_index);
+}
+
 void GDScriptByteCodeGenerator::write_set_static_variable(const Address &p_value, const Address &p_class, int p_index) {
 	append_opcode(GDScriptFunction::OPCODE_SET_STATIC_VARIABLE);
 	append(p_value);

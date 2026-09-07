@@ -148,6 +148,10 @@ class GDScriptCompiler {
 	bool _is_class_member_property(CodeGen &codegen, const StringName &p_name);
 	bool _is_class_member_property(GDScript *owner, const StringName &p_name);
 	const GDType::Member* _get_native_member_property(GDScript* owner, const StringName &p_name);
+	const GDType::Member* _get_native_member_property_by_class(const StringName& p_native_class, const StringName &p_name);
+	const GDType::Member* _get_native_member_property_for_base(const GDScriptDataType& p_base_type, const StringName &p_name);
+	void _write_get_named_smart(GDScriptCodeGenerator* gen, const GDScriptCodeGenerator::Address& p_target, const StringName& p_name, const GDScriptCodeGenerator::Address& p_base);
+	void _write_set_named_smart(GDScriptCodeGenerator* gen, const GDScriptCodeGenerator::Address& p_base, const StringName& p_name, const GDScriptCodeGenerator::Address& p_source);
 	bool _is_local_or_parameter(CodeGen &codegen, const StringName &p_name);
 
 	void _set_error(const String &p_error, const GDScriptParser::Node *p_node);

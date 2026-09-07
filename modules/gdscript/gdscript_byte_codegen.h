@@ -570,6 +570,8 @@ public:
 
 	void write_set_member_validated(const Address& p_value, const MethodBind* p_setter, int p_index);
 	void write_get_member_validated(const Address& p_target, const MethodBind* p_getter, int p_index);
+	void write_set_named_member_validated(const Address& p_base, const Address& p_value, const MethodBind* p_setter, int p_index);
+	void write_get_named_member_validated(const Address& p_target, const Address& p_base, const MethodBind* p_getter, int p_index);
 	
 	virtual ~GDScriptByteCodeGenerator();
 };
