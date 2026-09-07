@@ -70,6 +70,23 @@ bool GDScriptCompiler::_is_class_member_property(GDScript *owner, const StringNa
 	return ClassDB::has_property(nc->get_name(), p_name);
 }
 
+const GDType::Member* GDScriptCompiler::_get_native_member_property_by_class(const StringName &p_native_class, const StringName &p_name) {
+	if (p_native_class == StringName()) {
+		return nullptr;
+	}
+
+	const GDType* gdtype = ClassDB::get_gdtype(p_native_class);
+	if (!gdtype) {
+		return nullptr;
+	}
+
+	const GDType::Member* member = gdtype->members().getptr(p_name);
+	if (member && member->type == GDType::Member::Type::PROPERTY) {
+		return member;
+	}
+	return nullptr;
+}
+
 const GDType::Member* GDScriptCompiler::_get_native_member_property(GDScript* owner, const StringName &p_name) {
 	GDScript* scr = owner;
 	GDScriptNativeClass* nc = nullptr;
@@ -83,20 +100,54 @@ const GDType::Member* GDScriptCompiler::_get_native_member_property(GDScript* ow
 		return nullptr;
 	}
 
-	const GDType* gdtype = ClassDB::get_gdtype(nc->get_name());
-	if (!gdtype) {
-		return nullptr;
-	}
+	return _get_native_member_property_by_class(nc->get_name(), p_name);
+}
 
-	const GDType::Member* member = gdtype->members().getptr(p_name);
-	if (member && member->type == GDType::Member::Type::PROPERTY) {
-		return member;
+const GDType::Member* GDScriptCompiler::_get_native_member_property_for_base(const GDScriptDataType &p_base_type, const StringName &p_name) {
+	switch (p_base_type.kind) {
+		case GDScriptDataType::NATIVE: {
+			return _get_native_member_property_by_class(p_base_type.native_type, p_name);
+		}
+		case GDScriptDataType::GDSCRIPT:
+		case GDScriptDataType::SCRIPT: {
+			GDScript* scr = Object::cast_to<GDScript>(p_base_type.script_type);
+			if (!scr && p_base_type.script_type_ref.is_valid()) {
+				scr = Object::cast_to<GDScript>(p_base_type.script_type_ref.ptr());
+			}
+			if (!scr) {
+				return nullptr;
+			}
+			return _get_native_member_property(scr, p_name);
+		}
+		default:
+			return nullptr;
 	}
-	return nullptr;
 }
 
 bool GDScriptCompiler::_is_local_or_parameter(CodeGen &codegen, const StringName &p_name) {
 	return codegen.parameters.has(p_name) || codegen.locals.has(p_name);
+}
+
+void GDScriptCompiler::_write_get_named_smart(GDScriptCodeGenerator* gen, const GDScriptCodeGenerator::Address &p_target, const StringName &p_name, const GDScriptCodeGenerator::Address &p_base) {
+	if (p_base.type.kind == GDScriptDataType::NATIVE || p_base.type.kind == GDScriptDataType::SCRIPT || p_base.type.kind == GDScriptDataType::GDSCRIPT) {
+		const GDType::Member* native_member = _get_native_member_property_for_base(p_base.type, p_name);
+		if (native_member && native_member->payload.property.getter) {
+			static_cast<GDScriptByteCodeGenerator*>(gen)->write_get_named_member_validated(p_target, p_base, native_member->payload.property.getter, native_member->payload.property.index);
+			return;
+		}
+	}
+	gen->write_get_named(p_target, p_name, p_base);
+}
+
+void GDScriptCompiler::_write_set_named_smart(GDScriptCodeGenerator* gen, const GDScriptCodeGenerator::Address &p_base, const StringName &p_name, const GDScriptCodeGenerator::Address &p_source) {
+	if (p_base.type.kind == GDScriptDataType::NATIVE || p_base.type.kind == GDScriptDataType::SCRIPT || p_base.type.kind == GDScriptDataType::GDSCRIPT) {
+		const GDType::Member* native_member = _get_native_member_property_for_base(p_base.type, p_name);
+		if (native_member && native_member->payload.property.setter) {
+			static_cast<GDScriptByteCodeGenerator*>(gen)->write_set_named_member_validated(p_base, p_source, native_member->payload.property.setter, native_member->payload.property.index);
+			return;
+		}
+	}
+	gen->write_set_named(p_base, p_name, p_source);
 }
 
 void GDScriptCompiler::_set_error(const String &p_error, const GDScriptParser::Node *p_node) {
@@ -969,7 +1020,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					}
 				}
 				if (!wrote_enum_impl_cached) {
-					gen->write_get_named(result, name, base);
+					_write_get_named_smart(gen, result, name, base);
 				}
 			} else {
 				gen->write_get(result, index, base);
@@ -1246,7 +1297,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 
 					if (subscript_elem->is_attribute) {
 						name = subscript_elem->attribute->name;
-						gen->write_get_named(value, name, prev_base);
+						_write_get_named_smart(gen, value, name, prev_base);
 					} else {
 						key = _parse_expression(codegen, r_error, subscript_elem->index);
 						if (r_error) {
@@ -1282,7 +1333,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					GDScriptCodeGenerator::Address op_result = codegen.add_temporary(_gdtype_from_datatype(assignment->type_constraint, codegen.script));
 					GDScriptCodeGenerator::Address value = codegen.add_temporary(_gdtype_from_datatype(subscript->type_constraint, codegen.script));
 					if (subscript->is_attribute) {
-						gen->write_get_named(value, name, prev_base);
+						_write_get_named_smart(gen, value, name, prev_base);
 					} else {
 						gen->write_get(value, key, prev_base);
 					}
@@ -1296,7 +1347,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 
 				// Perform assignment.
 				if (subscript->is_attribute) {
-					gen->write_set_named(prev_base, name, assigned);
+					_write_set_named_smart(gen, prev_base, name, assigned);
 				} else {
 					gen->write_set(prev_base, key, assigned);
 				}
@@ -1322,7 +1373,7 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 						if (!info.is_named) {
 							gen->write_set(info.base, info.key, assigned);
 						} else {
-							gen->write_set_named(info.base, info.name, assigned);
+							_write_set_named_smart(gen, info.base, info.name, assigned);
 						}
 						if (!known_type) {
 							gen->write_end_jump_if_shared();
