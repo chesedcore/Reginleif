@@ -469,7 +469,7 @@ Patches:
 ## harfbuzz
 
 - Upstream: https://github.com/harfbuzz/harfbuzz
-- Version: 14.2.0 (b0ffab42d473eb380ad0fcf42730e0f1868cbc97, 2026)
+- Version: 14.4.0 (36cb489cb02ce4b92099669ba9f9bea348eff93f, 2026)
 - License: MIT
 
 Files extracted from upstream source:
@@ -934,7 +934,7 @@ Patches:
 
 ## pcre2
 
-- Upstream: http://www.pcre.org
+- Upstream: https://pcre2project.github.io/pcre2/
 - Version: 10.47 (f454e231fe5006dd7ff8f4693fd2b8eb94333429, 2025)
 - License: BSD-3-Clause
 

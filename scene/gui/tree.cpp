@@ -3171,7 +3171,7 @@ int Tree::propagate_mouse_event(const Point2i &p_pos, int x_ofs, int y_ofs, int 
 			if (relative_pos.y > item->cached_label_height) {
 				continue;
 			}
-			int result = propagate_mouse_event(relative_pos, x_ofs, y_ofs, x_limit, p_double_click, item, p_button, p_mod, false, true);
+			int result = propagate_mouse_event(relative_pos, item->sticky_offset.x, item->sticky_offset.y, x_limit, p_double_click, item, p_button, p_mod, false, true);
 			if (result < 0) {
 				return result;
 			}
