@@ -34,6 +34,7 @@
 #include "gdscript_analyzer.h"
 #include "gdscript_byte_codegen.h"
 #include "gdscript_cache.h"
+#include "gdscript_optimiser.h"
 #include "gdscript_trait_analyzer.h"
 #include "gdscript_utility_functions.h"
 
@@ -67,6 +68,31 @@ bool GDScriptCompiler::_is_class_member_property(GDScript *owner, const StringNa
 	ERR_FAIL_NULL_V(nc, false);
 
 	return ClassDB::has_property(nc->get_name(), p_name);
+}
+
+const GDType::Member* GDScriptCompiler::_get_native_member_property(GDScript* owner, const StringName &p_name) {
+	GDScript* scr = owner;
+	GDScriptNativeClass* nc = nullptr;
+	while (scr) {
+		if (scr->native.is_valid()) {
+			nc = scr->native.ptr();
+		}
+		scr = scr->base.ptr();
+	}
+	if (!nc) {
+		return nullptr;
+	}
+
+	const GDType* gdtype = ClassDB::get_gdtype(nc->get_name());
+	if (!gdtype) {
+		return nullptr;
+	}
+
+	const GDType::Member* member = gdtype->members().getptr(p_name);
+	if (member && member->type == GDType::Member::Type::PROPERTY) {
+		return member;
+	}
+	return nullptr;
 }
 
 bool GDScriptCompiler::_is_local_or_parameter(CodeGen &codegen, const StringName &p_name) {
@@ -293,7 +319,8 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 
 					// Try local variables and constants.
 					if (!p_initializer && codegen.locals.has(identifier)) {
-						return codegen.locals[identifier];
+						GDScriptCodeGenerator::Address resolved_addr = codegen.locals[identifier];
+						return resolved_addr;
 					}
 				} break;
 
@@ -306,7 +333,12 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					if (_is_class_member_property(codegen, identifier)) {
 						// Get property.
 						GDScriptCodeGenerator::Address temp = codegen.add_temporary(_gdtype_from_datatype(p_expression->type_constraint, codegen.script));
-						gen->write_get_member(temp, identifier);
+						const GDType::Member* native_member = _get_native_member_property(codegen.script, identifier);
+						if (native_member && native_member->payload.property.getter) {
+							static_cast<GDScriptByteCodeGenerator*>(gen)->write_get_member_validated(temp, native_member->payload.property.getter, native_member->payload.property.index);
+						} else {
+							gen->write_get_member(temp, identifier);
+						}
 						return temp;
 					}
 
@@ -1315,7 +1347,12 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 						if (!known_type) {
 							gen->write_jump_if_shared(assigned);
 						}
-						gen->write_set_member(assigned, assign_class_member_property);
+						const GDType::Member* native_member = _get_native_member_property(codegen.script, assign_class_member_property);
+						if (native_member && native_member->payload.property.setter) {
+							static_cast<GDScriptByteCodeGenerator*>(gen)->write_set_member_validated(assigned, native_member->payload.property.setter, native_member->payload.property.index);
+						} else {
+							gen->write_set_member(assigned, assign_class_member_property);
+						}
 						if (!known_type) {
 							gen->write_end_jump_if_shared();
 						}
@@ -1370,13 +1407,25 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				if (has_operation) {
 					GDScriptCodeGenerator::Address op_result = codegen.add_temporary(_gdtype_from_datatype(assignment->type_constraint, codegen.script));
 					GDScriptCodeGenerator::Address member = codegen.add_temporary(_gdtype_from_datatype(assignment->assignee->type_constraint, codegen.script));
-					gen->write_get_member(member, name);
+					const GDType::Member* native_read_member = _get_native_member_property(codegen.script, name);
+					if (native_read_member && native_read_member->payload.property.getter) {
+						static_cast<GDScriptByteCodeGenerator*>(gen)->write_get_member_validated(member, native_read_member->payload.property.getter, native_read_member->payload.property.index);
+					} else {
+						gen->write_get_member(member, name);
+					}
 					gen->write_binary_operator(op_result, assignment->variant_op, member, assigned_value);
 					gen->pop_temporary(); // Pop member temp.
 					to_assign = op_result;
 				}
 
-				gen->write_set_member(to_assign, name);
+				{
+					const GDType::Member* native_member = _get_native_member_property(codegen.script, name);
+					if (native_member && native_member->payload.property.setter) {
+						static_cast<GDScriptByteCodeGenerator*>(gen)->write_set_member_validated(to_assign, native_member->payload.property.setter, native_member->payload.property.index);
+					} else {
+						gen->write_set_member(to_assign, name);
+					}
+				}
 
 				if (to_assign.mode == GDScriptCodeGenerator::Address::TEMPORARY) {
 					gen->pop_temporary(); // Pop the assigned expression or the temp result if it has operation.
@@ -1973,12 +2022,70 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_match_pattern(CodeGen &c
 
 List<GDScriptCodeGenerator::Address> GDScriptCompiler::_add_block_locals(CodeGen &codegen, const GDScriptParser::SuiteNode *p_block) {
 	List<GDScriptCodeGenerator::Address> addresses;
+	HashMap<const GDScriptParser::Node*, GDScriptOptimiser::VarLifetime> lifetimes = GDScriptOptimiser::compute_lifetimes(p_block);
+
+	struct FreedSlot {
+		StringName owner_name;
+		GDScriptCodeGenerator::Address address;
+		int freed_at_line;
+	};
+	List<FreedSlot> free_slots;
+
 	for (const GDScriptParser::SuiteNode::Local &local : p_block->locals) {
 		if (local.type == GDScriptParser::SuiteNode::Local::PARAMETER || local.type == GDScriptParser::SuiteNode::Local::FOR_VARIABLE) {
 			// Parameters are added directly from function and loop variables are declared explicitly.
 			continue;
 		}
-		addresses.push_back(codegen.add_local(local.name, _gdtype_from_datatype(local.get_datatype(), codegen.script)));
+
+		bool eligible_for_reuse = local.type == GDScriptParser::SuiteNode::Local::VARIABLE ||
+				local.type == GDScriptParser::SuiteNode::Local::PATTERN_BIND;
+
+		const GDScriptParser::Node* lifetime_key = nullptr;
+		if (local.type == GDScriptParser::SuiteNode::Local::VARIABLE) {
+			lifetime_key = local.variable;
+		} else if (local.type == GDScriptParser::SuiteNode::Local::PATTERN_BIND) {
+			lifetime_key = local.bind;
+		}
+
+		GDScriptDataType type = _gdtype_from_datatype(local.get_datatype(), codegen.script);
+
+		GDScriptCodeGenerator::Address addr;
+		bool reused = false;
+
+		if (eligible_for_reuse) {
+			List<FreedSlot>::Element* best = nullptr;
+			for (List<FreedSlot>::Element* E = free_slots.front(); E; E = E->next()) {
+				if (E->get().freed_at_line < local.start_line) {
+					if (best == nullptr || E->get().freed_at_line > best->get().freed_at_line) {
+						best = E;
+					}
+				}
+			}
+			if (best != nullptr) {
+				GDScriptByteCodeGenerator* bytecode_gen = static_cast<GDScriptByteCodeGenerator*>(codegen.generator);
+				uint32_t pos = bytecode_gen->reuse_local_slot(local.name, type, best->get().address.address);
+				addr = GDScriptCodeGenerator::Address(GDScriptCodeGenerator::Address::LOCAL_VARIABLE, pos, type);
+				codegen.locals[local.name] = addr;
+				free_slots.erase(best);
+				reused = true;
+			}
+		}
+
+		if (!reused) {
+			addr = codegen.add_local(local.name, type);
+		}
+
+		addresses.push_back(addr);
+
+		if (eligible_for_reuse && lifetime_key != nullptr) {
+			const GDScriptOptimiser::VarLifetime* lt = lifetimes.getptr(lifetime_key);
+			if (lt != nullptr) {
+				int freed_at = MAX(lt->last_read, lt->last_write);
+				if (freed_at >= 0) {
+					free_slots.push_back({ local.name, addr, freed_at });
+				}
+			}
+		}
 	}
 	return addresses;
 }

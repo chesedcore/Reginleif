@@ -223,7 +223,8 @@ class GDScriptByteCodeGenerator : public GDScriptCodeGenerator {
 
 	int get_constant_pos(const Variant &p_constant) {
 		if (constant_map.has(p_constant)) {
-			return constant_map[p_constant];
+			int existing_pos = constant_map[p_constant];
+			return existing_pos;
 		}
 		int pos = constant_map.size();
 		constant_map[p_constant] = pos;
@@ -483,6 +484,9 @@ public:
 	virtual void write_start(GDScript *p_script, const StringName &p_function_name, bool p_static, Variant p_rpc_config, const GDScriptDataType &p_return_type) override;
 	virtual GDScriptFunction *write_end() override;
 
+	uint32_t reuse_local_slot(const StringName& p_name, const GDScriptDataType& p_type, uint32_t p_existing_stack_pos);
+	void clear_dirty(const Address& p_address) override;
+
 #ifdef DEBUG_ENABLED
 	virtual void set_signature(const String &p_signature) override;
 #endif
@@ -564,5 +568,8 @@ public:
 	virtual void write_return(const Address &p_return_value, bool p_use_conversion) override;
 	virtual void write_assert(const Address &p_test, const Address &p_message) override;
 
+	void write_set_member_validated(const Address& p_value, const MethodBind* p_setter, int p_index);
+	void write_get_member_validated(const Address& p_target, const MethodBind* p_getter, int p_index);
+	
 	virtual ~GDScriptByteCodeGenerator();
 };

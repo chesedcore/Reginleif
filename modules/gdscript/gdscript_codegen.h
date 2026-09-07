@@ -74,6 +74,7 @@ public:
 	virtual void clear_temporaries() = 0;
 	virtual void clear_address(const Address &p_address) = 0;
 	virtual bool is_local_dirty(const Address &p_address) const = 0;
+	virtual void clear_dirty(const Address& p_address) = 0;
 
 	virtual void start_parameters() = 0;
 	virtual void end_parameters() = 0;

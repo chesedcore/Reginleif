@@ -73,6 +73,15 @@ uint32_t GDScriptByteCodeGenerator::add_local(const StringName &p_name, const GD
 	return stack_pos;
 }
 
+uint32_t GDScriptByteCodeGenerator::reuse_local_slot(const StringName& p_name, const GDScriptDataType& p_type, uint32_t p_existing_stack_pos) {
+	int index = (int)p_existing_stack_pos - GDScriptFunction::FIXED_ADDRESSES_MAX;
+	ERR_FAIL_INDEX_V(index, locals.size(), add_local(p_name, p_type));
+	locals.write[index] = StackSlot(p_type.builtin_type, p_type.can_contain_object());
+	add_stack_identifier(p_name, p_existing_stack_pos);
+	dirty_locals.insert(p_existing_stack_pos);
+	return p_existing_stack_pos;
+}
+
 uint32_t GDScriptByteCodeGenerator::add_local_constant(const StringName &p_name, const Variant &p_constant) {
 	int index = add_or_get_constant(p_constant);
 	local_constants[p_name] = index;
@@ -943,6 +952,20 @@ void GDScriptByteCodeGenerator::write_get_member(const Address &p_target, const 
 	append_opcode(GDScriptFunction::OPCODE_GET_MEMBER);
 	append(p_target);
 	append(p_name);
+}
+
+void GDScriptByteCodeGenerator::write_set_member_validated(const Address& p_value, const MethodBind* p_setter, int p_index) {
+	append_opcode(GDScriptFunction::OPCODE_SET_MEMBER_VALIDATED);
+	append(p_value);
+	append(p_setter);
+	append(p_index);
+}
+
+void GDScriptByteCodeGenerator::write_get_member_validated(const Address& p_target, const MethodBind* p_getter, int p_index) {
+	append_opcode(GDScriptFunction::OPCODE_GET_MEMBER_VALIDATED);
+	append(p_target);
+	append(p_getter);
+	append(p_index);
 }
 
 void GDScriptByteCodeGenerator::write_set_static_variable(const Address &p_value, const Address &p_class, int p_index) {
@@ -2063,15 +2086,16 @@ void GDScriptByteCodeGenerator::clear_address(const Address &p_address) {
 		write_assign_null(p_address);
 	}
 
-	if (p_address.mode == Address::LOCAL_VARIABLE) {
-		dirty_locals.erase(p_address.address);
-	}
 }
 
 // Returns `true` if the local has been reused and not cleaned up with `clear_address()`.
 bool GDScriptByteCodeGenerator::is_local_dirty(const Address &p_address) const {
 	ERR_FAIL_COND_V(p_address.mode != Address::LOCAL_VARIABLE, false);
 	return dirty_locals.has(p_address.address);
+}
+
+void GDScriptByteCodeGenerator::clear_dirty(const Address& p_address) {
+	dirty_locals.erase(p_address.address);
 }
 
 GDScriptByteCodeGenerator::~GDScriptByteCodeGenerator() {
