@@ -32,6 +32,7 @@
 
 #include "../gdscript.h"
 #include "../gdscript_analyzer.h"
+#include "../gdscript_linter.h"
 #include "gdscript_language_protocol.h"
 #include "gdscript_workspace.h"
 
@@ -970,6 +971,11 @@ void ExtendGDScriptParser::parse(const String &p_code, const String &p_path) {
 	if (parse_result == OK) {
 		parse_result = analyzer.analyze();
 	}
+	if (parse_result == OK) {
+		GDScriptLinter linter(*this);
+		parse_result = linter.lint();
+	}
+
 	update_diagnostics();
 	update_symbols();
 	update_document_links(p_code);

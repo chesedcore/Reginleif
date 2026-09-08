@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  resource_uid.h                                                        */
+/*  gdscript_linter.h                                                     */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -30,77 +30,32 @@
 
 #pragma once
 
-#include "core/object/object.h"
-#include "core/string/ustring.h"
-#include "core/templates/hash_map.h"
+#ifdef DEBUG_ENABLED
 
-class FileAccess;
+#include "modules/gdscript/gdscript_parser.h"
 
-typedef void (*ResourceUIDScanForUIDOnStartup)();
+/**
+ * The `GDScriptLinter` emits warnings based on a completely analyzed AST.
+ *
+ * The linter pass can be skipped if it is not needed, e.g. in release builds
+ * or when analyzing for editor features like autocompletion. As such the linter
+ * must not have an influence on compilation i.e. it can't modify the AST.
+ *
+ * Especially expensive warnings should be implemented through this pass.
+ */
+class GDScriptLinter final {
+	using CallbackWithValidation = void(const GDScriptParser::Node *, GDScriptParser &);
 
-class ResourceUID : public Object {
-	GDCLASS(ResourceUID, Object)
-public:
-	typedef int64_t ID;
-	constexpr const static ID INVALID_ID = -1;
-
-	static String get_cache_file();
-
-private:
-	Mutex mutex;
-	struct Cache {
-		CharString cs;
-		bool saved_to_cache = false;
-	};
-
-	HashMap<ID, Cache> unique_ids; // Unique IDs and utf8 paths (less memory used).
-#ifdef TOOLS_ENABLED
-	HashMap<ID, Cache> unique_ids_copy; // Copy of the cache during filesystem scan.
-#endif
-	bool use_reverse_cache = false;
-	HashMap<CharString, ID> reverse_cache; // Used at runtime.
-	static ResourceUID *singleton;
-
-	uint32_t cache_entries = 0;
-	bool changed = false;
-	bool cache_initialized = false;
-
-protected:
-	static void _bind_methods();
+	GDScriptParser *const tree;
+	static CallbackWithValidation *const checks[];
 
 public:
-	inline static ResourceUIDScanForUIDOnStartup scan_for_uid_on_startup = nullptr;
+	template <typename T>
+	using Callback = void(const T *, GDScriptParser &);
 
-	String id_to_text(ID p_id) const;
-	ID text_to_id(const String &p_text) const;
-
-	ID create_id();
-	ID create_id_for_path(const String &p_path);
-	bool has_id(ID p_id) const;
-	void add_id(ID p_id, const String &p_path);
-	void set_id(ID p_id, const String &p_path);
-	String get_id_path(ID p_id) const;
-	ID get_path_id(const String &p_path) const;
-	void remove_id(ID p_id);
-
-	static String uid_to_path(const String &p_uid);
-	static String path_to_uid(const String &p_path);
-	static String ensure_path(const String &p_uid_or_path);
-
-	Error load_from_cache(bool p_reset);
-	Error save_to_cache();
-	Error update_cache();
-	static String get_path_from_cache(Ref<FileAccess> &p_cache_file, const String &p_uid_string);
-	static Vector<uint8_t> encode_binary_cache(const Vector<Pair<ID, String>> &p_entries);
-
-	void enable_reverse_cache() { use_reverse_cache = true; }
-	void clear();
-#ifdef TOOLS_ENABLED
-	void copy_and_clear_cache();
-	void clear_copy();
-#endif
-
-	static ResourceUID *get_singleton() { return singleton; }
-
-	ResourceUID();
+public:
+	Error lint();
+	GDScriptLinter(GDScriptParser &p_tree) : tree(&p_tree) {}
 };
+
+#endif // DEBUG_ENABLED

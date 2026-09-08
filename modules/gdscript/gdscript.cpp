@@ -33,6 +33,7 @@
 #include "gdscript_analyzer.h"
 #include "gdscript_cache.h"
 #include "gdscript_compiler.h"
+#include "gdscript_linter.h"
 #include "gdscript_parser.h"
 #include "gdscript_tokenizer_buffer.h"
 #include "gdscript_warning.h"
@@ -842,6 +843,13 @@ Error GDScript::reload(bool p_keep_state) {
 
 	GDScriptAnalyzer analyzer(&parser);
 	err = analyzer.analyze();
+
+#ifdef DEBUG_ENABLED
+	if (err == OK) {
+		GDScriptLinter linter(parser);
+		err = linter.lint();
+	}
+#endif
 
 	if (err) {
 		if (EngineDebugger::is_active()) {
