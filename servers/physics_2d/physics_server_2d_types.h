@@ -57,6 +57,20 @@ struct RayResult {
 	ObjectID collider_id;
 	[[deprecated("Use `collider_id` instead.")]] Object *collider = nullptr;
 	int shape = 0;
+
+	_FORCE_INLINE_ Object *get_collider() const {
+#ifndef DISABLE_DEPRECATED
+		if (collider != nullptr) {
+			return collider;
+		}
+#endif // !DISABLE_DEPRECATED
+
+		if (collider_id.is_valid()) {
+			return ObjectDB::get_instance(collider_id);
+		} else {
+			return nullptr;
+		}
+	}
 };
 GODOT_POP_IGNORE_DEPRECATION()
 
@@ -66,6 +80,20 @@ struct ShapeResult {
 	ObjectID collider_id;
 	[[deprecated("Use `collider_id` instead.")]] Object *collider = nullptr;
 	int shape = 0;
+
+	_FORCE_INLINE_ Object *get_collider() const {
+#ifndef DISABLE_DEPRECATED
+		if (collider != nullptr) {
+			return collider;
+		}
+#endif // !DISABLE_DEPRECATED
+
+		if (collider_id.is_valid()) {
+			return ObjectDB::get_instance(collider_id);
+		} else {
+			return nullptr;
+		}
+	}
 };
 GODOT_POP_IGNORE_DEPRECATION()
 

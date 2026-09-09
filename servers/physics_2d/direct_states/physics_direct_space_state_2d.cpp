@@ -47,20 +47,7 @@ Dictionary PhysicsDirectSpaceState2D::_intersect_ray(RequiredParam<PhysicsRayQue
 	d["position"] = result.position;
 	d["normal"] = result.normal;
 	d["collider_id"] = result.collider_id;
-
-#ifndef DISABLE_DEPRECATED
-	GODOT_PUSH_IGNORE_DEPRECATION()
-	if (result.collider != nullptr) {
-		d["collider"] = result.collider;
-	} else if (result.collider_id.is_valid()) {
-		d["collider"] = ObjectDB::get_instance(result.collider_id);
-	} else {
-		d["collider"] = (Object *)nullptr;
-	}
-	GODOT_POP_IGNORE_DEPRECATION()
-#else
-	d["collider"] = result.collider_id.is_valid() ? ObjectDB::get_instance(result.collider_id) : (Object *)nullptr;
-#endif // !DISABLE_DEPRECATED
+	d["collider"] = result.get_collider();
 	d["shape"] = result.shape;
 	d["rid"] = result.rid;
 
@@ -85,19 +72,7 @@ TypedArray<Dictionary> PhysicsDirectSpaceState2D::_intersect_point(RequiredParam
 		Dictionary d;
 		d["rid"] = ret[i].rid;
 		d["collider_id"] = ret[i].collider_id;
-#ifndef DISABLE_DEPRECATED
-		GODOT_PUSH_IGNORE_DEPRECATION()
-		if (ret[i].collider != nullptr) {
-			d["collider"] = ret[i].collider;
-		} else if (ret[i].collider_id.is_valid()) {
-			d["collider"] = ObjectDB::get_instance(ret[i].collider_id);
-		} else {
-			d["collider"] = (Object *)nullptr;
-		}
-		GODOT_POP_IGNORE_DEPRECATION()
-#else
-		d["collider"] = ret[i].collider_id.is_valid() ? ObjectDB::get_instance(ret[i].collider_id) : (Object *)nullptr;
-#endif // !DISABLE_DEPRECATED
+		d["collider"] = ret[i].get_collider();
 		d["shape"] = ret[i].shape;
 		r[i] = d;
 	}
@@ -117,19 +92,7 @@ TypedArray<Dictionary> PhysicsDirectSpaceState2D::_intersect_shape(RequiredParam
 		Dictionary d;
 		d["rid"] = sr[i].rid;
 		d["collider_id"] = sr[i].collider_id;
-#ifndef DISABLE_DEPRECATED
-		GODOT_PUSH_IGNORE_DEPRECATION()
-		if (sr[i].collider != nullptr) {
-			d["collider"] = sr[i].collider;
-		} else if (sr[i].collider_id.is_valid()) {
-			d["collider"] = ObjectDB::get_instance(sr[i].collider_id);
-		} else {
-			d["collider"] = (Object *)nullptr;
-		}
-		GODOT_POP_IGNORE_DEPRECATION()
-#else
-		d["collider"] = sr[i].collider_id.is_valid() ? ObjectDB::get_instance(sr[i].collider_id) : (Object *)nullptr;
-#endif // !DISABLE_DEPRECATED
+		d["collider"] = sr[i].get_collider();
 		d["shape"] = sr[i].shape;
 		ret[i] = d;
 	}

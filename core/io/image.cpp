@@ -3510,6 +3510,11 @@ void Image::_copy_internals_from(const Image &p_image) {
 	data = p_image.data;
 }
 
+template <typename T>
+_FORCE_INLINE_ T _quantize_unorm_fast(float p_value, float p_max) {
+	return static_cast<T>(CLAMP(p_value * p_max + 0.5f, 0.0f, p_max));
+}
+
 _FORCE_INLINE_ Color color_from_rgba4444(uint16_t p_col) {
 	float r = ((p_col >> 12) & 0xF) / 15.0;
 	float g = ((p_col >> 8) & 0xF) / 15.0;
@@ -3521,10 +3526,10 @@ _FORCE_INLINE_ Color color_from_rgba4444(uint16_t p_col) {
 _FORCE_INLINE_ uint16_t color_to_rgba4444(Color p_col) {
 	uint16_t rgba = 0;
 
-	rgba = uint16_t(CLAMP(p_col.r * 15.0, 0, 15)) << 12;
-	rgba |= uint16_t(CLAMP(p_col.g * 15.0, 0, 15)) << 8;
-	rgba |= uint16_t(CLAMP(p_col.b * 15.0, 0, 15)) << 4;
-	rgba |= uint16_t(CLAMP(p_col.a * 15.0, 0, 15));
+	rgba = _quantize_unorm_fast<uint16_t>(p_col.r, 15.0f) << 12;
+	rgba |= _quantize_unorm_fast<uint16_t>(p_col.g, 15.0f) << 8;
+	rgba |= _quantize_unorm_fast<uint16_t>(p_col.b, 15.0f) << 4;
+	rgba |= _quantize_unorm_fast<uint16_t>(p_col.a, 15.0f);
 
 	return rgba;
 }
@@ -3539,9 +3544,9 @@ _FORCE_INLINE_ Color color_from_rgb565(uint16_t p_col) {
 _FORCE_INLINE_ uint16_t color_to_rgb565(Color p_col) {
 	uint16_t rgba = 0;
 
-	rgba = uint16_t(CLAMP(p_col.r * 31.0, 0, 31)) << 11;
-	rgba |= uint16_t(CLAMP(p_col.g * 63.0, 0, 63)) << 5;
-	rgba |= uint16_t(CLAMP(p_col.b * 31.0, 0, 31));
+	rgba = _quantize_unorm_fast<uint16_t>(p_col.r, 31.0f) << 11;
+	rgba |= _quantize_unorm_fast<uint16_t>(p_col.g, 63.0f) << 5;
+	rgba |= _quantize_unorm_fast<uint16_t>(p_col.b, 31.0f);
 
 	return rgba;
 }
@@ -3686,29 +3691,29 @@ Color Image::_get_color_at_ofs(const uint8_t *p_ptr, uint32_t p_ofs) const {
 void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_color) {
 	switch (format) {
 		case FORMAT_L8: {
-			r_ptr[p_ofs] = uint8_t(CLAMP(p_color.get_v() * 255.0, 0, 255));
+			r_ptr[p_ofs] = _quantize_unorm_fast<uint8_t>(p_color.get_v(), 255.0f);
 		} break;
 		case FORMAT_LA8: {
-			r_ptr[p_ofs * 2 + 0] = uint8_t(CLAMP(p_color.get_v() * 255.0, 0, 255));
-			r_ptr[p_ofs * 2 + 1] = uint8_t(CLAMP(p_color.a * 255.0, 0, 255));
+			r_ptr[p_ofs * 2 + 0] = _quantize_unorm_fast<uint8_t>(p_color.get_v(), 255.0f);
+			r_ptr[p_ofs * 2 + 1] = _quantize_unorm_fast<uint8_t>(p_color.a, 255.0f);
 		} break;
 		case FORMAT_R8: {
-			r_ptr[p_ofs] = uint8_t(CLAMP(p_color.r * 255.0, 0, 255));
+			r_ptr[p_ofs] = _quantize_unorm_fast<uint8_t>(p_color.r, 255.0f);
 		} break;
 		case FORMAT_RG8: {
-			r_ptr[p_ofs * 2 + 0] = uint8_t(CLAMP(p_color.r * 255.0, 0, 255));
-			r_ptr[p_ofs * 2 + 1] = uint8_t(CLAMP(p_color.g * 255.0, 0, 255));
+			r_ptr[p_ofs * 2 + 0] = _quantize_unorm_fast<uint8_t>(p_color.r, 255.0f);
+			r_ptr[p_ofs * 2 + 1] = _quantize_unorm_fast<uint8_t>(p_color.g, 255.0f);
 		} break;
 		case FORMAT_RGB8: {
-			r_ptr[p_ofs * 3 + 0] = uint8_t(CLAMP(p_color.r * 255.0, 0, 255));
-			r_ptr[p_ofs * 3 + 1] = uint8_t(CLAMP(p_color.g * 255.0, 0, 255));
-			r_ptr[p_ofs * 3 + 2] = uint8_t(CLAMP(p_color.b * 255.0, 0, 255));
+			r_ptr[p_ofs * 3 + 0] = _quantize_unorm_fast<uint8_t>(p_color.r, 255.0f);
+			r_ptr[p_ofs * 3 + 1] = _quantize_unorm_fast<uint8_t>(p_color.g, 255.0f);
+			r_ptr[p_ofs * 3 + 2] = _quantize_unorm_fast<uint8_t>(p_color.b, 255.0f);
 		} break;
 		case FORMAT_RGBA8: {
-			r_ptr[p_ofs * 4 + 0] = uint8_t(CLAMP(p_color.r * 255.0, 0, 255));
-			r_ptr[p_ofs * 4 + 1] = uint8_t(CLAMP(p_color.g * 255.0, 0, 255));
-			r_ptr[p_ofs * 4 + 2] = uint8_t(CLAMP(p_color.b * 255.0, 0, 255));
-			r_ptr[p_ofs * 4 + 3] = uint8_t(CLAMP(p_color.a * 255.0, 0, 255));
+			r_ptr[p_ofs * 4 + 0] = _quantize_unorm_fast<uint8_t>(p_color.r, 255.0f);
+			r_ptr[p_ofs * 4 + 1] = _quantize_unorm_fast<uint8_t>(p_color.g, 255.0f);
+			r_ptr[p_ofs * 4 + 2] = _quantize_unorm_fast<uint8_t>(p_color.b, 255.0f);
+			r_ptr[p_ofs * 4 + 3] = _quantize_unorm_fast<uint8_t>(p_color.a, 255.0f);
 		} break;
 		case FORMAT_RGBA4444: {
 			((uint16_t *)r_ptr)[p_ofs] = color_to_rgba4444(p_color);
@@ -3756,40 +3761,40 @@ void Image::_set_color_at_ofs(uint8_t *r_ptr, uint32_t p_ofs, const Color &p_col
 			((uint32_t *)r_ptr)[p_ofs] = p_color.to_rgbe9995();
 		} break;
 		case FORMAT_R16: {
-			((uint16_t *)r_ptr)[p_ofs] = uint16_t(CLAMP(p_color.r * 65535.0, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs] = _quantize_unorm_fast<uint16_t>(p_color.r, 65535.0f);
 		} break;
 		case FORMAT_RG16: {
-			((uint16_t *)r_ptr)[p_ofs * 2 + 0] = uint16_t(CLAMP(p_color.r * 65535.0, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 2 + 1] = uint16_t(CLAMP(p_color.g * 65535.0, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs * 2 + 0] = _quantize_unorm_fast<uint16_t>(p_color.r, 65535.0f);
+			((uint16_t *)r_ptr)[p_ofs * 2 + 1] = _quantize_unorm_fast<uint16_t>(p_color.g, 65535.0f);
 		} break;
 		case FORMAT_RGB16: {
-			((uint16_t *)r_ptr)[p_ofs * 3 + 0] = uint16_t(CLAMP(p_color.r * 65535.0, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 3 + 1] = uint16_t(CLAMP(p_color.g * 65535.0, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 3 + 2] = uint16_t(CLAMP(p_color.b * 65535.0, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs * 3 + 0] = _quantize_unorm_fast<uint16_t>(p_color.r, 65535.0f);
+			((uint16_t *)r_ptr)[p_ofs * 3 + 1] = _quantize_unorm_fast<uint16_t>(p_color.g, 65535.0f);
+			((uint16_t *)r_ptr)[p_ofs * 3 + 2] = _quantize_unorm_fast<uint16_t>(p_color.b, 65535.0f);
 		} break;
 		case FORMAT_RGBA16: {
-			((uint16_t *)r_ptr)[p_ofs * 4 + 0] = uint16_t(CLAMP(p_color.r * 65535.0, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 4 + 1] = uint16_t(CLAMP(p_color.g * 65535.0, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 4 + 2] = uint16_t(CLAMP(p_color.b * 65535.0, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 4 + 3] = uint16_t(CLAMP(p_color.a * 65535.0, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs * 4 + 0] = _quantize_unorm_fast<uint16_t>(p_color.r, 65535.0f);
+			((uint16_t *)r_ptr)[p_ofs * 4 + 1] = _quantize_unorm_fast<uint16_t>(p_color.g, 65535.0f);
+			((uint16_t *)r_ptr)[p_ofs * 4 + 2] = _quantize_unorm_fast<uint16_t>(p_color.b, 65535.0f);
+			((uint16_t *)r_ptr)[p_ofs * 4 + 3] = _quantize_unorm_fast<uint16_t>(p_color.a, 65535.0f);
 		} break;
 		case FORMAT_R16I: {
-			((uint16_t *)r_ptr)[p_ofs] = uint16_t(CLAMP(p_color.r, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs] = uint16_t(CLAMP(p_color.r, 0.0f, 65535));
 		} break;
 		case FORMAT_RG16I: {
-			((uint16_t *)r_ptr)[p_ofs * 2 + 0] = uint16_t(CLAMP(p_color.r, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 2 + 1] = uint16_t(CLAMP(p_color.g, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs * 2 + 0] = uint16_t(CLAMP(p_color.r, 0.0f, 65535.0f));
+			((uint16_t *)r_ptr)[p_ofs * 2 + 1] = uint16_t(CLAMP(p_color.g, 0.0f, 65535.0f));
 		} break;
 		case FORMAT_RGB16I: {
-			((uint16_t *)r_ptr)[p_ofs * 3 + 0] = uint16_t(CLAMP(p_color.r, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 3 + 1] = uint16_t(CLAMP(p_color.g, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 3 + 2] = uint16_t(CLAMP(p_color.b, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs * 3 + 0] = uint16_t(CLAMP(p_color.r, 0.0f, 65535.0f));
+			((uint16_t *)r_ptr)[p_ofs * 3 + 1] = uint16_t(CLAMP(p_color.g, 0.0f, 65535.0f));
+			((uint16_t *)r_ptr)[p_ofs * 3 + 2] = uint16_t(CLAMP(p_color.b, 0.0f, 65535.0f));
 		} break;
 		case FORMAT_RGBA16I: {
-			((uint16_t *)r_ptr)[p_ofs * 4 + 0] = uint16_t(CLAMP(p_color.r, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 4 + 1] = uint16_t(CLAMP(p_color.g, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 4 + 2] = uint16_t(CLAMP(p_color.b, 0, 65535));
-			((uint16_t *)r_ptr)[p_ofs * 4 + 3] = uint16_t(CLAMP(p_color.a, 0, 65535));
+			((uint16_t *)r_ptr)[p_ofs * 4 + 0] = uint16_t(CLAMP(p_color.r, 0.0f, 65535.0f));
+			((uint16_t *)r_ptr)[p_ofs * 4 + 1] = uint16_t(CLAMP(p_color.g, 0.0f, 65535.0f));
+			((uint16_t *)r_ptr)[p_ofs * 4 + 2] = uint16_t(CLAMP(p_color.b, 0.0f, 65535.0f));
+			((uint16_t *)r_ptr)[p_ofs * 4 + 3] = uint16_t(CLAMP(p_color.a, 0.0f, 65535.0f));
 		} break;
 
 		default: {

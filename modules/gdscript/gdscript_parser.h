@@ -171,6 +171,16 @@ public:
 		_FORCE_INLINE_ bool is_variant() const { return kind == VARIANT || kind == RESOLVING || kind == UNRESOLVED || kind == TRAIT_OBJECT; }
 		_FORCE_INLINE_ bool is_hard_type() const { return type_source > INFERRED; }
 
+		_FORCE_INLINE_ GDScriptParser::DataType as_hard_type() const {
+			if (!is_set() || has_no_type() || is_hard_type()) {
+				return *this;
+			}
+			DataType ret;
+			ret.type_source = ANNOTATED_INFERRED;
+			ret.kind = VARIANT;
+			return ret;
+		}
+
 		String to_string() const;
 		_FORCE_INLINE_ String to_string_strict() const { return is_hard_type() ? to_string() : "Variant"; }
 
@@ -838,7 +848,7 @@ public:
 		Vector<IdentifierNode *> extends; // List for indexing: extends A.B.C
 		Vector<TypeNode*> extends_generic_args; ///generics that belong to the superclass
 		DataType base_type;
-		// Metatype that represents this class.
+		// Metatype that represents this class. Always contains a hard-type.
 		DataType self_type;
 		String fqcn; // Fully-qualified class name. Identifies uniquely any class in the project.
 

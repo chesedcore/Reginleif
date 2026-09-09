@@ -7229,7 +7229,7 @@ void EditorNode::reload_scene(const String &p_path) {
 
 	// Reload scene.
 	_remove_scene(scene_idx, false);
-	Error err = load_scene(p_path, true, false, false, false);
+	Error err = load_scene(p_path, true, false, true, false);
 	if (err != OK) {
 		return;
 	}
