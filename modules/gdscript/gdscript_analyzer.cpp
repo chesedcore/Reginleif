@@ -1709,7 +1709,10 @@ void GDScriptAnalyzer::resolve_class_member(GDScriptParser::ClassNode *p_class, 
 		ensure_cached_external_parser_for_class(member.get_datatype().class_type, p_class, "Trying to resolve datatype of class member", p_source);
 		GDScriptParser::DataType member_type = member.get_datatype();
 		for (int i = 0; i < member_type.get_container_element_type_count(); ++i) {
-			ensure_cached_external_parser_for_class(member_type.get_container_element_type(i).class_type, p_class, "Trying to resolve datatype of class member", p_source);
+			ensure_cached_external_parsers_for_datatype(member_type.get_container_element_type(i), p_class, "Trying to resolve datatype of class member", p_source);
+		}
+		for (const KeyValue<StringName, GDScriptParser::DataType>& E : member_type.generic_type_bindings) {
+			ensure_cached_external_parsers_for_datatype(E.value, p_class, "Trying to resolve generic binding of class member", p_source);
 		}
 	});
 
@@ -5131,6 +5134,10 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			}
 		}
 
+		for (const KeyValue<StringName, GDScriptParser::DataType>& E : call_generic_bindings) {
+			ensure_cached_external_parsers_for_datatype(E.value, base_type.class_type, "Trying to resolve generic binding of call", p_call);
+		}
+
 		/// now we gotta seed call_generic_bindings from explicit type args given to us in the turbobrick
 
 		bool has_turbobrick = p_call->has_explicit_generic_args;
@@ -5744,6 +5751,21 @@ Ref<GDScriptParserRef> GDScriptAnalyzer::ensure_cached_external_parser_for_class
 	return parser_ref;
 }
 
+void GDScriptAnalyzer::ensure_cached_external_parsers_for_datatype(const GDScriptParser::DataType& p_type, const GDScriptParser::ClassNode* p_from_class, const char* p_context, const GDScriptParser::Node* p_source, int p_depth) {
+	if (p_depth > 64) {
+		return;
+	}
+	if (p_type.class_type != nullptr) {
+		ensure_cached_external_parser_for_class(p_type.class_type, p_from_class, p_context, p_source);
+	}
+	for (int i = 0; i < p_type.get_container_element_type_count(); i++) {
+		ensure_cached_external_parsers_for_datatype(p_type.get_container_element_type(i), p_from_class, p_context, p_source, p_depth + 1);
+	}
+	for (const KeyValue<StringName, GDScriptParser::DataType>& E : p_type.generic_type_bindings) {
+		ensure_cached_external_parsers_for_datatype(E.value, p_from_class, p_context, p_source, p_depth + 1);
+	}
+}
+
 Ref<GDScriptParserRef> GDScriptAnalyzer::find_cached_external_parser_for_class(const GDScriptParser::ClassNode *p_class, const Ref<GDScriptParserRef> &p_dependant_parser) {
 	if (p_dependant_parser.is_null()) {
 		return nullptr;
@@ -5989,6 +6011,9 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 
 	HashMap<StringName, GDScriptParser::DataType> accumulated_bindings;
 	accumulated_bindings = base.generic_type_bindings;
+	for (const KeyValue<StringName, GDScriptParser::DataType>& E : accumulated_bindings) {
+		ensure_cached_external_parsers_for_datatype(E.value, base_class, "Trying to resolve generic binding of base type", p_identifier);
+	}
 
 	for (GDScriptParser::ClassNode *script_class : script_classes) {
 		if (p_base == nullptr && script_class->identifier && script_class->identifier->name == name) {
@@ -6112,6 +6137,9 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 												resolve_generic_type(E.value, accumulated_bindings);
 				}
 				accumulated_bindings = next_level_bindings;
+				for (const KeyValue<StringName, GDScriptParser::DataType>& E : accumulated_bindings) {
+					ensure_cached_external_parsers_for_datatype(E.value, base_class, "Trying to resolve generic binding of base type", p_identifier);
+				}
 			}
 
 		}
