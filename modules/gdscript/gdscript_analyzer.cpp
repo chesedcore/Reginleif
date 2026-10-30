@@ -8428,6 +8428,11 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 		if (same_generic_owner) {
 			return p_target == p_source;
 		}
+
+		if (is_generic_in_open_context(p_target, p_class) || is_generic_fn_in_open_context(p_target, p_func)) {
+			return false;
+		}
+		
 		return true;
 	}
 	
