@@ -269,6 +269,11 @@ void EditorResourcePicker::_file_selected(const String &p_path) {
 		}
 	}
 
+	if (!is_resource_generic_compatible(loaded_resource)) {
+		EditorNode::get_singleton()->show_warning(vformat(TTR("[Reginleif] The selected resource (%s) does not satisfy the generic arguments expected for this property."), loaded_resource->get_class()));
+		return;
+	}
+
 	edited_resource = loaded_resource;
 	_resource_changed();
 }
@@ -380,7 +385,7 @@ void EditorResourcePicker::_update_menu_items() {
 	// Add options to copy/paste resource.
 	Ref<Resource> cb = EditorSettings::get_singleton()->get_resource_clipboard();
 	bool paste_valid = false;
-	if (is_editable() && cb.is_valid()) {
+	if (is_editable() && cb.is_valid() && is_resource_generic_compatible(cb)) {
 		if (base_type.is_empty()) {
 			paste_valid = true;
 		} else {
@@ -681,6 +686,9 @@ void EditorResourcePicker::set_create_options(Object *p_menu_node) {
 				if (!scr.is_valid() || !scr->is_script_valid() || scr->is_abstract()) {
 					continue;
 				}
+				if (!_script_matches_generic_args(scr)) {
+					continue;
+				}
 			} else {
 				ERR_CONTINUE_MSG(true, vformat(R"(Invalid class "%s")", t));
 			}
@@ -907,6 +915,9 @@ bool EditorResourcePicker::_is_drop_valid(const Dictionary &p_drag_data) const {
 	if (res.is_null()) {
 		return false;
 	}
+	if (!is_resource_generic_compatible(res)) {
+		return false;
+	}
 
 	_ensure_allowed_types();
 	HashSet<StringName> allowed_types(allowed_types_with_convert);
@@ -935,6 +946,146 @@ bool EditorResourcePicker::_is_type_valid(const String &p_type_name, const HashS
 	}
 
 	return false;
+}
+
+static bool _substitute_generic_expr(const String& p_expr, const Vector<String>& p_params, const HashMap<String, String>& p_known, String& r_out) {
+	r_out = String();
+	const int len = p_expr.length();
+	int i = 0;
+
+	while (i < len) {
+		///help me. help. help. FUCK
+		const char32_t c = p_expr[i];
+		if (c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+			int j = i;
+
+			while (j < len && (p_expr[j] == '_' || (p_expr[j] >= 'a' && p_expr[j] <= 'z') || (p_expr[j] >= 'A' && p_expr[j] <= 'Z') || (p_expr[j] >= '0' && p_expr[j] <= '9'))) {
+				j++;
+			}
+
+			const String token = p_expr.substr(i, j - i);
+			int k = j;
+			while (k < len && p_expr[k] == ' ') {
+				k++;
+			}
+
+			const bool is_key = k < len && p_expr[k] == '=';
+			if (!is_key && p_params.has(token)) {
+				const String* known = p_known.getptr(token);
+				if (known == nullptr) {
+					return false;
+				}
+				r_out += *known;
+			} else {
+				r_out += token;
+			}
+
+			i = j;
+		} else {
+			r_out += String::chr(c);
+			i++;
+		}
+	}
+	return true;
+}
+
+static bool _is_concrete_type_expr(const String& p_expr) {
+	const int len = p_expr.length();
+	int i = 0;
+
+	while (i < len) {
+		const char32_t c = p_expr[i];
+
+		if (c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+			int j = i;
+
+			while (j < len && (p_expr[j] == '_' || (p_expr[j] >= 'a' && p_expr[j] <= 'z') || (p_expr[j] >= 'A' && p_expr[j] <= 'Z') || (p_expr[j] >= '0' && p_expr[j] <= '9'))) {
+				j++;
+			}
+
+			int k = j;
+			while (k < len && p_expr[k] == ' ') {
+				k++;
+			}
+
+			if (!(k < len && p_expr[k] == '=')) {
+				const String token = p_expr.substr(i, j - i);
+				if (token != "Variant" && !ClassDB::class_exists(token) && !ScriptServer::is_global_class(token) && Variant::get_type_by_name(token) == Variant::VARIANT_MAX) {
+					return false;
+				}
+			}
+			i = j;
+		
+		} else {
+			i++;
+		}
+		
+	}
+	return true;
+}
+
+bool EditorResourcePicker::_script_matches_generic_args(Ref<Script> p_script) const {
+	if (generic_args.is_empty()) {
+		return true;
+	}
+
+	const String target = base_type.get_slicec(',', 0).strip_edges();
+	HashMap<String, String> current;
+
+	for (int guard = 0; guard < 64; guard++) {
+		if (p_script.is_null()) {
+			return true;
+		}
+		Ref<Script> parent = p_script->get_base_script();
+		if (parent.is_null()) {
+			return true;
+		}
+
+		const Variant info_v = p_script->call(SNAME("get_generic_chain_info"));
+		if (info_v.get_type() != Variant::DICTIONARY) {
+			return true;
+		}
+
+		const Dictionary info = info_v;
+		const Vector<String> params = info.get("params", PackedStringArray());
+		const Dictionary base_args = info.get("base_args", Dictionary());
+
+		HashMap<String, String> resolved;
+		for (const KeyValue<Variant, Variant>& kv : base_args) {
+			String out;
+			if (_substitute_generic_expr(String(kv.value), params, current, out)) {
+				resolved[String(kv.key)] = out;
+			}
+		}
+
+		if (String(parent->get_global_name()) == target) {
+			for (const KeyValue<Variant, Variant>& kv : generic_args) {
+				const String *bound = resolved.getptr(String(kv.key));
+				if (bound == nullptr) {
+					continue;
+				}
+				const String expected = String(kv.value).strip_edges();
+				if (!_is_concrete_type_expr(expected)) {
+					continue;
+				}
+				if (bound->replace(" ", "") != expected.replace(" ", "")) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		current = resolved;
+		p_script = parent;
+	}
+	return true;
+}
+
+bool EditorResourcePicker::is_resource_generic_compatible(const Ref<Resource>& p_resource) const {
+	if (generic_args.is_empty() || p_resource.is_null()) {
+		return true;
+	}
+	return _script_matches_generic_args(p_resource->get_script());
 }
 
 bool EditorResourcePicker::_is_custom_type_script() const {
