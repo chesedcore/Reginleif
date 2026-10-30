@@ -3245,6 +3245,11 @@ void GDScriptAnalyzer::check_generic_assignable(GDScriptParser::IdentifierNode* 
 		return;
 	}
 
+	if (!default_is_null && !default_is_concrete) {
+		mark_node_unsafe(p_initializer);
+		return;
+	}
+
 	if (p_generic_decl->generic_upper_bound == nullptr) {
 		if (default_is_null) {
 			push_error(vformat(
