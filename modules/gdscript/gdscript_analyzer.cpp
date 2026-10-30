@@ -5722,7 +5722,10 @@ Ref<GDScriptParserRef> GDScriptAnalyzer::ensure_cached_external_parser_for_class
 	}
 
 	Ref<GDScriptParserRef> parser_ref;
-	for (const GDScriptParser::ClassNode *look_class = p_from_class; look_class != nullptr; look_class = look_class->base_type.class_type) {
+
+	parser_ref = find_cached_external_parser_for_class(p_class, parser);
+
+	for (const GDScriptParser::ClassNode *look_class = p_from_class; parser_ref.is_null() && look_class != nullptr; look_class = look_class->base_type.class_type) {
 		if (parser->has_class(look_class)) {
 			parser_ref = find_cached_external_parser_for_class(p_class, parser);
 			if (parser_ref.is_valid()) {
