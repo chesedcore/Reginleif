@@ -3787,8 +3787,12 @@ void GDScriptAnalyzer::resolve_return(GDScriptParser::ReturnNode *p_return) {
 		}
 	}
 
-	if (has_expected_type && !expected_type.is_variant() && expected_type.is_hard_type()) {
-		if (result.is_variant() || !result.is_hard_type()) {
+	const bool expected_is_trait_bound = has_expected_type && expected_type.kind == GDScriptParser::DataType::TRAIT_OBJECT && !expected_type.trait_bound_names.is_empty();
+	const bool result_is_trait_bound = result.kind == GDScriptParser::DataType::TRAIT_OBJECT && !result.trait_bound_names.is_empty();
+
+	if (has_expected_type && (!expected_type.is_variant() || expected_is_trait_bound) && expected_type.is_hard_type()) {
+		
+		if ((result.is_variant() && !(expected_is_trait_bound && result_is_trait_bound)) || !result.is_hard_type()) {
 			p_return->use_conversion = true;
 			mark_node_unsafe(p_return);
 		} else if (!is_type_compatible(expected_type, result, true, p_return)) {
