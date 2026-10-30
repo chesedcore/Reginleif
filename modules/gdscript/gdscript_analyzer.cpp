@@ -453,6 +453,11 @@ static GDScriptParser::DataType resolve_generic_type(const GDScriptParser::DataT
 	return resolve_generic_type(p_type_to_resolve, p_bindings, chain_resolved_so_far);
 }
 
+///public door momento
+GDScriptParser::DataType GDScriptAnalyzer::substitute_generic_bindings(const GDScriptParser::DataType& p_type, const HashMap<StringName, GDScriptParser::DataType>& p_bindings) {
+	return resolve_generic_type(p_type, p_bindings);
+}
+
 static bool has_unbound_generic_parameter(const GDScriptParser::DataType& p_type) {
 	if (p_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
 		return true;
