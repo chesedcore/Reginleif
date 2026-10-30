@@ -504,6 +504,19 @@ void GDScript::_update_exports_values(HashMap<StringName, Variant> &values, List
 
 	if (base_cache.is_valid()) {
 		base_cache->_update_exports_values(values, propnames);
+
+		if (!inherited_export_overrides.is_empty()) {
+			for (PropertyInfo& pi : propnames) {
+				const PropertyInfo* specialised = inherited_export_overrides.getptr(pi.name);
+				if (specialised != nullptr) {
+					pi.type = specialised->type;
+					pi.hint = specialised->hint;
+					pi.hint_string = specialised->hint_string;
+					pi.class_name = specialised->class_name;
+					pi.usage = specialised->usage;
+				}
+			}
+		}
 	}
 }
 
@@ -587,6 +600,9 @@ bool GDScript::_update_exports(bool *r_err, bool p_recursive_call, PlaceHolderSc
 			_signals.clear();
 
 			members_cache.push_back(get_class_category());
+
+			inherited_export_overrides.clear();
+			GDScriptCompiler::collect_specialized_generic_exports(c, inherited_export_overrides);
 
 			for (const GDScriptParser::ClassNode::Member &member : c->members) {
 				switch (member.type) {

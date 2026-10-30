@@ -3727,6 +3727,7 @@ void EditorPropertyResource::_viewport_selected(const NodePath &p_path) {
 ///
 static String _extract_first_generic_arg(const String& p_type_expr);
 static Vector<String> _extract_top_level_generic_args(const String& p_type_expr);
+static bool _payload_is_concrete(const String& p_payload);
 
 void EditorPropertyResource::setup(Object *p_object, const String &p_path, const String &p_base_type) {
 	if (resource_picker) {
@@ -3789,25 +3790,7 @@ void EditorPropertyResource::setup(Object *p_object, const String &p_path, const
 			generic_child_binding_payload = generic_binding_payload;
 		}
 
-			if (p_object != nullptr && p_base_type.find_char('[') != -1) {
-			if (!p_object->has_meta(SNAME("__gd_generic_bindings"))) {
-				Dictionary owner_meta;
-				owner_meta["args"] = generic_binding_payload;
-				p_object->set_meta(SNAME("__gd_generic_bindings"), owner_meta);
-			}
-
-			Variant script_variant = p_object->get("script");
-			if (script_variant.get_type() == Variant::OBJECT) {
-				Ref<Script> owner_script = script_variant;
-				if (owner_script.is_valid()) {
-					if (owner_script->has_method(SNAME("set_generic_type_args"))) {
-						owner_script->call(SNAME("set_generic_type_args"), generic_binding_payload);
-					}
-				}
-			}
-		}
-
-		if (p_object != nullptr) {
+		if (p_object != nullptr && _payload_is_concrete(generic_child_binding_payload)) {
 			const Variant existing_value = p_object->get(p_path);
 			if (existing_value.get_type() == Variant::OBJECT) {
 				Ref<Resource> existing_res = existing_value;
@@ -3851,7 +3834,7 @@ void EditorPropertyResource::update_property() {
 	}
 
 	///
-	if (!generic_child_binding_payload.is_empty() && res.is_valid()) {
+	if (!generic_child_binding_payload.is_empty() && res.is_valid() && _payload_is_concrete(generic_child_binding_payload)) {
 		Dictionary generic_meta;
 		generic_meta["args"] = generic_child_binding_payload;
 		res->set_meta(SNAME("__gd_generic_bindings"), generic_meta);
@@ -4206,6 +4189,53 @@ static Vector<String> _extract_top_level_generic_args(const String& p_type_expr)
 	return args;
 }
 
+///a name only counts as a type if the engine could actually load something by it
+static bool _is_concrete_type_name(const String& p_type_expr) {
+	String name = p_type_expr;
+	const int bracket = name.find_char('[');
+	if (bracket != -1) {
+		name = name.substr(0, bracket);
+	}
+
+	name = name.strip_edges();
+	if (name.is_empty()) {
+		return false;
+	}
+
+	if (ClassDB::class_exists(name) || ScriptServer::is_global_class(name)) {
+		return true;
+	}
+
+	for (int i = 0; i < Variant::VARIANT_MAX; i++) {
+		if (name == Variant::get_type_name((Variant::Type)i)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+///`T=T` is a fucking cry for help
+static bool _payload_is_concrete(const String& p_payload) {
+	const Vector<String> args = _split_top_level_args_text(p_payload);
+
+	if (args.is_empty()) {
+		return false;
+	}
+
+	for (const String& arg : args) {
+		String value = arg;
+		const int eq = value.find("=");
+		if (eq != -1) {
+			value = value.substr(eq + 1).strip_edges();
+		}
+
+		if (!_is_concrete_type_name(value)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 ///this is where the export hint sent from upstream (the parser) gets figured out
 static bool _decode_generic_export_hint(const String& p_encoded, PropertyHint& r_base_hint, String& r_base_hint_string) {
 
@@ -4241,6 +4271,23 @@ static bool _try_resolve_generic_type_from_script(Object* p_object, const String
 				if (d.has("args")) {
 					String args_text = d["args"];
 					Vector<String> args = _split_top_level_args_text(args_text);
+
+					///i need genuine fucking help
+					for (int ai = 0; ai < args.size(); ai++) {
+						const int named_eq = args[ai].find("=");
+						if (named_eq == -1 || args[ai].substr(0, named_eq).strip_edges() != p_generic_name) {
+							               ///^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ what the genuine flying fuck
+							continue;
+						}
+
+						const String bound = args[ai].substr(named_eq + 1).strip_edges();
+						if (_is_concrete_type_name(bound)) {
+							r_resolved_type = bound;
+							return true;
+						}
+						return false;
+					}
+					return false;
 				
 				if (args.size() == 1) {
 					String arg = args[0].strip_edges();
@@ -4389,7 +4436,7 @@ EditorProperty *EditorInspectorDefaultPlugin::get_editor_for_property(Object *p_
 				}
 				if (!encoded_type.is_empty() && encoded_type.is_valid_identifier()) {
 					String resolved_type;
-					if (_try_resolve_generic_type_from_script(p_object, encoded_type, resolved_type)) {
+					if (_try_resolve_generic_type_from_script(p_object, encoded_type, resolved_type) && _is_concrete_type_name(resolved_type)) {
 						if (effective_hint == PROPERTY_HINT_TYPE_STRING || effective_hint == PROPERTY_HINT_ARRAY_TYPE || effective_hint == PROPERTY_HINT_DICTIONARY_TYPE) {
 							const String replaced_hint_text = effective_hint_text.replace("Resource", resolved_type);
 							if (replaced_hint_text != effective_hint_text) {
@@ -4400,27 +4447,6 @@ EditorProperty *EditorInspectorDefaultPlugin::get_editor_for_property(Object *p_
 						}
 					}
 				}
-			}
-		}
-	}
-	if (p_object != nullptr && p_object->has_meta(SNAME("__gd_generic_bindings")) && !effective_hint_text.is_empty()) {
-		Variant meta = p_object->get_meta(SNAME("__gd_generic_bindings"));
-		if (meta.get_type() == Variant::DICTIONARY) {
-
-			///we got our stuff, hell yeah
-			///i went through all this bullshit for genuinely nothing tbh
-			Dictionary d = meta;
-			if (d.has("args")) {
-				const String generic_arg = String(d["args"]).strip_edges();
-
-				Vector<String> top_args = _split_top_level_args_text(generic_arg);
-				if (!(top_args.size() > 1)) {
-					const String replaced = effective_hint_text.replace("Resource", generic_arg);
-					if (replaced != effective_hint_text) {
-						effective_hint_text = replaced;
-					}
-				}
-
 			}
 		}
 	}

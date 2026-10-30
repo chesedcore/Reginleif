@@ -3423,6 +3423,20 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 				p_script->base_generic_args[E.key] = StringName(E.value.to_property_info_hint_string());
 			}
 #endif // TOOLS_ENABLED
+
+			HashMap<StringName, PropertyInfo> specialized_exports;
+			collect_specialized_generic_exports(p_class, specialized_exports);
+			for (const KeyValue<StringName, PropertyInfo>& E : specialized_exports) {
+				HashMap<StringName, GDScript::MemberInfo>::Iterator mi = p_script->member_indices.find(E.key);
+				if (mi) {
+					PropertyInfo& info = mi->value.property_info;
+					info.type = E.value.type;
+					info.hint = E.value.hint;
+					info.hint_string = E.value.hint_string;
+					info.class_name = E.value.class_name;
+					info.usage = E.value.usage | PROPERTY_USAGE_SCRIPT_VARIABLE;
+				}
+			}
 		} break;
 		default: {
 			_set_error("Parser bug (please report): invalid inheritance.", nullptr);
@@ -3799,6 +3813,183 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 
 	p_script->valid = true;
 	return OK;
+}
+
+static bool _object_export_hint(const GDScriptParser::DataType& p_type, PropertyHint& r_hint, String& r_hint_string) {
+	if (p_type.is_meta_type || (p_type.kind != GDScriptParser::DataType::CLASS && p_type.kind != GDScriptParser::DataType::NATIVE && p_type.kind != GDScriptParser::DataType::SCRIPT)) {
+		return false;
+	}
+	if (ClassDB::is_parent_class(p_type.native_type, SNAME("Resource"))) {
+		r_hint = PROPERTY_HINT_RESOURCE_TYPE;
+	} else if (ClassDB::is_parent_class(p_type.native_type, SNAME("Node"))) {
+		r_hint = PROPERTY_HINT_NODE_TYPE;
+	} else {
+		return false;
+	}
+	r_hint_string = p_type.to_property_info_hint_string();
+	return true;
+}
+
+static String _enum_hint_string(const GDScriptParser::DataType& p_enum) {
+	String result;
+	bool first = true;
+	for (const KeyValue<StringName, int64_t>& E : p_enum.enum_values) {
+		if (!first) {
+			result += ",";
+		}
+		first = false;
+		result += E.key.string().capitalize().xml_escape();
+		result += ":";
+		result += String::num_int64(E.value).xml_escape();
+	}
+	return result;
+}
+
+static bool _container_element_prefix(const GDScriptParser::DataType& p_element, String& r_prefix) {
+	PropertyHint hint = PROPERTY_HINT_NONE;
+	String hint_string;
+
+	if (p_element.is_variant()) {
+		r_prefix = itos(Variant::NIL) + ":";
+		return true;
+	}
+
+	if (_object_export_hint(p_element, hint, hint_string)) {
+		r_prefix = itos(Variant::OBJECT) + "/" + itos(hint) + ":" + hint_string;
+		return true;
+	}
+
+	if (p_element.kind == GDScriptParser::DataType::ENUM && !p_element.is_meta_type) {
+		r_prefix = itos(Variant::INT) + "/" + itos(PROPERTY_HINT_ENUM) + ":" + _enum_hint_string(p_element);
+		return true;
+	}
+
+	if (p_element.kind == GDScriptParser::DataType::BUILTIN && p_element.builtin_type != Variant::NIL) {
+		if (p_element.builtin_type == Variant::ARRAY && p_element.has_container_element_type(0)) {
+			String inner_prefix;
+			if (!_container_element_prefix(p_element.get_container_element_type(0), inner_prefix)) {
+				return false; ///inner is still open
+			}
+			r_prefix = itos(Variant::ARRAY) + "/" + itos(PROPERTY_HINT_TYPE_STRING) + ":" + inner_prefix;
+			return true;
+		}
+
+		if (p_element.builtin_type == Variant::DICTIONARY && p_element.has_container_element_types()) {
+			String nested_key_prefix;
+			String nested_value_prefix;
+			if (!_container_element_prefix(p_element.get_container_element_type_or_variant(0), nested_key_prefix) ||
+					!_container_element_prefix(p_element.get_container_element_type_or_variant(1), nested_value_prefix)) {
+				return false;
+			}
+			r_prefix = itos(Variant::DICTIONARY) + "/" + itos(PROPERTY_HINT_TYPE_STRING) + ":" + nested_key_prefix + ";" + nested_value_prefix;
+			return true;
+		}
+		r_prefix = itos(p_element.builtin_type) + ":";
+		return true;
+	}
+
+	return false;
+}
+
+static bool _specialize_generic_export(PropertyInfo& r_info, const GDScriptParser::DataType& p_declared, const HashMap<StringName, GDScriptParser::DataType>& p_bindings) {
+	const GDScriptParser::DataType resolved = GDScriptAnalyzer::substitute_generic_bindings(p_declared, p_bindings);
+
+	const uint32_t cleaned_usage = r_info.usage & ~(uint32_t)(PROPERTY_USAGE_GENERIC | PROPERTY_USAGE_NIL_IS_VARIANT);
+
+	PropertyHint hint = PROPERTY_HINT_NONE;
+	String hint_string;
+
+	if (_object_export_hint(resolved, hint, hint_string)) {
+		r_info.type = Variant::OBJECT;
+		r_info.hint = hint;
+		r_info.hint_string = hint_string;
+		r_info.class_name = StringName();
+		r_info.usage = cleaned_usage;
+		return true;
+	}
+
+	if (resolved.kind == GDScriptParser::DataType::BUILTIN && resolved.builtin_type == Variant::ARRAY && resolved.has_container_element_type(0)) {
+		String prefix;
+		if (!_container_element_prefix(resolved.get_container_element_type(0), prefix)) {
+			return false;
+		}
+		r_info.type = Variant::ARRAY;
+		r_info.hint = PROPERTY_HINT_TYPE_STRING;
+		r_info.hint_string = prefix;
+		r_info.class_name = StringName();
+		r_info.usage = PROPERTY_USAGE_DEFAULT;
+		return true;
+	}
+
+	if (resolved.kind == GDScriptParser::DataType::BUILTIN && resolved.builtin_type == Variant::DICTIONARY && resolved.has_container_element_types()) {
+		String key_prefix;
+		String value_prefix;
+		if (!_container_element_prefix(resolved.get_container_element_type_or_variant(0), key_prefix) ||
+				!_container_element_prefix(resolved.get_container_element_type_or_variant(1), value_prefix)) {
+			return false;
+		}
+		///from the parser's layout: "<key prefix>;<value prefix>"
+		r_info.type = Variant::DICTIONARY;
+		r_info.hint = PROPERTY_HINT_TYPE_STRING;
+		r_info.hint_string = key_prefix + ";" + value_prefix;
+		r_info.class_name = StringName();
+		r_info.usage = PROPERTY_USAGE_DEFAULT;
+		return true;
+	}
+
+	///bare T that resolved to an enum
+	if (p_declared.kind == GDScriptParser::DataType::GENERIC_TYPE && resolved.kind == GDScriptParser::DataType::ENUM && !resolved.is_meta_type) {
+		r_info.type = Variant::INT;
+		r_info.hint = PROPERTY_HINT_ENUM;
+		r_info.hint_string = _enum_hint_string(resolved);
+		r_info.class_name = String(resolved.native_type).replace("::", ".");
+		r_info.usage = cleaned_usage | PROPERTY_USAGE_CLASS_IS_ENUM;
+		return true;
+	}
+
+	///bare T that resolved to a builtin like int
+	if (p_declared.kind == GDScriptParser::DataType::GENERIC_TYPE && resolved.kind == GDScriptParser::DataType::BUILTIN && resolved.builtin_type != Variant::NIL) {
+		r_info.type = resolved.builtin_type;
+		r_info.hint = PROPERTY_HINT_NONE;
+		r_info.hint_string = String();
+		r_info.class_name = StringName();
+		r_info.usage = cleaned_usage;
+		return true;
+	}
+
+	return false;
+}
+
+void GDScriptCompiler::collect_specialized_generic_exports(const GDScriptParser::ClassNode* p_class, HashMap<StringName, PropertyInfo>& r_specialized) {
+	ERR_FAIL_NULL(p_class);
+
+	HashMap<StringName, GDScriptParser::DataType> bindings(p_class->base_type.generic_type_bindings);
+	const GDScriptParser::ClassNode* ancestor = p_class->base_type.class_type;
+
+	while (ancestor != nullptr) {
+		if (!bindings.is_empty()) {
+			for (const GDScriptParser::ClassNode::Member& member : ancestor->members) {
+				if (member.type != GDScriptParser::ClassNode::Member::VARIABLE) {
+					continue;
+				}
+				const GDScriptParser::VariableNode* variable = member.variable;
+				if (!variable->exported || variable->is_static || (variable->export_info.usage & PROPERTY_USAGE_GENERIC) == 0) {
+					continue;
+				}
+				PropertyInfo info = variable->export_info;
+				if (_specialize_generic_export(info, variable->type_constraint, bindings)) {
+					r_specialized[variable->identifier->name] = info;
+				}
+			}
+		}
+
+		HashMap<StringName, GDScriptParser::DataType> next_bindings;
+		for (const KeyValue<StringName, GDScriptParser::DataType>& E : ancestor->base_type.generic_type_bindings) {
+			next_bindings[E.key] = bindings.is_empty() ? E.value : GDScriptAnalyzer::substitute_generic_bindings(E.value, bindings);
+		}
+		bindings = next_bindings;
+		ancestor = ancestor->base_type.class_type;
+	}
 }
 
 void GDScriptCompiler::convert_to_initializer_type(Variant &p_variant, const GDScriptParser::VariableNode *p_node) {
