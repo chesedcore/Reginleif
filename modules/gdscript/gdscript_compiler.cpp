@@ -3339,6 +3339,10 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 	p_script->static_initializer = nullptr;
 	p_script->rpc_config.clear();
 	p_script->lambda_info.clear();
+#ifdef TOOLS_ENABLED
+	p_script->generic_param_names.clear();
+	p_script->base_generic_args.clear();
+#endif // TOOLS_ENABLED
 
 	p_script->clearing = false;
 
@@ -3408,6 +3412,17 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 
 			p_script->base = base;
 			p_script->member_indices = base->member_indices;
+
+#ifdef TOOLS_ENABLED
+			for (const GDScriptParser::IdentifierNode* param : p_class->generic_parameters) {
+				if (param != nullptr) {
+					p_script->generic_param_names.push_back(param->name);
+				}
+			}
+			for (const KeyValue<StringName, GDScriptParser::DataType>& E : p_class->base_type.generic_type_bindings) {
+				p_script->base_generic_args[E.key] = StringName(E.value.to_property_info_hint_string());
+			}
+#endif // TOOLS_ENABLED
 		} break;
 		default: {
 			_set_error("Parser bug (please report): invalid inheritance.", nullptr);

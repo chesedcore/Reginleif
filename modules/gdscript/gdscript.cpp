@@ -290,6 +290,23 @@ String GDScript::get_generic_type_args() const {
 	return generic_type_args;
 }
 
+#ifdef TOOLS_ENABLED
+Dictionary GDScript::get_generic_chain_info() const {
+	PackedStringArray params;
+	for (const StringName& name : generic_param_names) {
+		params.push_back(String(name));
+	}
+	Dictionary base_args;
+	for (const KeyValue<StringName, StringName>& E : base_generic_args) {
+		base_args[String(E.key)] = String(E.value);
+	}
+	Dictionary info;
+	info["params"] = params;
+	info["base_args"] = base_args;
+	return info;
+}
+#endif // TOOLS_ENABLED
+
 StringName GDScript::get_instance_base_type() const {
 	if (native.is_valid()) {
 		return native->get_name();
@@ -1115,6 +1132,9 @@ void GDScript::_bind_methods() {
 	///TODO: replace with gdtype when i can be assed to. the migration could be anytime soon, eh?
 	ClassDB::bind_method(D_METHOD("set_generic_type_args", "args"), &GDScript::set_generic_type_args);
 	ClassDB::bind_method(D_METHOD("get_generic_type_args"), &GDScript::get_generic_type_args);
+#ifdef TOOLS_ENABLED
+	ClassDB::bind_method(D_METHOD("get_generic_chain_info"), &GDScript::get_generic_chain_info);
+#endif // TOOLS_ENABLED
 	ClassDB::bind_vararg_method(METHOD_FLAGS_DEFAULT, "new", &GDScript::_new, MethodInfo("new"));
 }
 

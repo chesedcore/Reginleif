@@ -3573,6 +3573,10 @@ bool EditorPropertyResource::_is_resource_assignment_valid(const Ref<Resource>& 
 		return true;
 	}
 
+	if (resource_picker != nullptr && !resource_picker->is_resource_generic_compatible(p_resource)) {
+		return false;
+	}
+
 	if (resource_picker != nullptr) {
 		const String picker_type = resource_picker->get_base_type();
 		if (!picker_type.is_empty() && picker_type != "Resource") {
@@ -3761,6 +3765,19 @@ void EditorPropertyResource::setup(Object *p_object, const String &p_path, const
 	if (open != -1 && close != -1 && close > open + 1) {
 
 		Vector<String> top_level_args = _extract_top_level_generic_args(p_base_type);
+
+		Dictionary expected_generic_args;
+		for (const String& arg : top_level_args) {
+			const int eq = arg.find_char('=');
+			if (eq > 0) {
+				const String key = arg.substr(0, eq).strip_edges();
+				if (key.is_valid_identifier()) {
+					expected_generic_args[key] = arg.substr(eq + 1).strip_edges();
+				}
+			}
+		}
+		resource_picker->set_generic_args(expected_generic_args);
+
 		if (top_level_args.size() > 1) {
 			generic_binding_payload = String(", ").join(top_level_args);
 			generic_child_binding_payload = generic_binding_payload;
@@ -3827,6 +3844,11 @@ void EditorPropertyResource::make_passthrough(bool p_passthrough) {
 
 void EditorPropertyResource::update_property() {
 	Ref<Resource> res = get_edited_property_display_value();
+
+	if (resource_picker) {
+		const bool generic_mismatch = res.is_valid() && !resource_picker->is_resource_generic_compatible(res);
+		resource_picker->set_modulate(generic_mismatch ? get_theme_color(SNAME("warning_color"), EditorStringName(Editor)) : Color(1, 1, 1));
+	}
 
 	///
 	if (!generic_child_binding_payload.is_empty() && res.is_valid()) {
