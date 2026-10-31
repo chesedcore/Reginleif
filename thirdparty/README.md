@@ -96,7 +96,7 @@ Patches:
 ## brotli
 
 - Upstream: https://github.com/google/brotli
-- Version: 1.2.0 (028fb5a23661f123017c060daa546b55cf4bde29, 2025)
+- Version: 1.2.1 (db24a98aed38a16de78cc05ca15cdd8dc2a0d92d, 2026)
 - License: MIT
 
 Files extracted from upstream source:
@@ -356,13 +356,13 @@ for UI.
 ## freetype
 
 - Upstream: https://gitlab.freedesktop.org/freetype/freetype
-- Version: 2.14.3 (0a0221a1347e2f1e07c395263540026e9a0aa7c7, 2026)
+- Version: 2.15.0 (37515cf56ba3349656049edbed89ffc6f6466f2d, 2026)
 - License: FreeType License (BSD-like)
 
 Files extracted from upstream source:
 
 - `src/` folder, minus the `dlg` and `tools` subfolders
-  * These files can be removed: `.dat`, `.diff`, `.mk`, `.rc`, `README*`
+  * These files can be removed: `.cin`, `.dat`, `.diff`, `.hin`, `.mk`, `.rc`, `README*`
   * In `src/gzip/`, keep only `ftgzip.c`
 - `include/` folder, minus the `dlg` subfolder
 - `LICENSE.TXT` and `docs/FTL.TXT`
@@ -470,7 +470,7 @@ Patches:
 ## harfbuzz
 
 - Upstream: https://github.com/harfbuzz/harfbuzz
-- Version: 14.4.0 (36cb489cb02ce4b92099669ba9f9bea348eff93f, 2026)
+- Version: 15.0.0 (35f656a1a2bab548ea7f54a6dd3fba2b09680d14, 2026)
 - License: MIT
 
 Files extracted from upstream source:
@@ -777,6 +777,12 @@ Files extracted from upstream source:
 - `LICENSE`
 - `src/miniupnpcstrings.h` was created manually for Godot (it is usually generated
   by CMake). Bump the version number for miniupnpc in that file when upgrading.
+
+Patches:
+
+- `0001-minixml-fix-buffer-read-overflow.patch` ([GH-124962](https://github.com/godotengine/godot/pull/124962))
+- `0002-minixml-fix-buffer-overrun-after-namespace-separator.patch` ([GH-124962](https://github.com/godotengine/godot/pull/124962))
+- `0003-minixml-fix-1-byte-out-of-bounds-read.patch` ([GH-124962](https://github.com/godotengine/godot/pull/124962))
 
 
 ## minizip

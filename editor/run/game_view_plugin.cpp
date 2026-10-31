@@ -68,10 +68,6 @@
 #include "servers/display/display_server.h"
 
 void GameViewDebugger::_session_started(Ref<EditorDebuggerSession> p_session) {
-	if (!is_feature_enabled) {
-		return;
-	}
-
 	bool is_native = EditorRunBar::get_singleton()->is_running_natively();
 
 	Dictionary settings;
@@ -145,7 +141,7 @@ void GameViewDebugger::_session_started(Ref<EditorDebuggerSession> p_session) {
 	p_session->send_message("scene:runtime_node_select_setup", { settings });
 	p_session->send_message("scene:runtime_node_select_set_node_type", { node_type });
 	p_session->send_message("scene:runtime_node_select_set_selection_visible", { selection_visible });
-	p_session->send_message("scene:runtime_node_select_set_ci_tool", { ci_tool });
+	p_session->send_message("scene:runtime_node_select_set_ci_tool", { ci_tool, false });
 	if (!is_native) {
 		p_session->send_message("scene:runtime_node_select_set_ci_local_space", { ci_local_space });
 	}
@@ -175,9 +171,11 @@ void GameViewDebugger::_session_started(Ref<EditorDebuggerSession> p_session) {
 }
 
 void GameViewDebugger::_session_stopped() {
-	if (!is_feature_enabled) {
+	if (!is_feature_enabled && !was_feature_disabled_mid_play) {
 		return;
 	}
+
+	was_feature_disabled_mid_play = false;
 
 	emit_signal(SNAME("session_stopped"));
 }
@@ -296,6 +294,7 @@ void GameViewDebugger::set_ci_tool(int p_tool) {
 
 	Array message;
 	message.append(p_tool);
+	message.append(Input::get_singleton()->is_key_pressed(Key::SHIFT));
 
 	for (Ref<EditorDebuggerSession> &I : sessions) {
 		if (I->is_active()) {
@@ -396,6 +395,7 @@ void GameViewDebugger::setup_session(int p_session_id) {
 void GameViewDebugger::_feature_profile_changed() {
 	Ref<EditorFeatureProfile> profile = EditorFeatureProfileManager::get_singleton()->get_current_profile();
 	is_feature_enabled = profile.is_null() || !profile->is_feature_disabled(EditorFeatureProfile::FEATURE_GAME);
+	was_feature_disabled_mid_play = !is_feature_enabled && EditorRunBar::get_singleton()->is_playing();
 }
 
 void GameViewDebugger::_bind_methods() {
@@ -643,7 +643,7 @@ void GameView::_play_pressed() {
 }
 
 void GameView::_stop_pressed() {
-	if (!is_feature_enabled) {
+	if (!is_feature_enabled && !was_feature_disabled_mid_play) {
 		return;
 	}
 
@@ -664,6 +664,8 @@ void GameView::_stop_pressed() {
 	}
 
 	screen_index_before_start = -1;
+
+	was_feature_disabled_mid_play = false;
 
 	if (InspectorDock::get_inspector_singleton()->is_connected(SNAME("edited_object_changed"), callable_mp(this, &GameView::_inspector_object_changed))) {
 		InspectorDock::get_inspector_singleton()->disconnect(SNAME("edited_object_changed"), callable_mp(this, &GameView::_inspector_object_changed));
@@ -719,7 +721,7 @@ void GameView::_inspector_object_changed() {
 void GameView::_update_debugger_buttons() {
 	bool empty = active_sessions == 0;
 
-	suspend_button->set_disabled(empty);
+	suspend_button->set_disabled(empty || !is_feature_enabled);
 	camera_override_button->set_disabled(empty);
 	speed_state_button->set_disabled(empty);
 	game_size_label->set_visible(!empty);
@@ -754,7 +756,7 @@ void GameView::_update_debugger_buttons() {
 			ci_button[i]->set_disabled(is_native);
 		}
 	}
-	ci_local_space->set_disabled(is_native);
+	ci_local_space_button->set_disabled(is_native);
 
 	menu = game_window_options_menu->get_popup();
 	if (empty) {
@@ -1502,8 +1504,30 @@ void GameView::_debugger_breaked(bool p_breaked, bool p_can_debug) {
 void GameView::_feature_profile_changed() {
 	Ref<EditorFeatureProfile> profile = EditorFeatureProfileManager::get_singleton()->get_current_profile();
 	bool is_profile_null = profile.is_null();
-
 	is_feature_enabled = is_profile_null || !profile->is_feature_disabled(EditorFeatureProfile::FEATURE_GAME);
+	was_feature_disabled_mid_play = !is_feature_enabled && EditorRunBar::get_singleton()->is_playing();
+
+	if (!is_feature_enabled) {
+		if (!node_type_button[RuntimeNodeSelect::NODE_TYPE_NONE]->is_pressed()) {
+			node_type_button[RuntimeNodeSelect::NODE_TYPE_NONE]->set_pressed(true);
+			_node_type_pressed(RuntimeNodeSelect::NODE_TYPE_NONE);
+		}
+
+		suspend_button->set_pressed(false);
+		camera_override_button->set_pressed(false);
+
+		_reset_time_scales();
+
+		if (debug_mute_audio) {
+			_debug_mute_audio_button_pressed();
+		}
+
+		// If the game is currently being played and embedded, stop the game.
+		// Otherwise it would just get stuck in the now inaccessible Game view.
+		_window_close_request();
+	}
+
+	suspend_button->set_disabled(active_sessions == 0 || !is_feature_enabled);
 
 	bool is_3d_enabled = is_profile_null || !profile->is_feature_disabled(EditorFeatureProfile::FEATURE_3D);
 	if (!is_3d_enabled && node_type_button[RuntimeNodeSelect::NODE_TYPE_3D]->is_pressed()) {
@@ -1677,15 +1701,18 @@ GameView::GameView(Ref<GameViewDebugger> p_debugger, EmbeddedProcessBase *p_embe
 
 	// 2D Section
 
-	ci_bar = memnew(EditorToolbarGroup);
+	ci_bar = memnew(HBoxContainer);
 	main_menu_fc->add_child(ci_bar);
 	ci_bar->hide();
+
+	EditorToolbarGroup *ci_etg = memnew(EditorToolbarGroup);
+	ci_bar->add_child(ci_etg);
 
 	ci_group.instantiate();
 
 	{
 		Button *button = _setup_button(SNAME("ToolSelect"), ci_group, ED_GET_SHORTCUT("canvas_item_editor/select_mode"));
-		ci_bar->get_hbox()->add_child(button);
+		ci_etg->get_hbox()->add_child(button);
 		button->set_pressed(true);
 		button->connect(SceneStringName(pressed), callable_mp(*debugger, &GameViewDebugger::set_ci_tool).bind(CanvasItemManipulator::TOOL_SELECT));
 		ci_button[CanvasItemManipulator::TOOL_SELECT] = button;
@@ -1693,64 +1720,63 @@ GameView::GameView(Ref<GameViewDebugger> p_debugger, EmbeddedProcessBase *p_embe
 
 	VSeparator *vsep = memnew(VSeparator);
 	vsep->set_theme_type_variation("VSeparatorButtonGroup");
-	ci_bar->get_hbox()->add_child(vsep);
+	ci_etg->get_hbox()->add_child(vsep);
 
 	{
 		Button *button = _setup_button(SNAME("ToolMove"), ci_group, ED_GET_SHORTCUT("canvas_item_editor/move_mode"));
-		ci_bar->get_hbox()->add_child(button);
+		ci_etg->get_hbox()->add_child(button);
 		button->connect(SceneStringName(pressed), callable_mp(*debugger, &GameViewDebugger::set_ci_tool).bind(CanvasItemManipulator::TOOL_MOVE));
 		ci_button[CanvasItemManipulator::TOOL_MOVE] = button;
 	}
 	{
 		Button *button = _setup_button(SNAME("ToolRotate"), ci_group, ED_GET_SHORTCUT("canvas_item_editor/rotate_mode"));
-		ci_bar->get_hbox()->add_child(button);
+		ci_etg->get_hbox()->add_child(button);
 		button->connect(SceneStringName(pressed), callable_mp(*debugger, &GameViewDebugger::set_ci_tool).bind(CanvasItemManipulator::TOOL_ROTATE));
 		ci_button[CanvasItemManipulator::TOOL_ROTATE] = button;
 	}
 	{
 		Button *button = _setup_button(SNAME("ToolScale"), ci_group, ED_GET_SHORTCUT("canvas_item_editor/scale_mode"));
-		ci_bar->get_hbox()->add_child(button);
+		ci_etg->get_hbox()->add_child(button);
 		button->connect(SceneStringName(pressed), callable_mp(*debugger, &GameViewDebugger::set_ci_tool).bind(CanvasItemManipulator::TOOL_SCALE));
 		ci_button[CanvasItemManipulator::TOOL_SCALE] = button;
 	}
 
 	vsep = memnew(VSeparator);
 	vsep->set_theme_type_variation("VSeparatorButtonGroup");
-	ci_bar->get_hbox()->add_child(vsep);
+	ci_etg->get_hbox()->add_child(vsep);
 
 	{
 		Button *button = _setup_button(SNAME("ListSelect"), ci_group);
-		ci_bar->get_hbox()->add_child(button);
+		ci_etg->get_hbox()->add_child(button);
 		button->connect(SceneStringName(pressed), callable_mp(*debugger, &GameViewDebugger::set_ci_tool).bind(CanvasItemManipulator::TOOL_LIST_SELECT));
 		ci_button[CanvasItemManipulator::TOOL_LIST_SELECT] = button;
 	}
 	{
 		Button *button = _setup_button(SNAME("EditPivot"), ci_group);
 		button->set_disabled(true);
-		ci_bar->get_hbox()->add_child(button);
+		ci_etg->get_hbox()->add_child(button);
 		button->connect(SceneStringName(pressed), callable_mp(*debugger, &GameViewDebugger::set_ci_tool).bind(CanvasItemManipulator::TOOL_EDIT_PIVOT));
 		ci_button[CanvasItemManipulator::TOOL_EDIT_PIVOT] = button;
 	}
 	{
 		Button *button = _setup_button(SNAME("ToolPan"), ci_group, ED_GET_SHORTCUT("canvas_item_editor/pan_mode"));
-		ci_bar->get_hbox()->add_child(button);
+		ci_etg->get_hbox()->add_child(button);
 		button->connect(SceneStringName(pressed), callable_mp(*debugger, &GameViewDebugger::set_ci_tool).bind(CanvasItemManipulator::TOOL_PAN));
 		ci_button[CanvasItemManipulator::TOOL_PAN] = button;
 	}
 
 	vsep = memnew(VSeparator);
-	vsep->set_theme_type_variation("VSeparatorButtonGroup");
-	ci_bar->get_hbox()->add_child(vsep);
+	ci_bar->add_child(vsep);
 
-	ci_local_space = memnew(Button);
-	ci_bar->get_hbox()->add_child(ci_local_space);
-	ci_local_space->set_button_icon(EditorIconManager::get_icon(SNAME("Object")));
-	ci_local_space->set_toggle_mode(true);
-	ci_local_space->set_pressed(true);
-	ci_local_space->set_theme_type_variation(SceneStringName(FlatButton));
-	ci_local_space->connect(SceneStringName(toggled), callable_mp(*debugger, &GameViewDebugger::set_ci_local_space));
-	ci_local_space->set_shortcut(ED_GET_SHORTCUT("canvas_item_editor/use_local_space"));
-	ci_local_space->set_shortcut_context(this);
+	ci_local_space_button = memnew(Button);
+	ci_bar->add_child(ci_local_space_button);
+	ci_local_space_button->set_button_icon(EditorIconManager::get_icon(SNAME("Object")));
+	ci_local_space_button->set_toggle_mode(true);
+	ci_local_space_button->set_pressed(true);
+	ci_local_space_button->set_theme_type_variation(SceneStringName(FlatButton));
+	ci_local_space_button->connect(SceneStringName(toggled), callable_mp(*debugger, &GameViewDebugger::set_ci_local_space));
+	ci_local_space_button->set_shortcut(ED_GET_SHORTCUT("canvas_item_editor/use_local_space"));
+	ci_local_space_button->set_shortcut_context(this);
 
 	// 3D Section
 

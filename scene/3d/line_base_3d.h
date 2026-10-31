@@ -1,5 +1,5 @@
 /**************************************************************************/
-/*  line_3d.h                                                             */
+/*  line_base_3d.h                                                        */
 /**************************************************************************/
 /*                         This file is part of:                          */
 /*                             GODOT ENGINE                               */
@@ -32,8 +32,8 @@
 
 #include "scene/3d/visual_instance_3d.h"
 
-class Line3D : public GeometryInstance3D {
-	GDCLASS(Line3D, GeometryInstance3D);
+class LineBase3D : public GeometryInstance3D {
+	GDCLASS(LineBase3D, GeometryInstance3D);
 
 protected:
 	static void _bind_methods();
@@ -61,6 +61,6 @@ public:
 	PackedStringArray get_configuration_warnings() const override;
 };
 
-VARIANT_ENUM_CAST(Line3D::TilingMode)
-VARIANT_ENUM_CAST(Line3D::MeshAlignment)
-VARIANT_ENUM_CAST(Line3D::MaterialMode)
+VARIANT_ENUM_CAST(LineBase3D::TilingMode)
+VARIANT_ENUM_CAST(LineBase3D::MeshAlignment)
+VARIANT_ENUM_CAST(LineBase3D::MaterialMode)

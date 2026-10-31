@@ -347,12 +347,18 @@ void RuntimeNodeSelect::_set_camera_override_enabled(bool p_enabled) {
 		Camera3D *override_camera = root->get_override_camera_3d();
 		override_camera->set_transform(view_3d_controller->to_camera_transform());
 		override_camera->set_perspective(camera_fov * view_3d_controller->cursor.fov_scale, camera_znear, camera_zfar);
-#endif // _3D_DISABLED
+#endif
 	}
 }
 
-void RuntimeNodeSelect::_set_ci_tool(CanvasItemManipulator::Tool p_tool) {
+void RuntimeNodeSelect::_set_ci_tool(CanvasItemManipulator::Tool p_tool, bool p_shift_pressed) {
 	ci_manipulator->set_tool(p_tool);
+#ifdef TOOLS_ENABLED
+	if (p_shift_pressed && ci_manipulator->get_tool() == CanvasItemManipulator::TOOL_EDIT_PIVOT) {
+		ci_manipulator->center_temp_pivot_on_selection();
+	}
+#endif
+
 	panner->set_force_drag(p_tool == CanvasItemManipulator::TOOL_PAN);
 	_queue_selection_update();
 }
@@ -599,19 +605,21 @@ void RuntimeNodeSelect::_scene_double_clicked(const String &p_path) {
 
 void RuntimeNodeSelect::_process_frame() {
 #ifndef _3D_DISABLED
-	// Calculate the process time manually, as the time scale can be frozen.
-	const double process_time = (1.0 / Engine::get_singleton()->get_frames_per_second());
+	if (SceneTree::get_singleton()->get_root()->is_camera_3d_override_enabled()) {
+		// Calculate the process time manually, as the time scale can be frozen.
+		const double process_time = (1.0 / Engine::get_singleton()->get_frames_per_second());
 
-	if (view_3d_controller->is_freelook_enabled()) {
-		bool was_input_disabled = Input::get_singleton()->is_input_disabled();
-		Input::get_singleton()->set_disable_input(false);
+		if (view_3d_controller->is_freelook_enabled()) {
+			bool was_input_disabled = Input::get_singleton()->is_input_disabled();
+			Input::get_singleton()->set_disable_input(false);
 
-		view_3d_controller->update_freelook(process_time);
+			view_3d_controller->update_freelook(process_time);
 
-		Input::get_singleton()->set_disable_input(was_input_disabled);
+			Input::get_singleton()->set_disable_input(was_input_disabled);
+		}
+
+		view_3d_controller->update_camera(process_time);
 	}
-
-	view_3d_controller->update_camera(process_time);
 #endif // _3D_DISABLED
 
 	if (selection_update_queued || !SceneTree::get_singleton()->is_suspended()) {
