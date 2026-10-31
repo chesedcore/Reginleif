@@ -1152,6 +1152,10 @@ void GDScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_generic_chain_info"), &GDScript::get_generic_chain_info);
 #endif // TOOLS_ENABLED
 	ClassDB::bind_vararg_method(METHOD_FLAGS_DEFAULT, "new", &GDScript::_new, MethodInfo("new"));
+#ifdef DEBUG_ENABLED
+	ClassDB::bind_method(D_METHOD("get_function_disassembly", "function"), &GDScript::get_function_disassembly);
+	ClassDB::bind_method(D_METHOD("get_disassembly"), &GDScript::get_disassembly);
+#endif
 }
 
 void GDScript::set_path_cache(const String &p_path) {

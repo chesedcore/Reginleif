@@ -556,6 +556,7 @@ public:
 #ifdef DEBUG_ENABLED
 	void _profile_native_call(uint64_t p_t_taken, const String &p_function_name, const String &p_instance_class_name = String());
 	void disassemble(const Vector<String> &p_code_lines) const;
+	String get_disassembly(const Vector<String>& p_code_lines) const;
 #endif
 
 	GDScriptFunction();

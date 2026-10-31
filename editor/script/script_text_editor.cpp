@@ -164,6 +164,14 @@ ScriptTextEditor::EditMenusScTE::EditMenusScTE(DocumentEditorContainer *p_docume
 	search_menu->get_popup()->add_separator();
 	search_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_text_editor/show_tooltip"), SHOW_TOOLTIP_AT_CARET);
 	search_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_text_editor/contextual_help"), HELP_CONTEXTUAL);
+#ifdef DEBUG_ENABLED
+	reginleif_menu = memnew(MenuButton);
+	reginleif_menu->set_text(TTRC("Reginleif"));
+	reginleif_menu->set_switch_on_hover(true);
+	reginleif_menu->get_popup()->add_item(TTRC("Show Disassembly"), SHOW_DISASSEMBLY);
+	reginleif_menu->get_popup()->connect("id_pressed", callable_mp(this, &EditMenusScTE::_reginleif_item_pressed));
+	add_child(reginleif_menu);
+#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1868,6 +1876,9 @@ bool ScriptTextEditor::_edit_option(int p_op) {
 		case SHOW_TOOLTIP_AT_CARET: {
 			_show_symbol_tooltip(tx->get_word_under_caret(), tx->get_caret_line(), tx->get_caret_column(), true);
 		} break;
+		case SHOW_DISASSEMBLY: {
+			_show_disassembly();
+		} break;
 		case HELP_CONTEXTUAL: {
 			String text = tx->get_selected_text(0);
 			if (text.is_empty()) {
@@ -1919,6 +1930,48 @@ bool ScriptTextEditor::_edit_option(int p_op) {
 		}
 	}
 	return true;
+}
+
+void ScriptTextEditor::_show_disassembly() {
+
+	Ref<Script> script = edited_res;
+	if (script.is_null() || script->get_language()->get_name() != "GDScript") {
+		EditorToaster::get_singleton()->popup_str(TTR("Reginleif disassembly is only available for GDScript."), EditorToaster::SEVERITY_WARNING);
+		return;
+	}
+
+	_validate_script();
+	if (!validation_success) {
+		EditorToaster::get_singleton()->popup_str(TTR("Fix script errors before viewing disassembly!"), EditorToaster::SEVERITY_WARNING);
+		return;
+	}
+
+	script->set_source_code(code_editor->get_text_editor()->get_text());
+	script->reload(true);
+
+	if (!ClassDB::has_method(script->get_class(), "get_disassembly")) {
+		EditorToaster::get_singleton()->popup_str(TTR("This build has no disassembler (requires a debug-enabled build)."), EditorToaster::SEVERITY_WARNING);
+		return;
+	}
+	const String disassembly = script->call(SNAME("get_disassembly"));
+
+	if (!disassembly_dialog) {
+		disassembly_dialog = memnew(AcceptDialog);
+		disassembly_dialog->set_ok_button_text(TTRC("Close"));
+
+		disassembly_text = memnew(CodeEdit);
+		disassembly_text->set_editable(false);
+		disassembly_text->set_draw_line_numbers(false);
+		disassembly_text->set_v_size_flags(SIZE_EXPAND_FILL);
+		disassembly_text->set_h_size_flags(SIZE_EXPAND_FILL);
+		disassembly_text->set_custom_minimum_size(Size2(800, 500) * EDSCALE);
+		disassembly_dialog->add_child(disassembly_text);
+		add_child(disassembly_dialog);
+	}
+
+	disassembly_dialog->set_title(vformat(TTR("Disassembly: %s"), get_document_name()));
+	disassembly_text->set_text(disassembly);
+	disassembly_dialog->popup_centered_clamped(Size2(900, 600) * EDSCALE, 0.8);
 }
 
 void ScriptTextEditor::_edit_option_toggle_inline_comment() {
