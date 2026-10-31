@@ -278,6 +278,10 @@ public:
 
 	const HashMap<StringName, MemberInfo> &debug_get_member_indices() const { return member_indices; }
 	const HashMap<StringName, GDScriptFunction *> &debug_get_member_functions() const; //this is debug only
+#ifdef DEBUG_ENABLED
+	String get_function_disassembly(const StringName& p_function) const;
+	String get_disassembly() const;
+#endif
 	StringName debug_get_member_by_index(int p_idx) const;
 	StringName debug_get_static_var_by_index(int p_idx) const;
 
