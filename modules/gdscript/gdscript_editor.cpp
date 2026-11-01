@@ -80,6 +80,16 @@ static String _get_indentation() {
 	return "\t";
 }
 
+static String _get_header_terminator() {
+#ifdef TOOLS_ENABLED
+	ProjectSettings* ps = ProjectSettings::get_singleton();
+	if (ps != nullptr && int(ps->get_setting("reginleif/editor/scope_style", 0)) == 1) {
+		return " {";
+	}
+#endif
+	return ":";
+}
+
 Vector<String> GDScriptLanguage::get_comment_delimiters() const {
 	static const Vector<String> delimiters = { "#" };
 	return delimiters;
@@ -593,8 +603,12 @@ String GDScriptLanguage::make_function(const String &p_class, const String &p_na
 			}
 		}
 	}
-	result += String(")") + (type_hints ? " -> void" : "") + ":\n" +
-			_get_indentation() + "pass # Replace with function body.\n";
+	result += String(")") + (type_hints ? " -> void" : "");
+	if (_get_header_terminator() == " {") {
+		result += " {\n" + _get_indentation() + "pass # Replace with function body.\n}\n";
+	} else {
+		result += ":\n" + _get_indentation() + "pass # Replace with function body.\n";
+	}
 
 	return result;
 }
@@ -1271,7 +1285,7 @@ static void _add_trait_method_completion_from_node(const GDScriptParser::Functio
 			method_hint += " -> " + ret_type.to_string();
 		}
 	}
-	method_hint += ":";
+	method_hint += _get_header_terminator();
 
 	EditorLanguage::CompletionOption option(method_hint, EditorLanguage::CompletionKind::FUNCTION);
 	r_result.insert(method_name.string(), option);
@@ -1318,7 +1332,7 @@ static void _add_trait_method_completion_from_snapshot(const StringName& p_metho
 			method_hint += " -> " + snapshot_return_type.to_string();
 		}
 	}
-	method_hint += ":";
+	method_hint += _get_header_terminator();
 
 	EditorLanguage::CompletionOption option(method_hint, EditorLanguage::CompletionKind::FUNCTION);
 	r_result.insert(p_method_name.string(), option);
@@ -1379,7 +1393,7 @@ static void _list_impl_body_default_overrides_from_index(const GDScriptParser::I
 		if (p_type_hints && sig.return_type.kind != RGIndex::TypeRef::VARIANT) {
 			hint += " -> " + _type_ref_to_hint(sig.return_type);
 		}
-		hint += ":";
+		hint += _get_header_terminator();
 
 		EditorLanguage::CompletionOption option(hint, EditorLanguage::CompletionKind::FUNCTION);
 		r_result.insert(method_name.string(), option);
@@ -4741,7 +4755,7 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 							}
 
 							String display_name = member.function->identifier->name;
-							display_name += member.function->signature + ":";
+							display_name += member.function->signature + _get_header_terminator();
 							EditorLanguage::CompletionOption option(display_name, EditorLanguage::CompletionKind::FUNCTION);
 							options.insert(member.function->identifier->name, option); // Insert name instead of display to track duplicates.
 						}
@@ -4814,7 +4828,7 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 				if (type_hints) {
 					method_hint += " -> " + _get_visual_datatype(mi.return_val, false, class_name);
 				}
-				method_hint += ":";
+				method_hint += _get_header_terminator();
 
 				EditorLanguage::CompletionOption option(method_hint, EditorLanguage::CompletionKind::FUNCTION);
 				options.insert(option.display, option);

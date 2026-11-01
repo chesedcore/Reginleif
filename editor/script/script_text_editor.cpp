@@ -39,6 +39,7 @@
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/object/editor_language.h"
+#include "core/object/method_bind.h"
 #include "core/os/keyboard.h"
 #include "editor/debugger/editor_debugger_node.h"
 #include "editor/doc/editor_help.h"
@@ -56,7 +57,10 @@
 #include "editor/settings/editor_command_palette.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/themes/editor_scale.h"
+#include "scene/gui/box_container.h"
 #include "scene/gui/grid_container.h"
+#include "scene/gui/label.h"
+#include "scene/gui/line_edit.h"
 #include "scene/gui/menu_button.h"
 #include "scene/gui/rich_text_label.h"
 #include "scene/gui/split_container.h"
@@ -164,14 +168,16 @@ ScriptTextEditor::EditMenusScTE::EditMenusScTE(DocumentEditorContainer *p_docume
 	search_menu->get_popup()->add_separator();
 	search_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_text_editor/show_tooltip"), SHOW_TOOLTIP_AT_CARET);
 	search_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_text_editor/contextual_help"), HELP_CONTEXTUAL);
-#ifdef DEBUG_ENABLED
 	reginleif_menu = memnew(MenuButton);
 	reginleif_menu->set_text(TTRC("Reginleif"));
 	reginleif_menu->set_switch_on_hover(true);
+	reginleif_menu->get_popup()->add_shortcut(ED_GET_SHORTCUT("script_text_editor/extract_function"), EXTRACT_FUNCTION);
+	reginleif_menu->get_popup()->set_item_text(-1, TTR("Extract Function..."));
+#ifdef DEBUG_ENABLED
 	reginleif_menu->get_popup()->add_item(TTRC("Show Disassembly"), SHOW_DISASSEMBLY);
+#endif
 	reginleif_menu->get_popup()->connect("id_pressed", callable_mp(this, &EditMenusScTE::_reginleif_item_pressed));
 	add_child(reginleif_menu);
-#endif
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1879,6 +1885,9 @@ bool ScriptTextEditor::_edit_option(int p_op) {
 		case SHOW_DISASSEMBLY: {
 			_show_disassembly();
 		} break;
+		case EXTRACT_FUNCTION: {
+			_extract_function();
+		} break;
 		case HELP_CONTEXTUAL: {
 			String text = tx->get_selected_text(0);
 			if (text.is_empty()) {
@@ -1972,6 +1981,144 @@ void ScriptTextEditor::_show_disassembly() {
 	disassembly_dialog->set_title(vformat(TTR("Disassembly: %s"), get_document_name()));
 	disassembly_text->set_text(disassembly);
 	disassembly_dialog->popup_centered_clamped(Size2(900, 600) * EDSCALE, 0.8);
+}
+
+Dictionary ScriptTextEditor::_call_extract_function(const String& p_name) {
+	Dictionary fail;
+	fail["ok"] = false;
+
+	const MethodBind* bind = ClassDB::get_method(SNAME("GDScript"), SNAME("extract_function"));
+	if (bind == nullptr) {
+		fail["error"] = TTR("What the hell?! This build has no extract-function support!");
+		return fail;
+	}
+
+	Ref<Script> script = edited_res;
+	Variant source = code_editor->get_text_editor()->get_text();
+	Variant path = script.is_valid() ? script->get_path() : String();
+	Variant first = extract_first_line;
+	Variant last = extract_last_line;
+	Variant name = p_name;
+	const Variant* args[5] = { &source, &path, &first, &last, &name };
+
+	Callable::CallError ce;
+	Variant ret = bind->call(nullptr, args, 5, ce);
+
+	if (ce.error != Callable::CallError::CALL_OK || ret.get_type() != Variant::DICTIONARY) {
+		fail["error"] = TTR("Extract function failed unexpectedly...");
+		return fail;
+	}
+
+	return ret;
+}
+
+void ScriptTextEditor::_extract_function() {
+	Ref<Script> script = edited_res;
+	if (script.is_null() || script->get_language()->get_name() != "GDScript") {
+		EditorToaster::get_singleton()->popup_str(TTR("Extract Function is only available for GDScript for now."), EditorToaster::SEVERITY_WARNING);
+		return;
+	}
+
+	CodeEdit* tx = code_editor->get_text_editor();
+	extract_first_line = tx->get_caret_line();
+	extract_last_line = extract_first_line;
+	if (tx->has_selection()) {
+		extract_first_line = tx->get_selection_from_line();
+		extract_last_line = tx->get_selection_to_line();
+		if (extract_last_line > extract_first_line && tx->get_selection_to_column() == 0) {
+			extract_last_line--;
+		}
+	}
+
+	if (!extract_dialog) {
+		extract_dialog = memnew(ConfirmationDialog);
+		extract_dialog->set_title(TTRC("Extract Function"));
+		extract_dialog->set_ok_button_text(TTRC("Extract"));
+
+		VBoxContainer* vb = memnew(VBoxContainer);
+		extract_dialog->add_child(vb);
+
+		Label* label = memnew(Label);
+		label->set_text(TTRC("Function name:"));
+		vb->add_child(label);
+
+		extract_name = memnew(LineEdit);
+		extract_name->set_custom_minimum_size(Size2(420, 0) * EDSCALE);
+		extract_name->connect(SceneStringName(text_changed), callable_mp(this, &ScriptTextEditor::_extract_function_preview).unbind(1));
+		vb->add_child(extract_name);
+		extract_dialog->register_text_enter(extract_name);
+
+		extract_signature = memnew(Label);
+		extract_signature->set_autowrap_mode(TextServer::AUTOWRAP_ARBITRARY);
+		extract_signature->set_custom_minimum_size(Size2(420, 0) * EDSCALE);
+		vb->add_child(extract_signature);
+
+		extract_preview = memnew(Label);
+		extract_preview->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+		extract_preview->set_custom_minimum_size(Size2(420, 0) * EDSCALE);
+		vb->add_child(extract_preview);
+
+		extract_dialog->connect("confirmed", callable_mp(this, &ScriptTextEditor::_extract_function_confirmed));
+		add_child(extract_dialog);
+	}
+
+	extract_signature->add_theme_font_override(SceneStringName(font), tx->get_theme_font(SceneStringName(font)));
+	extract_signature->add_theme_font_size_override(SceneStringName(font_size), tx->get_theme_font_size(SceneStringName(font_size)));
+	extract_preview->add_theme_color_override(SceneStringName(font_color), extract_preview->get_theme_color(SNAME("error_color"), EditorStringName(Editor)));
+	                               																				///^^^^^^^^^^^^^^ i misspelt this shit as 'error_colour' and had the worst time of my life. shoutout american defaultism 
+
+	extract_name->set_text("extracted_function");
+	_extract_function_preview();
+	extract_dialog->popup_centered();
+	extract_name->select_all();
+	extract_name->grab_focus();
+}
+
+void ScriptTextEditor::_extract_function_preview() {
+	const Dictionary res = _call_extract_function(extract_name->get_text());
+	const bool ok = res.get("ok", false);
+	extract_signature->set_text(ok ? String(res.get("signature", "")) : String());
+	extract_signature->set_visible(ok);
+	extract_preview->set_text(ok ? String() : String(res.get("error", "")));
+	extract_preview->set_visible(!ok);
+	extract_dialog->get_ok_button()->set_disabled(!ok);
+	extract_dialog->reset_size();
+}
+
+void ScriptTextEditor::_extract_function_confirmed() {
+	const Dictionary res = _call_extract_function(extract_name->get_text());
+	if (!bool(res.get("ok", false))) {
+		EditorToaster::get_singleton()->popup_str(String(res.get("error", "")), EditorToaster::SEVERITY_WARNING);
+		return;
+	}
+
+	CodeEdit* tx = code_editor->get_text_editor();
+	const Array edits = res["edits"];
+
+	tx->begin_complex_operation(); ///cant believe they actually named this fn that lmao
+	for (int i = 0; i < edits.size(); i++) {
+		const Dictionary e = edits[i];
+		const int sl = e["start_line"];
+		const int sc = e["start_column"];
+		const int el = e["end_line"];
+		const int ec = e["end_column"];
+
+		tx->deselect();
+		if (sl == el && sc == ec) {
+			tx->set_caret_line(sl, false);
+			tx->set_caret_column(sc, false);
+		} else {
+			tx->select(sl, sc, el, ec);
+		}
+		tx->insert_text_at_caret(e["text"]);
+	}
+	tx->end_complex_operation();
+
+	tx->deselect();
+	tx->set_caret_line(int(res["function_line"]));
+	tx->set_caret_column(0);
+	tx->center_viewport_to_caret();
+	tx->grab_focus();
 }
 
 void ScriptTextEditor::_edit_option_toggle_inline_comment() {
@@ -2643,6 +2790,12 @@ void ScriptTextEditor::_make_ste_context_menu(bool p_selection, bool p_color, bo
 		_popup_move_item(EDIT_TO_LOWERCASE, context_menu);
 		context_menu->add_shortcut(ED_GET_SHORTCUT("script_text_editor/create_code_region"), EDIT_CREATE_CODE_REGION);
 		_popup_move_item(EDIT_EVALUATE, context_menu);
+
+		Ref<Script> extract_script = edited_res;
+		if (extract_script.is_valid() && extract_script->get_language()->get_name() == "GDScript") {
+			context_menu->add_shortcut(ED_GET_SHORTCUT("script_text_editor/extract_function"), EXTRACT_FUNCTION);
+			context_menu->set_item_text(-1, TTR("Extract Function..."));
+		}
 	}
 
 	if (p_color || p_open_docs) {
@@ -2701,6 +2854,8 @@ void ScriptTextEditor::register_editor() {
 	ED_SHORTCUT_OVERRIDE("script_text_editor/duplicate_lines", "macos", KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::SHIFT | Key::DOWN);
 	ED_SHORTCUT("script_text_editor/evaluate_selection", TTRC("Evaluate Selection"), KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::SHIFT | Key::E);
 	ED_SHORTCUT("script_text_editor/toggle_word_wrap", TTRC("Toggle Word Wrap"), KeyModifierMask::ALT | Key::Z);
+	ED_SHORTCUT("script_text_editor/extract_function", TTRC("Extract Function"), KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::ALT | Key::M);
+	ED_SHORTCUT_OVERRIDE("script_text_editor/extract_function", "macos", KeyModifierMask::CTRL | KeyModifierMask::META | Key::M);
 	ED_SHORTCUT("script_text_editor/trim_trailing_whitespace", TTRC("Trim Trailing Whitespace"), KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::ALT | Key::T);
 	ED_SHORTCUT("script_text_editor/trim_final_newlines", TTRC("Trim Final Newlines"), Key::NONE);
 	ED_SHORTCUT("script_text_editor/convert_indent_to_spaces", TTRC("Convert Indent to Spaces"), KeyModifierMask::CMD_OR_CTRL | KeyModifierMask::SHIFT | Key::Y);
