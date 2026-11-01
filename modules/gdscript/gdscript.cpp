@@ -47,6 +47,7 @@
 
 #ifdef TOOLS_ENABLED
 #include "editor/gdscript_docgen.h"
+#include "gdscript_refactor.h"
 #endif
 
 #ifdef TESTS_ENABLED
@@ -1150,6 +1151,7 @@ void GDScript::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_generic_type_args"), &GDScript::get_generic_type_args);
 #ifdef TOOLS_ENABLED
 	ClassDB::bind_method(D_METHOD("get_generic_chain_info"), &GDScript::get_generic_chain_info);
+	ClassDB::bind_static_method("GDScript", D_METHOD("extract_function", "source", "path", "first_line", "last_line", "name"), &GDScriptRefactor::extract_function_dict);
 #endif // TOOLS_ENABLED
 	ClassDB::bind_vararg_method(METHOD_FLAGS_DEFAULT, "new", &GDScript::_new, MethodInfo("new"));
 #ifdef DEBUG_ENABLED
@@ -3162,6 +3164,7 @@ GDScriptLanguage::GDScriptLanguage() {
 	track_locals = track_locals || EngineDebugger::is_active();
 
 	GLOBAL_DEF("debug/gdscript/warnings/enable", true);
+	GLOBAL_DEF(PropertyInfo(Variant::INT, "reginleif/editor/scope_style", PROPERTY_HINT_ENUM, "Indentation,Braces"), 0);
 
 	GLOBAL_DEF(PropertyInfo(Variant::DICTIONARY,
 					   "debug/gdscript/warnings/directory_rules",
