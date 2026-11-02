@@ -2181,7 +2181,8 @@ static void _find_identifiers_in_base(const GDScriptCompletionIdentifier &p_base
 				}
 
 				int location = EditorLanguage::CompletionLocation::OTHER;
-				const String builtin_detail = base_type.kind == GDScriptParser::DataType::ENUM ? base_type.to_string() : Variant::get_type_name(base_type.builtin_type);
+				const bool detail_uses_full_type = base_type.kind == GDScriptParser::DataType::ENUM || (base_type.builtin_type == Variant::CALLABLE && base_type.has_callable_signature);
+				const String builtin_detail = detail_uses_full_type ? base_type.to_string() : Variant::get_type_name(base_type.builtin_type);
 
 				if (!p_only_functions) {
 					List<PropertyInfo> members;
