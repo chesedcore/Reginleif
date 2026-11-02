@@ -5572,6 +5572,25 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				unbound_type.callable_return.clear();
 			}
 			call_type = unbound_type;
+			
+		} else if (is_callable_call && p_call->function_name == SNAME("callv")) {
+			call_type = base_type.callable_return[0];
+			if (p_call->arguments.size() == 1 && p_call->arguments[0]->type == GDScriptParser::Node::ARRAY) {
+				const GDScriptParser::ArrayNode* array = static_cast<const GDScriptParser::ArrayNode*>(p_call->arguments[0]);
+				const int param_count = base_type.callable_params.size();
+				const int element_count = array->elements.size();
+				if (element_count != param_count) {
+					push_error(vformat(R"([Reginleif] Typed Callable takes %d argument(s), but the array has %d element(s).)", param_count, element_count), p_call->arguments[0]);
+				} else {
+					for (int i = 0; i < param_count; i++) {
+						const GDScriptParser::DataType& expected = base_type.callable_params[i];
+						const GDScriptParser::DataType& actual = array->elements[i]->type_constraint;
+						if (actual.is_hard_type() && !actual.is_variant() && !is_type_compatible(expected, actual, true, array->elements[i])) {
+							push_error(vformat(R"([Reginleif] Invalid argument %d for typed callv(): cannot convert from "%s" to "%s".)", i + 1, actual.to_string(), expected.to_string()), array->elements[i]);
+						}
+					}
+				}
+			}
 		}
 
 		if (is_constructor && !call_generic_bindings.is_empty()) {
