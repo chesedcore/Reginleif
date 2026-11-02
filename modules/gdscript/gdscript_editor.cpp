@@ -867,6 +867,31 @@ static String _make_arguments_hint(const MethodInfo &p_info, int p_arg_idx, bool
 	return arghint;
 }
 
+static String _make_callable_arguments_hint(const GDScriptParser::DataType* p_type, int p_arg_idx) {
+	String arghint;
+	const GDScriptParser::DataType* return_type = &p_type->callable_return[0];
+	if (return_type->kind == GDScriptParser::DataType::BUILTIN && return_type->builtin_type == Variant::NIL) {
+		arghint = "void ";
+	} else {
+		arghint = return_type->to_string() + " ";
+	}
+	arghint += "call(";
+	for (int i = 0; i < p_type->callable_params.size(); i++) {
+		if (i > 0) {
+			arghint += ", ";
+		}
+		if (i == p_arg_idx) {
+			arghint += String::chr(0xFFFF);
+		}
+		arghint += vformat("arg%d: ", i) + p_type->callable_params[i].to_string();
+		if (i == p_arg_idx) {
+			arghint += String::chr(0xFFFF);
+		}
+	}
+	arghint += ")";
+	return arghint;
+}
+
 static String _make_arguments_hint(const GDScriptParser::FunctionNode *p_function, uint32_t p_arg_idx, bool p_just_args = false) {
 	String arghint;
 
@@ -4208,6 +4233,11 @@ static void _list_call_arguments_core(GDScriptParser::CompletionContext& p_conte
 					if (err.error != Callable::CallError::CALL_OK) {
 						return;
 					}
+				}
+
+				if (base_type.builtin_type == Variant::CALLABLE && base_type.has_callable_signature && !base_type.callable_return.is_empty() && !base_type.is_meta_type && method == SNAME("call")) {
+					r_arghint = _make_callable_arguments_hint(&base_type, p_argidx);
+					return;
 				}
 
 				List<MethodInfo> methods;
