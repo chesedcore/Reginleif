@@ -3175,7 +3175,9 @@ GDScriptParser::ExpressionNode *GDScriptParser::parse_precedence(Precedence p_pr
 		// Allow keywords that can be treated as identifiers.
 		token_type = GDScriptTokenizer::Token::IDENTIFIER;
 	}
-	ParseFunction prefix_rule = get_rule(token_type)->prefix;
+
+	ParseFunction prefix_rule = (token_type == GDScriptTokenizer::Token::PIPE || token_type == GDScriptTokenizer::Token::PIPE_PIPE) ? 
+		&GDScriptParser::parse_closure : get_rule(token_type)->prefix;
 
 	if (prefix_rule == nullptr) {
 		// Expected expression. Let the caller give the proper error message.
@@ -4172,6 +4174,127 @@ GDScriptParser::ExpressionNode *GDScriptParser::parse_lambda(ExpressionNode *p_p
 	return lambda;
 }
 
+GDScriptParser::ExpressionNode* GDScriptParser::parse_closure(ExpressionNode* p_previous_operand, bool p_can_assign) {
+	LambdaNode* lambda = alloc_node<LambdaNode>();
+	lambda->parent_function = current_function;
+	lambda->parent_lambda = current_lambda;
+
+	FunctionNode* function = alloc_node<FunctionNode>();
+	function->source_lambda = lambda;
+	function->is_closure = true;
+	function->is_static = current_function != nullptr ? current_function->is_static : false;
+
+	const bool has_params = previous.type == GDScriptTokenizer::Token::PIPE;
+	const bool multiline_context = multiline_stack.back()->get();
+
+	push_completion_call(nullptr);
+
+	FunctionNode* previous_function = current_function;
+	current_function = function;
+	LambdaNode* previous_lambda = current_lambda;
+	current_lambda = lambda;
+
+	SuiteNode* body = alloc_node<SuiteNode>();
+	body->parent_function = function;
+	body->parent_block = current_suite;
+	SuiteNode* previous_suite = current_suite;
+
+	if (has_params) {
+		push_multiline(true);
+		if (!check(GDScriptTokenizer::Token::PIPE)) {
+			do {
+				if (check(GDScriptTokenizer::Token::PIPE)) {
+					break;
+				}
+				ParameterNode* parameter = parse_parameter();
+				if (parameter == nullptr) {
+					break;
+				}
+				if (parameter->initializer != nullptr) {
+					push_error(R"([Reginleif] Closure parameters cannot have default values.)");
+				}
+				parameter->is_closure_param = true;
+				if (function->parameters_indices.has(parameter->identifier->name)) {
+					push_error(vformat(R"(Parameter with name "%s" was already declared for this closure.)", parameter->identifier->name));
+				} else {
+					function->parameters_indices[parameter->identifier->name] = function->parameters.size();
+					function->parameters.push_back(parameter);
+					body->add_local(parameter, function);
+				}
+			} while (match(GDScriptTokenizer::Token::COMMA));
+		}
+		pop_multiline();
+		consume(GDScriptTokenizer::Token::PIPE, R"([Reginleif] Expected "|" after closure parameters.)");
+	}
+
+	if (match(GDScriptTokenizer::Token::FORWARD_ARROW)) {
+		function->return_type = parse_type(true);
+		if (function->return_type == nullptr) {
+			push_error(R"([Reginleif] Expected return type or "void" after "->".)");
+		}
+	}
+
+	function->header_end_line = previous.end_line;
+	function->header_end_column = previous.end_column;
+
+	const bool previous_in_lambda = in_lambda;
+	const bool could_break = can_break;
+	const bool could_continue = can_continue;
+	can_break = false;
+	can_continue = false;
+
+	if (check(GDScriptTokenizer::Token::BRACE_OPEN)) {
+		in_lambda = true;
+		push_multiline(false);
+		if (multiline_context) {
+			tokenizer->push_expression_indented_block();
+		}
+		function->has_explicit_body = true;
+		function->body = parse_suite("closure body", body, true);
+		complete_extents(function);
+		complete_extents(lambda);
+		pop_multiline();
+		if (multiline_context) {
+			while (check(GDScriptTokenizer::Token::DEDENT) || check(GDScriptTokenizer::Token::INDENT) || check(GDScriptTokenizer::Token::NEWLINE)) {
+				current = tokenizer->scan();
+			}
+			tokenizer->pop_expression_indented_block();
+		}
+	} else {
+		current_suite = body;
+		ExpressionNode* expression = parse_expression(true);
+		current_suite = previous_suite;
+		if (expression == nullptr) {
+			push_error(R"([Reginleif] Expected closure body.)");
+		} else if (expression->type == Node::ASSIGNMENT) {
+			body->statements.push_back(expression);
+		} else {
+			ReturnNode* implicit_return = alloc_node<ReturnNode>();
+			implicit_return->return_value = expression;
+			implicit_return->is_implicit_closure_return = true;
+			complete_extents(implicit_return);
+			body->statements.push_back(implicit_return);
+			body->has_return = true;
+		}
+		complete_extents(body);
+		function->has_explicit_body = true;
+		function->body = body;
+		complete_extents(function);
+		complete_extents(lambda);
+	}
+
+	pop_completion_call();
+
+	current_function = previous_function;
+	current_lambda = previous_lambda;
+	in_lambda = previous_in_lambda;
+	can_break = could_break;
+	can_continue = could_continue;
+	lambda->function = function;
+
+	return lambda;
+}
+
 GDScriptParser::ExpressionNode *GDScriptParser::parse_type_test(ExpressionNode *p_previous_operand, bool p_can_assign) {
 	// x is not int
 	// ^        ^^^ ExpressionNode, TypeNode
@@ -4278,6 +4401,30 @@ GDScriptParser::TypeNode *GDScriptParser::parse_type(bool p_allow_void) {
 	IdentifierNode *type_element = parse_identifier();
 
 	type->type_chain.push_back(type_element);
+
+	if (type_element->name == SNAME("Callable") && match(GDScriptTokenizer::Token::BRACKET_OPEN)) {
+		type->is_callable_signature = true;
+		if (!check(GDScriptTokenizer::Token::BRACKET_CLOSE)) {
+			do {
+				TypeNode* param_type = parse_type(false);
+				if (param_type == nullptr) {
+					push_error(R"([Reginleif] Expected parameter type in Callable signature.)");
+					complete_extents(type);
+					return nullptr;
+				}
+				type->container_types.push_back(param_type);
+			} while (match(GDScriptTokenizer::Token::COMMA));
+		}
+		consume(GDScriptTokenizer::Token::BRACKET_CLOSE, R"([Reginleif] Expected "]" after Callable signature.)");
+		if (match(GDScriptTokenizer::Token::FORWARD_ARROW)) {
+			type->callable_return = parse_type(true);
+			if (type->callable_return == nullptr) {
+				push_error(R"([Reginleif] Expected return type or "void" after "->" in Callable signature.)");
+			}
+		}
+		complete_extents(type);
+		return type;
+	}
 
 	if (match(GDScriptTokenizer::Token::BRACKET_OPEN)) {
 		// Typed collection (like Array[int], Dictionary[String, int]).
@@ -6070,6 +6217,18 @@ String GDScriptParser::DataType::to_string() const {
 			}
 			if (builtin_type == Variant::DICTIONARY && has_container_element_types()) {
 				return vformat("Dictionary[%s, %s]", get_container_element_type_or_variant(0).to_string(), get_container_element_type_or_variant(1).to_string());
+			}
+			if (builtin_type == Variant::CALLABLE && has_callable_signature) {
+				String signature = "Callable[";
+				for (int i = 0; i < callable_params.size(); i++) {
+					signature += (i > 0 ? ", " : "") + callable_params[i].to_string();
+				}
+				signature += "]";
+				const DataType& return_type = callable_return[0];
+				if (!(return_type.kind == BUILTIN && return_type.builtin_type == Variant::NIL)) {
+					signature += " -> " + return_type.to_string();
+				}
+				return signature;
 			}
 			return Variant::get_type_name(builtin_type);
 		
