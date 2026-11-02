@@ -6919,6 +6919,9 @@ GDScriptParser::DataType GDScriptAnalyzer::make_closure_signature_type(GDScriptP
 }
 
 void GDScriptAnalyzer::reduce_lambda(GDScriptParser::LambdaNode *p_lambda) {
+	const GDScriptParser::DataType expected = expected_closure_type;
+	expected_closure_type = GDScriptParser::DataType();
+
 	// Lambda is always a Callable.
 	GDScriptParser::DataType lambda_type;
 	lambda_type.type_source = GDScriptParser::DataType::ANNOTATED_INFERRED;
@@ -6935,7 +6938,16 @@ void GDScriptAnalyzer::reduce_lambda(GDScriptParser::LambdaNode *p_lambda) {
 	resolve_function_signature(p_lambda->function, p_lambda, true);
 	current_lambda = previous_lambda;
 
+	if (p_lambda->function->is_closure) {
+		apply_expected_closure_type(p_lambda, expected);
+	}
+
 	pending_body_resolution_lambdas.push_back(p_lambda);
+
+	if (p_lambda->function->is_closure) {
+		resolve_pending_lambda_bodies();
+		p_lambda->type_constraint = make_closure_signature_type(p_lambda);
+	}
 }
 
 void GDScriptAnalyzer::reduce_literal(GDScriptParser::LiteralNode *p_literal) {
@@ -8203,6 +8215,13 @@ bool GDScriptAnalyzer::get_function_signature(GDScriptParser::Node *p_source, bo
 	}
 
 	if (p_base_type.kind == GDScriptParser::DataType::BUILTIN) {
+		if (p_base_type.builtin_type == Variant::CALLABLE && p_base_type.has_callable_signature && !p_base_type.is_meta_type && p_function == SNAME("call")) {
+			r_return_type = p_base_type.callable_return[0];
+			for (const GDScriptParser::DataType& param_type : p_base_type.callable_params) {
+				r_par_types.push_back(param_type);
+			}
+			return true;
+		}
 		// Construct a base type to get methods.
 		Callable::CallError err;
 		Variant dummy;
@@ -8904,6 +8923,23 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 			}
 			if (valid && p_target.has_container_element_type(1) && p_source.has_container_element_type(1)) {
 				valid = p_target.get_container_element_type(1) == p_source.get_container_element_type(1);
+			}
+		}
+		if (valid && p_target.builtin_type == Variant::CALLABLE && p_target.has_callable_signature && p_source.has_callable_signature) {
+			if (p_target.callable_params.size() != p_source.callable_params.size()) {
+				valid = false;
+			} else {
+				for (int i = 0; i < p_target.callable_params.size(); i++) {
+					if (!check_type_compatibility(p_source.callable_params[i], p_target.callable_params[i], false, nullptr, p_class, p_func, p_trait_analyzer)) {
+						valid = false;
+						break;
+					}
+				}
+				const GDScriptParser::DataType& target_return = p_target.callable_return[0];
+				const bool target_is_void = target_return.kind == GDScriptParser::DataType::BUILTIN && target_return.builtin_type == Variant::NIL;
+				if (valid && !target_is_void) {
+					valid = check_type_compatibility(target_return, p_source.callable_return[0], false, nullptr, p_class, p_func, p_trait_analyzer);
+				}
 			}
 		}
 		return valid;
