@@ -892,6 +892,38 @@ static String _make_callable_arguments_hint(const GDScriptParser::DataType* p_ty
 	return arghint;
 }
 
+static String _make_callable_bind_arguments_hint(const GDScriptParser::DataType* p_type, int p_arg_idx, int p_arg_count) {
+	const int param_count = p_type->callable_params.size();
+	const int bound_count = MIN(MAX(p_arg_count, p_arg_idx + 1), param_count);
+
+	String result = "Callable[";
+	for (int i = 0; i < param_count - bound_count; i++) {
+		result += (i > 0 ? String(", ") : String()) + p_type->callable_params[i].to_string();
+	}
+	result += "]";
+	const GDScriptParser::DataType* return_type = &p_type->callable_return[0];
+	if (!(return_type->kind == GDScriptParser::DataType::BUILTIN && return_type->builtin_type == Variant::NIL)) {
+		result += " -> " + return_type->to_string();
+	}
+
+	String arghint = result + " bind(";
+	for (int i = 0; i < bound_count; i++) {
+		if (i > 0) {
+			arghint += ", ";
+		}
+		if (i == p_arg_idx) {
+			arghint += String::chr(0xFFFF);
+		}
+		const int param_index = param_count - bound_count + i;
+		arghint += vformat("arg%d: ", param_index) + p_type->callable_params[param_index].to_string();
+		if (i == p_arg_idx) {
+			arghint += String::chr(0xFFFF);
+		}
+	}
+	arghint += ")";
+	return arghint;
+}
+
 static String _make_arguments_hint(const GDScriptParser::FunctionNode *p_function, uint32_t p_arg_idx, bool p_just_args = false) {
 	String arghint;
 
@@ -3284,7 +3316,8 @@ static bool _guess_identifier_type(GDScriptParser::CompletionContext &p_context,
 		c.current_line = last_assign_line;
 		GDScriptCompletionIdentifier assigned_type;
 		if (_guess_expression_type(c, last_assigned_expression, assigned_type)) {
-			if (id_type.type.is_set() && (assigned_type.type.kind == GDScriptParser::DataType::VARIANT || (assigned_type.type.is_set() && !GDScriptAnalyzer::check_type_compatibility(id_type.type, assigned_type.type)))) {
+			const bool assigned_loses_callable_signature = id_type.type.is_set() && id_type.type.is_hard_type() && id_type.type.kind == GDScriptParser::DataType::BUILTIN && id_type.type.builtin_type == Variant::CALLABLE && id_type.type.has_callable_signature && assigned_type.type.kind == GDScriptParser::DataType::BUILTIN && assigned_type.type.builtin_type == Variant::CALLABLE && !assigned_type.type.has_callable_signature;
+			if (id_type.type.is_set() && (assigned_type.type.kind == GDScriptParser::DataType::VARIANT || assigned_loses_callable_signature || (assigned_type.type.is_set() && !GDScriptAnalyzer::check_type_compatibility(id_type.type, assigned_type.type)))) {
 				// The assigned type is incompatible. The annotated type takes priority.
 				r_type = id_type;
 				r_type.assigned_expression = last_assigned_expression;
@@ -3923,6 +3956,20 @@ static void _find_enumeration_candidates(GDScriptParser::CompletionContext &p_co
 }
 
 static String _type_ref_to_hint(const RGIndex::TypeRef& p_type) {
+
+	if (p_type.callable_signature && !p_type.args.is_empty()) {
+		String signature = "Callable[";
+		for (int i = 0; i < p_type.args.size() - 1; i++) {
+			signature += (i > 0 ? String(", ") : String()) + _type_ref_to_hint(p_type.args[i]);
+		}
+		signature += "]";
+		const RGIndex::TypeRef& return_ref = p_type.args[p_type.args.size() - 1];
+		if (return_ref.kind != RGIndex::TypeRef::VOID_TYPE) {
+			signature += " -> " + _type_ref_to_hint(return_ref);
+		}
+		return signature;
+	}
+
 	String s = p_type.kind == RGIndex::TypeRef::GENERIC_PARAM ? String(p_type.name) : p_type.debug_string();
 	if (!p_type.args.is_empty()) {
 		s += "[";
@@ -4236,9 +4283,15 @@ static void _list_call_arguments_core(GDScriptParser::CompletionContext& p_conte
 					}
 				}
 
-				if (base_type.builtin_type == Variant::CALLABLE && base_type.has_callable_signature && !base_type.callable_return.is_empty() && !base_type.is_meta_type && method == SNAME("call")) {
-					r_arghint = _make_callable_arguments_hint(&base_type, p_argidx);
-					return;
+				if (base_type.builtin_type == Variant::CALLABLE && base_type.has_callable_signature && !base_type.callable_return.is_empty() && !base_type.is_meta_type) {
+					if (method == SNAME("call")) {
+						r_arghint = _make_callable_arguments_hint(&base_type, p_argidx);
+						return;
+					}
+					if (method == SNAME("bind")) {
+						r_arghint = _make_callable_bind_arguments_hint(&base_type, p_argidx, p_call->arguments.size());
+						return;
+					}
 				}
 
 				List<MethodInfo> methods;
