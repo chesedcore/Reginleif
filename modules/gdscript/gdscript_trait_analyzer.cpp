@@ -102,9 +102,18 @@ GDScriptDetachedType GDScriptDetachedType::detach(const GDScriptParser::DataType
 	out.base.generic_owner_function = nullptr;
 	out.base.container_element_types.clear();
 	out.base.generic_type_bindings.clear();
+	out.base.callable_params.clear();
+	out.base.callable_return.clear();
 
 	for (const GDScriptParser::DataType& element : p_type.container_element_types) {
 		out.elements.push_back(detach(element));
+	}
+
+	for (int i = 0; i < p_type.callable_params.size(); i++) {
+		out.callable_param_types.push_back(detach(p_type.callable_params[i]));
+	}
+	for (int i = 0; i < p_type.callable_return.size(); i++) {
+		out.callable_return_types.push_back(detach(p_type.callable_return[i]));
 	}
 
 	for (const KeyValue<StringName, GDScriptParser::DataType>& B : p_type.generic_type_bindings) {
@@ -140,6 +149,14 @@ GDScriptParser::DataType GDScriptDetachedType::resolve(GDScriptParser* p_current
 	out.container_element_types.clear();
 	for (const GDScriptDetachedType& element : elements) {
 		out.container_element_types.push_back(element.resolve(p_current));
+	}
+	out.callable_params.clear();
+	for (int i = 0; i < callable_param_types.size(); i++) {
+		out.callable_params.push_back(callable_param_types[i].resolve(p_current));
+	}
+	out.callable_return.clear();
+	for (int i = 0; i < callable_return_types.size(); i++) {
+		out.callable_return.push_back(callable_return_types[i].resolve(p_current));
 	}
 	out.generic_type_bindings.clear();
 	for (const KeyValue<StringName, GDScriptDetachedType>& B : bindings) {
