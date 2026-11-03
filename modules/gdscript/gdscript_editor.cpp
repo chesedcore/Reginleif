@@ -942,21 +942,79 @@ static String _make_signal_emit_arguments_hint(const GDScriptParser::DataType* p
 	return arghint;
 }
 
-static void _fill_typed_signal_lookup(const GDScriptParser::DataType* p_type, const String& p_symbol, EditorLanguage::LookupResult& r_result) {
-	if (p_symbol != "emit") {
-		return;
+static String _make_signal_connect_arguments_hint(const GDScriptParser::DataType* p_type, int p_arg_idx) {
+	String handler = "Callable[";
+	for (int i = 0; i < p_type->callable_params.size(); i++) {
+		handler += (i > 0 ? String(", ") : String()) + p_type->callable_params[i].to_string();
 	}
+	handler += "]";
+
+	String arghint = "int connect(";
+	if (p_arg_idx == 0) {
+		arghint += String::chr(0xFFFF);
+	}
+	arghint += "callable: " + handler;
+	if (p_arg_idx == 0) {
+		arghint += String::chr(0xFFFF);
+	}
+	arghint += ", ";
+	if (p_arg_idx == 1) {
+		arghint += String::chr(0xFFFF);
+	}
+	arghint += "flags: int = 0";
+	if (p_arg_idx == 1) {
+		arghint += String::chr(0xFFFF);
+	}
+	return arghint + ")";
+}
+
+static void _fill_typed_signal_lookup(const GDScriptParser::DataType* p_type, const String& p_symbol, EditorLanguage::LookupResult& r_result) {
 	r_result.method_arguments.clear();
 	r_result.method_is_vararg = false;
-	for (int i = 0; i < p_type->callable_params.size(); i++) {
-		Dictionary arg;
-		arg["name"] = vformat("arg%d", i);
-		arg["type"] = p_type->callable_params[i].to_string();
-		arg["default"] = String();
-		r_result.method_arguments.push_back(arg);
+
+	///fuckass hacky hardcoded slop :sob:
+
+	if (p_symbol == "emit") {
+		for (int i = 0; i < p_type->callable_params.size(); i++) {
+			Dictionary arg;
+			arg["name"] = vformat("arg%d", i);
+			arg["type"] = p_type->callable_params[i].to_string();
+			arg["default"] = String();
+			r_result.method_arguments.push_back(arg);
+		}
+		r_result.doc_type = "void";
+		r_result.description = "Emits this signal with its typed arguments.";
+		return;
 	}
-	r_result.doc_type = "void";
-	r_result.description = "Emits this signal with its typed arguments.";
+
+	if (p_symbol == "connect") {
+		GDScriptParser::DataType handler_type;
+		handler_type.kind = GDScriptParser::DataType::BUILTIN;
+		handler_type.builtin_type = Variant::CALLABLE;
+		handler_type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+		handler_type.has_callable_signature = true;
+		handler_type.callable_params = p_type->callable_params;
+		GDScriptParser::DataType void_return;
+		void_return.kind = GDScriptParser::DataType::BUILTIN;
+		void_return.builtin_type = Variant::NIL;
+		void_return.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+		handler_type.callable_return.push_back(void_return);
+
+		Dictionary callable_arg;
+		callable_arg["name"] = "callable";
+		callable_arg["type"] = handler_type.to_string();
+		callable_arg["default"] = String();
+		r_result.method_arguments.push_back(callable_arg);
+
+		Dictionary flags_arg;
+		flags_arg["name"] = "flags";
+		flags_arg["type"] = "int";
+		flags_arg["default"] = "0";
+		r_result.method_arguments.push_back(flags_arg);
+
+		r_result.doc_type = "int";
+		r_result.description = "Connects this signal to a callable whose signature must match this signal's typed arguments.";
+	}
 }
 
 static String _make_arguments_hint(const GDScriptParser::FunctionNode *p_function, uint32_t p_arg_idx, bool p_just_args = false) {
@@ -2517,6 +2575,22 @@ static GDScriptCompletionIdentifier _type_from_property(const PropertyInfo &p_pr
 	return ci;
 }
 
+static GDScriptCompletionIdentifier _signal_type_from_method_info(const MethodInfo& p_method) {
+	GDScriptCompletionIdentifier ci;
+	ci.type.kind = GDScriptParser::DataType::BUILTIN;
+	ci.type.builtin_type = Variant::SIGNAL;
+	ci.type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+	ci.type.is_constant = true;
+	ci.type.method_info = p_method;
+	ci.type.has_signal_signature = true;
+	for (const PropertyInfo& argument : p_method.arguments) {
+		GDScriptParser::DataType param_type = _type_from_property(argument).type;
+		param_type.is_constant = false;
+		ci.type.callable_params.push_back(param_type);
+	}
+	return ci;
+}
+
 static GDScriptCompletionIdentifier _callable_type_from_method_info(const MethodInfo &p_method) {
 	GDScriptCompletionIdentifier ci;
 	ci.type.kind = GDScriptParser::DataType::BUILTIN;
@@ -3565,6 +3639,10 @@ static bool _guess_identifier_type_from_base(GDScriptParser::CompletionContext &
 							r_type = _type_from_variant(member.enum_value.value, p_context);
 							return true;
 						case GDScriptParser::ClassNode::Member::SIGNAL:
+							if (member.signal->signal_type.is_set() && member.signal->signal_type.has_signal_signature) {
+								r_type.type = member.signal->signal_type;
+								return true;
+							}
 							r_type.type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
 							r_type.type.kind = GDScriptParser::DataType::BUILTIN;
 							r_type.type.builtin_type = Variant::SIGNAL;
@@ -3658,6 +3736,12 @@ static bool _guess_identifier_type_from_base(GDScriptParser::CompletionContext &
 				MethodInfo method;
 				if (ClassDB::get_method_info(class_name, p_identifier, &method)) {
 					r_type = _callable_type_from_method_info(method);
+					return true;
+				}
+
+				MethodInfo signal_info;
+				if (ClassDB::get_signal(class_name, p_identifier, &signal_info)) {
+					r_type = _signal_type_from_method_info(signal_info);
 					return true;
 				}
 
@@ -4349,6 +4433,11 @@ static void _list_call_arguments_core(GDScriptParser::CompletionContext& p_conte
 
 				if (base_type.builtin_type == Variant::SIGNAL && base_type.has_signal_signature && !base_type.is_meta_type && method == SNAME("emit")) {
 					r_arghint = _make_signal_emit_arguments_hint(&base_type, p_argidx);
+					return;
+				}
+
+				if (base_type.builtin_type == Variant::SIGNAL && base_type.has_signal_signature && !base_type.is_meta_type && method == SNAME("connect")) {
+					r_arghint = _make_signal_connect_arguments_hint(&base_type, p_argidx);
 					return;
 				}
 
