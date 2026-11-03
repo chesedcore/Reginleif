@@ -2527,6 +2527,39 @@ static GDScriptCompletionIdentifier _callable_type_from_method_info(const Method
 	return ci;
 }
 
+static GDScriptCompletionIdentifier _callable_type_from_function(const GDScriptParser::FunctionNode* p_function) {
+	GDScriptCompletionIdentifier ci = _callable_type_from_method_info(p_function->info);
+
+	if (p_function->is_vararg() || p_function->has_generic_parameters()) {
+		return ci;
+	}
+	for (const GDScriptParser::ParameterNode* param : p_function->parameters) {
+		if (param->initializer != nullptr) {
+			return ci;
+		}
+	}
+
+	ci.type.has_callable_signature = true;
+	for (const GDScriptParser::ParameterNode* param : p_function->parameters) {
+		GDScriptParser::DataType param_type = param->type_constraint;
+		if (!param_type.is_set() || param_type.has_no_type()) {
+			param_type = GDScriptParser::DataType::get_variant_type();
+		}
+		param_type.is_constant = false;
+		ci.type.callable_params.push_back(param_type);
+	}
+
+	GDScriptParser::DataType return_type = p_function->return_type_constraint;
+	if (!return_type.is_set() || return_type.has_no_type() || return_type.is_variant()) {
+		return_type = GDScriptParser::DataType::get_variant_type();
+	} else if (!return_type.is_hard_type()) {
+		return_type.type_source = GDScriptParser::DataType::ANNOTATED_INFERRED;
+	}
+	return_type.is_constant = false;
+	ci.type.callable_return.push_back(return_type);
+	return ci;
+}
+
 #define MAX_COMPLETION_RECURSION 100
 struct RecursionCheck {
 	int *counter;
@@ -3545,7 +3578,7 @@ static bool _guess_identifier_type_from_base(GDScriptParser::CompletionContext &
 							if (is_static && !member.function->is_static) {
 								return false;
 							}
-							r_type = _callable_type_from_method_info(member.function->info);
+							r_type = _callable_type_from_function(member.function);
 							return true;
 						case GDScriptParser::ClassNode::Member::CLASS:
 							r_type.type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;

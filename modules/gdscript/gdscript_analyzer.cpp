@@ -164,6 +164,39 @@ static Ref<GDScriptTraitSignatureSnapshot> find_trait_bound_method_signature(con
 	return Ref<GDScriptTraitSignatureSnapshot>();
 }
 
+static GDScriptParser::DataType make_function_callable_type(const GDScriptParser::FunctionNode* p_function) {
+	GDScriptParser::DataType type = make_callable_type(p_function->info);
+
+	if (p_function->is_vararg() || p_function->has_generic_parameters()) {
+		return type;
+	}
+	for (const GDScriptParser::ParameterNode* param : p_function->parameters) {
+		if (param->initializer != nullptr) {
+			return type;
+		}
+	}
+
+	type.has_callable_signature = true;
+	for (const GDScriptParser::ParameterNode* param : p_function->parameters) {
+		GDScriptParser::DataType param_type = param->type_constraint;
+		if (!param_type.is_set() || param_type.has_no_type()) {
+			param_type = GDScriptParser::DataType::get_variant_type();
+		}
+		param_type.is_constant = false;
+		type.callable_params.push_back(param_type);
+	}
+
+	GDScriptParser::DataType return_type = p_function->return_type_constraint;
+	if (!return_type.is_set() || return_type.has_no_type() || return_type.is_variant()) {
+		return_type = GDScriptParser::DataType::get_variant_type();
+	} else if (!return_type.is_hard_type()) {
+		return_type.type_source = GDScriptParser::DataType::ANNOTATED_INFERRED;
+	}
+	return_type.is_constant = false;
+	type.callable_return.push_back(return_type);
+	return type;
+}
+
 static GDScriptParser::DataType make_signal_type(const MethodInfo &p_info) {
 	GDScriptParser::DataType type;
 	type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
@@ -6377,7 +6410,7 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 
 				case GDScriptParser::ClassNode::Member::FUNCTION: {
 					if (is_base && (!base.is_meta_type || member.function->is_static || is_constructor)) {
-						p_identifier->type_constraint = make_callable_type(member.function->info);
+						p_identifier->type_constraint = make_function_callable_type(member.function);
 						p_identifier->source = GDScriptParser::IdentifierNode::MEMBER_FUNCTION;
 						p_identifier->function_source = member.function;
 						p_identifier->function_source_is_static = member.function->is_static;
