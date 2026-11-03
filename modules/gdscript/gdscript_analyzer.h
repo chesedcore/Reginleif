@@ -126,6 +126,7 @@ class GDScriptAnalyzer {
 	void reduce_lambda(GDScriptParser::LambdaNode *p_lambda);
 	void reduce_with_expected(GDScriptParser::ExpressionNode* p_expression, const GDScriptParser::DataType& p_expected);
 	void apply_expected_closure_type(GDScriptParser::LambdaNode* p_lambda, const GDScriptParser::DataType& p_expected);
+	void apply_signal_signature(GDScriptParser::DataType* r_type, const MethodInfo& p_info, const GDScriptParser::Node* p_source) const;
 	bool is_rigid_generic(const GDScriptParser::DataType* p_type) const;
 	bool has_foreign_open_generics(const GDScriptParser::DataType* p_type) const;
 	GDScriptParser::DataType make_closure_signature_type(GDScriptParser::LambdaNode* p_lambda);
