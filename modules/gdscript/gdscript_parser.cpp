@@ -4402,7 +4402,8 @@ GDScriptParser::TypeNode *GDScriptParser::parse_type(bool p_allow_void) {
 
 	type->type_chain.push_back(type_element);
 
-	if (type_element->name == SNAME("Callable") && match(GDScriptTokenizer::Token::BRACKET_OPEN)) {
+	const bool is_signal_type = type_element->name == SNAME("Signal");
+	if ((type_element->name == SNAME("Callable") || is_signal_type) && match(GDScriptTokenizer::Token::BRACKET_OPEN)) {
 		type->is_callable_signature = true;
 		if (!check(GDScriptTokenizer::Token::BRACKET_CLOSE)) {
 			do {
@@ -4416,6 +4417,10 @@ GDScriptParser::TypeNode *GDScriptParser::parse_type(bool p_allow_void) {
 			} while (match(GDScriptTokenizer::Token::COMMA));
 		}
 		consume(GDScriptTokenizer::Token::BRACKET_CLOSE, R"([Reginleif] Expected "]" after Callable signature.)");
+		if (is_signal_type) {
+			complete_extents(type);
+			return type;
+		}
 		if (match(GDScriptTokenizer::Token::FORWARD_ARROW)) {
 			type->callable_return = parse_type(true);
 			if (type->callable_return == nullptr) {
@@ -6217,6 +6222,13 @@ String GDScriptParser::DataType::to_string() const {
 			}
 			if (builtin_type == Variant::DICTIONARY && has_container_element_types()) {
 				return vformat("Dictionary[%s, %s]", get_container_element_type_or_variant(0).to_string(), get_container_element_type_or_variant(1).to_string());
+			}
+			if (builtin_type == Variant::SIGNAL && has_signal_signature) {
+				String signature = "Signal[";
+				for (int i = 0; i < callable_params.size(); i++) {
+					signature += (i > 0 ? ", " : "") + callable_params[i].to_string();
+				}
+				return signature + "]";
 			}
 			if (builtin_type == Variant::CALLABLE && has_callable_signature) {
 				String signature = "Callable[";
