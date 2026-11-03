@@ -2671,6 +2671,28 @@ void GDScriptAnalyzer::resolve_function_signature(GDScriptParser::FunctionNode *
 		BitField<MethodFlags> method_flags = {};
 		StringName native_base;
 		if (!p_is_lambda && get_function_signature(p_function, false, base_type, function_name, parent_return_type, parameters_types, default_par_count, method_flags, &native_base)) {
+
+			HashMap<StringName, GDScriptParser::DataType> parent_bindings(base_type.generic_type_bindings);
+			
+			///fold until you uhh get the parent that has that method
+			for (GDScriptParser::ClassNode* walk = base_type.class_type; walk != nullptr && !walk->has_member(function_name); walk = walk->base_type.class_type) {
+				HashMap<StringName, GDScriptParser::DataType> next_bindings;
+
+				for (const KeyValue<StringName, GDScriptParser::DataType>& E : walk->base_type.generic_type_bindings) {
+					next_bindings[E.key] = parent_bindings.is_empty() ? E.value : resolve_generic_type(E.value, parent_bindings);
+				}
+
+				parent_bindings = next_bindings;
+			}
+
+			
+			if (!parent_bindings.is_empty()) {
+				parent_return_type = resolve_generic_type(parent_return_type, parent_bindings);
+				for (GDScriptParser::DataType& parent_par : parameters_types) {
+					parent_par = resolve_generic_type(parent_par, parent_bindings);
+				}
+			}
+
 			bool valid = p_function->is_static == method_flags.has_flag(METHOD_FLAG_STATIC);
 
 			if (p_function->return_type == nullptr) {
