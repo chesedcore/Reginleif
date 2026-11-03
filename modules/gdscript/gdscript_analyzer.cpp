@@ -8626,6 +8626,12 @@ void GDScriptAnalyzer::validate_call_arg(const List<GDScriptParser::DataType> &p
 		}
 		GDScriptParser::DataType arg_type = p_call->arguments[i]->type_constraint;
 
+#ifdef DEBUG_ENABLED
+		if (par_type.is_hard_type() && arg_type.is_hard_type()) {
+			warn_untyped_callable_assignment(par_type, arg_type, p_call->arguments[i]);
+		}
+#endif // DEBUG_ENABLED
+
 		if (arg_type.is_variant() || !arg_type.is_hard_type()) {
 #ifdef DEBUG_ENABLED
 			// Argument can be anything, so this is unsafe (unless the parameter is a hard variant).
@@ -8858,6 +8864,25 @@ GDScriptParser::DataType GDScriptAnalyzer::get_operation_type(Variant::Operator 
 	return result;
 }
 
+#ifdef DEBUG_ENABLED
+void GDScriptAnalyzer::warn_untyped_callable_assignment(const GDScriptParser::DataType& p_target, const GDScriptParser::DataType& p_source, const GDScriptParser::Node* p_node) {
+	if (p_node == nullptr) {
+		return;
+	}
+	const bool target_is_typed_callable = p_target.kind == GDScriptParser::DataType::BUILTIN && p_target.builtin_type == Variant::CALLABLE && p_target.has_callable_signature && !p_target.is_meta_type;
+	const bool source_is_untyped_callable = p_source.kind == GDScriptParser::DataType::BUILTIN && p_source.builtin_type == Variant::CALLABLE && !p_source.has_callable_signature && !p_source.is_meta_type;
+	if (!target_is_typed_callable || !source_is_untyped_callable) {
+		return;
+	}
+	for (const GDScriptParser::PendingWarning& pending : parser->pending_warnings) {
+		if (pending.code == GDScriptWarning::UNSAFE_CALLABLE_ASSIGNMENT && pending.start_line == p_node->start_line && pending.start_column == p_node->start_column) {
+			return;
+		}
+	}
+	parser->push_warning(p_node, GDScriptWarning::UNSAFE_CALLABLE_ASSIGNMENT, p_target.to_string());
+}
+#endif // DEBUG_ENABLED
+
 bool GDScriptAnalyzer::is_type_compatible(const GDScriptParser::DataType &p_target, const GDScriptParser::DataType &p_source, bool p_allow_implicit_conversion, const GDScriptParser::Node *p_source_node) {
 #ifdef DEBUG_ENABLED
 	if (p_source_node) {
@@ -8868,7 +8893,13 @@ bool GDScriptAnalyzer::is_type_compatible(const GDScriptParser::DataType &p_targ
 		}
 	}
 #endif // DEBUG_ENABLED
-	return check_type_compatibility(p_target, p_source, p_allow_implicit_conversion, p_source_node, parser->current_class, parser->current_function, trait_analyzer);
+	const bool compatible = check_type_compatibility(p_target, p_source, p_allow_implicit_conversion, p_source_node, parser->current_class, parser->current_function, trait_analyzer);
+#ifdef DEBUG_ENABLED
+	if (compatible) {
+		warn_untyped_callable_assignment(p_target, p_source, p_source_node);
+	}
+#endif // DEBUG_ENABLED
+	return compatible;
 }
 
 // NOTE:`is_type_compatible()` considers typed arrays/dictionaries compatible with untyped ones (but the operation is unsafe).
