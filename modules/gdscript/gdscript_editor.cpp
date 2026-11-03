@@ -2533,13 +2533,9 @@ static GDScriptCompletionIdentifier _callable_type_from_function(const GDScriptP
 	if (p_function->is_vararg() || p_function->has_generic_parameters()) {
 		return ci;
 	}
-	for (const GDScriptParser::ParameterNode* param : p_function->parameters) {
-		if (param->initializer != nullptr) {
-			return ci;
-		}
-	}
 
 	ci.type.has_callable_signature = true;
+	ci.type.callable_default_count = p_function->default_arg_values.size();
 	for (const GDScriptParser::ParameterNode* param : p_function->parameters) {
 		GDScriptParser::DataType param_type = param->type_constraint;
 		if (!param_type.is_set() || param_type.has_no_type()) {

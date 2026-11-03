@@ -167,6 +167,7 @@ public:
 		bool has_signal_signature = false;
 		Vector<DataType> callable_params;
 		Vector<DataType> callable_return;
+		int callable_default_count = 0;
 
 		_FORCE_INLINE_ bool is_set() const { return kind != RESOLVING && kind != UNRESOLVED; }
 		_FORCE_INLINE_ bool is_resolving() const { return kind == RESOLVING; }
@@ -354,6 +355,7 @@ public:
 			has_callable_signature = p_other.has_callable_signature;
 			callable_params = p_other.callable_params;
 			callable_return = p_other.callable_return;
+			callable_default_count = p_other.callable_default_count;
 			has_signal_signature = p_other.has_signal_signature;
 		}
 

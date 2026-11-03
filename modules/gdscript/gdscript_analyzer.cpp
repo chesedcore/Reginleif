@@ -170,13 +170,9 @@ static GDScriptParser::DataType make_function_callable_type(const GDScriptParser
 	if (p_function->is_vararg() || p_function->has_generic_parameters()) {
 		return type;
 	}
-	for (const GDScriptParser::ParameterNode* param : p_function->parameters) {
-		if (param->initializer != nullptr) {
-			return type;
-		}
-	}
 
 	type.has_callable_signature = true;
+	type.callable_default_count = p_function->default_arg_values.size();
 	for (const GDScriptParser::ParameterNode* param : p_function->parameters) {
 		GDScriptParser::DataType param_type = param->type_constraint;
 		if (!param_type.is_set() || param_type.has_no_type()) {
@@ -6010,6 +6006,27 @@ GDScriptParser::DataType GDScriptAnalyzer::make_global_class_meta_type(const Str
 	}
 }
 
+GDScriptParser::DataType GDScriptAnalyzer::make_callable_type_with_signature(const MethodInfo& p_info, const GDScriptParser::Node* p_source) const {
+	GDScriptParser::DataType type = make_callable_type(p_info);
+
+	if (p_info.flags & METHOD_FLAG_VARARG) {
+		return type;
+	}
+
+	type.has_callable_signature = true;
+	type.callable_default_count = p_info.default_arguments.size();
+	for (const PropertyInfo& argument : p_info.arguments) {
+		GDScriptParser::DataType param_type = type_from_property(argument, true, p_source);
+		param_type.is_constant = false;
+		type.callable_params.push_back(param_type);
+	}
+
+	GDScriptParser::DataType return_type = type_from_property(p_info.return_val, false, p_source);
+	return_type.is_constant = false;
+	type.callable_return.push_back(return_type);
+	return type;
+}
+
 Ref<GDScriptParserRef> GDScriptAnalyzer::ensure_cached_external_parser_for_class(const GDScriptParser::ClassNode *p_class, const GDScriptParser::ClassNode *p_from_class, const char *p_context, const GDScriptParser::Node *p_source) {
 	// Delicate piece of code that intentionally doesn't use the GDScript cache or `get_depended_parser_for`.
 	// Search dependencies for the parser that owns `p_class` and make a cache entry for it.
@@ -6275,7 +6292,7 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 						}
 					}
 					if (Variant::has_builtin_method(base.builtin_type, name)) {
-						p_identifier->type_constraint = make_callable_type(Variant::get_builtin_method_info(base.builtin_type, name));
+						p_identifier->type_constraint = make_callable_type_with_signature(Variant::get_builtin_method_info(base.builtin_type, name), p_identifier);
 						return;
 					}
 
@@ -6487,7 +6504,7 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 		MethodInfo method_info = script_type->get_method_info(p_identifier->name);
 
 		if (method_info.name == p_identifier->name) {
-			p_identifier->type_constraint = make_callable_type(method_info);
+			p_identifier->type_constraint = make_callable_type_with_signature(method_info, p_identifier);
 			p_identifier->source = GDScriptParser::IdentifierNode::MEMBER_FUNCTION;
 			p_identifier->function_source_is_static = method_info.flags & METHOD_FLAG_STATIC;
 			return;
@@ -6566,7 +6583,7 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 		}
 		if (ClassDB::get_method_info(native, name, &method_info)) {
 			// Method is callable.
-			p_identifier->type_constraint = make_callable_type(method_info);
+			p_identifier->type_constraint = make_callable_type_with_signature(method_info, p_identifier);
 			p_identifier->source = GDScriptParser::IdentifierNode::INHERITED_VARIABLE;
 			return;
 		}
@@ -9177,10 +9194,13 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 			}
 		}
 		if (valid && p_target.builtin_type == Variant::CALLABLE && p_target.has_callable_signature && p_source.has_callable_signature) {
-			if (p_target.callable_params.size() != p_source.callable_params.size()) {
+			const int target_param_count = p_target.callable_params.size();
+			const int source_max_params = p_source.callable_params.size();
+			const int source_min_params = MAX(0, source_max_params - p_source.callable_default_count);
+			if (target_param_count < source_min_params || target_param_count > source_max_params) {
 				valid = false;
 			} else {
-				for (int i = 0; i < p_target.callable_params.size(); i++) {
+				for (int i = 0; i < target_param_count; i++) {
 					if (!check_type_compatibility(p_source.callable_params[i], p_target.callable_params[i], false, nullptr, p_class, p_func, p_trait_analyzer)) {
 						valid = false;
 						break;
