@@ -1451,6 +1451,22 @@ void ScriptTextEditor::_show_symbol_tooltip(const String &p_symbol, int p_row, i
 				doc_symbol = "property|" + result.class_name + "|" + result.class_member;
 			} break;
 			case EditorLanguage::LookupResult::Type::CLASS_METHOD: {
+				if (!result.doc_type.is_empty()) {
+					Dictionary item_data;
+					item_data["description"] = result.description;
+					item_data["is_deprecated"] = result.is_deprecated;
+					item_data["deprecated_message"] = result.deprecated_message;
+					item_data["is_experimental"] = result.is_experimental;
+					item_data["experimental_message"] = result.experimental_message;
+					item_data["doc_type"] = result.doc_type;
+					item_data["enumeration"] = result.enumeration;
+					item_data["is_bitfield"] = result.is_bitfield;
+					item_data["value"] = result.value;
+					item_data["arguments"] = result.method_arguments;
+					item_data["is_vararg"] = result.method_is_vararg;
+					doc_symbol = "local_method||" + p_symbol + "|" + JSON::stringify(item_data);
+					break;
+				}
 				StringName cname = result.class_name;
 				while (ClassDB::class_exists(cname)) {
 					if (ClassDB::has_method(cname, result.class_member, true)) {

@@ -924,6 +924,41 @@ static String _make_callable_bind_arguments_hint(const GDScriptParser::DataType*
 	return arghint;
 }
 
+static String _make_signal_emit_arguments_hint(const GDScriptParser::DataType* p_type, int p_arg_idx) {
+	String arghint = "void emit(";
+	for (int i = 0; i < p_type->callable_params.size(); i++) {
+		if (i > 0) {
+			arghint += ", ";
+		}
+		if (i == p_arg_idx) {
+			arghint += String::chr(0xFFFF);
+		}
+		arghint += vformat("arg%d: ", i) + p_type->callable_params[i].to_string();
+		if (i == p_arg_idx) {
+			arghint += String::chr(0xFFFF);
+		}
+	}
+	arghint += ")";
+	return arghint;
+}
+
+static void _fill_typed_signal_lookup(const GDScriptParser::DataType* p_type, const String& p_symbol, EditorLanguage::LookupResult& r_result) {
+	if (p_symbol != "emit") {
+		return;
+	}
+	r_result.method_arguments.clear();
+	r_result.method_is_vararg = false;
+	for (int i = 0; i < p_type->callable_params.size(); i++) {
+		Dictionary arg;
+		arg["name"] = vformat("arg%d", i);
+		arg["type"] = p_type->callable_params[i].to_string();
+		arg["default"] = String();
+		r_result.method_arguments.push_back(arg);
+	}
+	r_result.doc_type = "void";
+	r_result.description = "Emits this signal with its typed arguments.";
+}
+
 static String _make_arguments_hint(const GDScriptParser::FunctionNode *p_function, uint32_t p_arg_idx, bool p_just_args = false) {
 	String arghint;
 
@@ -2213,7 +2248,7 @@ static void _find_identifiers_in_base(const GDScriptCompletionIdentifier &p_base
 				}
 
 				int location = EditorLanguage::CompletionLocation::OTHER;
-				const bool detail_uses_full_type = base_type.kind == GDScriptParser::DataType::ENUM || (base_type.builtin_type == Variant::CALLABLE && base_type.has_callable_signature);
+				const bool detail_uses_full_type = base_type.kind == GDScriptParser::DataType::ENUM || (base_type.builtin_type == Variant::CALLABLE && base_type.has_callable_signature) || (base_type.builtin_type == Variant::SIGNAL && base_type.has_signal_signature);
 				const String builtin_detail = detail_uses_full_type ? base_type.to_string() : Variant::get_type_name(base_type.builtin_type);
 
 				if (!p_only_functions) {
@@ -4283,6 +4318,11 @@ static void _list_call_arguments_core(GDScriptParser::CompletionContext& p_conte
 					}
 				}
 
+				if (base_type.builtin_type == Variant::SIGNAL && base_type.has_signal_signature && !base_type.is_meta_type && method == SNAME("emit")) {
+					r_arghint = _make_signal_emit_arguments_hint(&base_type, p_argidx);
+					return;
+				}
+
 				if (base_type.builtin_type == Variant::CALLABLE && base_type.has_callable_signature && !base_type.callable_return.is_empty() && !base_type.is_meta_type) {
 					if (method == SNAME("call")) {
 						r_arghint = _make_callable_arguments_hint(&base_type, p_argidx);
@@ -5047,6 +5087,35 @@ void GDScriptEditorLanguage::format_code(String &r_code, uint32_t p_from_line, u
 	r_code = String("\n").join(lines);
 }
 
+static void _fill_typed_callable_lookup(const GDScriptParser::DataType* p_type, const String& p_symbol, EditorLanguage::LookupResult& r_result) {
+	const bool is_call = p_symbol == "call";
+	const bool is_bind = p_symbol == "bind";
+	if (!is_call && !is_bind) {
+		return;
+	}
+
+	const GDScriptParser::DataType* return_type = &p_type->callable_return[0];
+	const bool returns_void = return_type->kind == GDScriptParser::DataType::BUILTIN && return_type->builtin_type == Variant::NIL;
+
+	r_result.method_arguments.clear();
+	r_result.method_is_vararg = false;
+	for (int i = 0; i < p_type->callable_params.size(); i++) {
+		Dictionary arg;
+		arg["name"] = vformat("arg%d", i);
+		arg["type"] = p_type->callable_params[i].to_string();
+		arg["default"] = is_bind ? String(U"\u2026") : String();
+		r_result.method_arguments.push_back(arg);
+	}
+
+	if (is_call) {
+		r_result.doc_type = returns_void ? String("void") : return_type->to_string();
+		r_result.description = "Calls this callable with its typed arguments.";
+	} else {
+		r_result.doc_type = "Callable";
+		r_result.description = "Binds the trailing arguments and returns a callable with the remaining signature.";
+	}
+}
+
 static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, const String &p_symbol, EditorLanguage::LookupResult &r_result) {
 	GDScriptParser::DataType base_type = p_base;
 
@@ -5305,6 +5374,13 @@ static Error _lookup_symbol_from_base(const GDScriptParser::DataType &p_base, co
 						r_result.class_member = p_symbol;
 						return OK;
 					}
+				}
+
+				if (base_type.builtin_type == Variant::CALLABLE && base_type.has_callable_signature && !base_type.callable_return.is_empty() && !base_type.is_meta_type && Variant::has_builtin_method(base_type.builtin_type, p_symbol)) {
+					_fill_typed_callable_lookup(&base_type, p_symbol, r_result);
+				}
+				if (base_type.builtin_type == Variant::SIGNAL && base_type.has_signal_signature && !base_type.is_meta_type) {
+					_fill_typed_signal_lookup(&base_type, p_symbol, r_result);
 				}
 
 				if (Variant::has_builtin_method(base_type.builtin_type, p_symbol)) {
