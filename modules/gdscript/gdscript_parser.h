@@ -164,6 +164,7 @@ public:
 		HashMap<StringName, DataType> generic_type_bindings;
 
 		bool has_callable_signature = false;
+		bool has_signal_signature = false;
 		Vector<DataType> callable_params;
 		Vector<DataType> callable_return;
 
@@ -251,7 +252,18 @@ public:
 				case VARIANT:
 					return true; // All variants are the same.
 				case BUILTIN:
-					if (builtin_type != p_other.builtin_type || has_callable_signature != p_other.has_callable_signature) {
+					if (has_signal_signature && p_other.has_signal_signature && builtin_type == p_other.builtin_type) {
+						if (callable_params.size() != p_other.callable_params.size()) {
+							return false;
+						}
+						for (int i = 0; i < callable_params.size(); i++) {
+							if (callable_params[i] != p_other.callable_params[i]) {
+								return false;
+							}
+						}
+						return true;
+					}
+					if (builtin_type != p_other.builtin_type || has_callable_signature != p_other.has_callable_signature || has_signal_signature != p_other.has_signal_signature) {
 						return false;
 					}
 					if (has_callable_signature) {
@@ -342,6 +354,7 @@ public:
 			has_callable_signature = p_other.has_callable_signature;
 			callable_params = p_other.callable_params;
 			callable_return = p_other.callable_return;
+			has_signal_signature = p_other.has_signal_signature;
 		}
 
 		DataType() = default;
