@@ -450,6 +450,9 @@ void _collect_class(const GP::ClassNode* p_class, const StringName& p_outer_key,
 	for (const GP::TypeNode* arg : p_class->extends_generic_args) {
 		c.base.generic_args.push_back(_make_type_ref(arg, generics));
 	}
+	for (const GP::TypeNode* arg : p_class->attach_to_types) {
+		c.attach_to.push_back(_make_type_ref(arg, generics));
+	}
 
 	for (uint32_t i = 0; i < p_class->members.size(); i++) {
 		const GP::ClassNode::Member& mem = p_class->members[i];

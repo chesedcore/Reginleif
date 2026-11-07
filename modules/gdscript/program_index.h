@@ -147,6 +147,7 @@ struct ClassDecl {
 	BaseRef base;
 	bool is_abstract = false;
 	Vector<StringName> generic_params;
+	Vector<TypeRef> attach_to;
 	Vector<MethodDecl> methods; ///fns declared directly in this class (NOT impls or trait methods!)
 	HashSet<StringName> enum_names;
 };
@@ -257,6 +258,7 @@ public:
 		String path;
 		TypeKey base; ///MUST be resolved. invalid if not!!
 		bool is_abstract = false;
+		Vector<TypeRef> attach_to;
 		HashMap<StringName, MethodHashes> methods;
 		HashSet<StringName> enums;
 	};
