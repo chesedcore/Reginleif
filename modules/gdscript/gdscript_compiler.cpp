@@ -3349,6 +3349,44 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 	p_script->tool = parser->is_tool();
 	p_script->_is_abstract = p_class->is_abstract;
 
+	p_script->attach_to_base = StringName();
+	p_script->attach_to_traits.clear();
+	if (p_class->attach_to_base.is_set()) {
+		const GDScriptParser::DataType& attach_base = p_class->attach_to_base;
+		if (attach_base.kind == GDScriptParser::DataType::NATIVE) {
+			p_script->attach_to_base = attach_base.native_type;
+		} else if (attach_base.kind == GDScriptParser::DataType::CLASS && attach_base.class_type != nullptr) {
+			const StringName global = attach_base.class_type->get_global_name();
+			p_script->attach_to_base = global != StringName() ? global : (attach_base.class_type->identifier ? attach_base.class_type->identifier->name : StringName());
+		}
+	}
+	
+	for (const StringName& trait_name : p_class->attach_to_traits) {
+		p_script->attach_to_traits.push_back(trait_name);
+	}
+
+	p_script->sibling_deps.clear();
+	for (const GDScriptParser::ClassNode::Member& member : p_class->members) {
+		if (member.type != GDScriptParser::ClassNode::Member::VARIABLE || member.variable->sibling_dep == GDScriptParser::VariableNode::SIBLING_NONE) {
+			continue;
+		}
+		const GDScriptParser::DataType& dep_type = member.variable->type_constraint;
+		StringName type_name;
+		if (dep_type.kind == GDScriptParser::DataType::NATIVE) {
+			type_name = dep_type.native_type;
+		} else if (dep_type.kind == GDScriptParser::DataType::CLASS && dep_type.class_type != nullptr) {
+			type_name = dep_type.class_type->get_global_name();
+		}
+		if (type_name == StringName()) {
+			continue;
+		}
+		GDScript::SiblingDep dep;
+		dep.member = member.variable->identifier->name;
+		dep.type = type_name;
+		dep.required = member.variable->sibling_dep == GDScriptParser::VariableNode::SIBLING_REQUIRED;
+		p_script->sibling_deps.push_back(dep);
+	}
+
 	if (p_script->local_name != StringName()) {
 		if (GDScriptAnalyzer::class_exists(p_script->local_name)) {
 			_set_error(vformat(R"(The class "%s" shadows a native class)", p_script->local_name), p_class);

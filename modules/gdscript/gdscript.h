@@ -177,6 +177,8 @@ private:
 	bool path_valid = false; // False if using default path.
 	StringName local_name; // Inner class identifier or `class_name`.
 	StringName global_name; // `class_name`.
+	StringName attach_to_base;
+	Vector<StringName> attach_to_traits;
 	String fully_qualified_name;
 	String simplified_icon_path;
 	SelfList<GDScript> script_list;
@@ -290,6 +292,15 @@ public:
 
 	virtual Ref<Script> get_base_script() const override;
 	virtual StringName get_global_name() const override;
+	void get_attach_constraints(StringName& r_base, Vector<StringName>& r_traits) const;
+
+	struct SiblingDep {
+		StringName member;
+		StringName type;
+		bool required = false;
+	};
+	Vector<SiblingDep> sibling_deps;
+	void get_sibling_deps(Vector<SiblingDep>& r_deps) const;
 
 	virtual StringName get_instance_base_type() const override; // this may not work in all scripts, will return empty if so
 	virtual ScriptInstance *instance_create(Object *p_this) override;

@@ -44,6 +44,7 @@
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/templates/rb_set.h"
+#include "scene/main/attach_rules.h"
 
 #ifdef TOOLS_ENABLED
 #include "editor/gdscript_docgen.h"
@@ -2748,6 +2749,7 @@ void GDScriptLanguage::reload_scripts(const Array &p_scripts) {
 		}
 	}
 
+	AttachRules::revalidate_all();
 #endif // DEBUG_ENABLED
 }
 
