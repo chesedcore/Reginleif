@@ -998,6 +998,9 @@ public:
 	void show_save_accept(const String &p_text, const String &p_ok_text = TTRC("OK"));
 	void show_warning(const String &p_text, const String &p_title = TTRC("Warning!"));
 
+	void collect_contract_errors(Vector<String>& r_errors);
+	bool validate_contracts_for_run();
+
 	void _copy_warning(const String &p_str);
 
 	Error export_preset(const String &p_preset, const String &p_path, bool p_debug, bool p_pack_only, bool p_android_build_template, bool p_patch, const Vector<String> &p_patches);
