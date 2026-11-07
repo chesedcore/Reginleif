@@ -139,6 +139,9 @@ public:
 
 #ifdef DEBUG_ENABLED
 	static SafeNumeric<uint64_t> total_node_count;
+
+	typedef bool (*AttachValidator)(const Node* p_child, const Node* p_parent, String& r_error);
+	static AttachValidator attach_validator;
 #endif
 	enum {
 		UNIQUE_SCENE_ID_UNASSIGNED = 0
