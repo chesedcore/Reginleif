@@ -117,6 +117,9 @@ static const GDScriptParser::DataType* get_trait_bound_type_for_lookup(const GDS
 	if (p_base.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
 		return &p_base;
 	}
+	if ((p_base.kind == GDScriptParser::DataType::NATIVE || p_base.kind == GDScriptParser::DataType::CLASS) && !p_base.trait_bound_names.is_empty()) {
+		return &p_base;
+	}
 	if (p_base.kind != GDScriptParser::DataType::GENERIC_TYPE) {
 		return nullptr;
 	}
@@ -2439,6 +2442,45 @@ void GDScriptAnalyzer::resolve_annotation(GDScriptParser::AnnotationNode *p_anno
 	}
 	p_annotation->is_resolved = true;
 
+	if (p_annotation->name == SNAME("@attach_to")) {
+		GDScriptParser::DataType base;
+		HashSet<StringName> seen_traits;
+		for (GDScriptParser::TypeNode* type_node : p_annotation->type_arguments) {
+			GDScriptParser::DataType t = resolve_datatype(type_node);
+
+			if (!t.is_set() || (t.is_variant() && t.kind != GDScriptParser::DataType::TRAIT_OBJECT)) {
+				push_error(R"([Reginleif]"@attach_to" argument could not be resolved.)", type_node);
+				continue;
+			}
+
+			if (t.kind == GDScriptParser::DataType::TRAIT_OBJECT) {
+				for (const StringName& trait_name : t.trait_bound_names) {
+					if (!seen_traits.has(trait_name)) {
+						seen_traits.insert(trait_name);
+					}
+				}
+				continue;
+			}
+
+			if (t.kind != GDScriptParser::DataType::NATIVE && t.kind != GDScriptParser::DataType::CLASS) {
+				push_error(R"([Reginleif] "@attach_to" accepts classes and trait bounds only.)", type_node);
+				continue;
+			}
+			if (!base.is_set()) {
+				base = t;
+			} else if (is_type_compatible(base, t, false)) {
+				base = t;
+			} else if (!is_type_compatible(t, base, false)) {
+				push_error(vformat(R"([Reginleif] "%s" and "%s" are unrelated classes. No host can be both.)", base.to_string(), t.to_string()), type_node);
+			}
+		}
+		for (const StringName& trait_name : seen_traits) {
+			p_annotation->attach_to_traits.push_back(trait_name);
+		}
+		p_annotation->attach_to_base = base;
+		return;
+	}
+
 	const MethodInfo &annotation_info = parser->valid_annotations[p_annotation->name].info;
 
 	for (uint32_t i = 0, j = 0; i < p_annotation->arguments.size(); i++) {
@@ -3210,6 +3252,30 @@ void GDScriptAnalyzer::resolve_assignable(GDScriptParser::AssignableNode *p_assi
 void GDScriptAnalyzer::resolve_variable(GDScriptParser::VariableNode *p_variable, bool p_is_local) {
 	static constexpr const char *kind = "variable";
 	resolve_assignable(p_variable, kind);
+
+	if (!p_is_local && p_variable->sibling_dep != GDScriptParser::VariableNode::SIBLING_NONE) {
+		const String ann = p_variable->sibling_dep == GDScriptParser::VariableNode::SIBLING_REQUIRED ? "@requires" : "@if_present";
+		const GDScriptParser::DataType& dep_type = p_variable->type_constraint;
+		if (parser->current_class == nullptr || !is_component_class(parser->current_class)) {
+			push_error(vformat(R"([Reginleif] "%s" can only be used in classes that extend "Component".)", ann), p_variable);
+		} else if (p_variable->exported || p_variable->onready) {
+			push_error(vformat(R"([Reginleif] "%s" variables are filled by the Composer, so they can't also be exported or "@onready".)", ann), p_variable);
+		} else if (p_variable->datatype_specifier == nullptr) {
+			push_error(vformat(R"([Reginleif] "%s" needs an explicit Component type.)", ann, ann), p_variable);
+		} else if (dep_type.kind == GDScriptParser::DataType::NATIVE) {
+			if (dep_type.native_type == SNAME("Component") || !ClassDB::is_parent_class(dep_type.native_type, SNAME("Component"))) {
+				push_error(vformat(R"([Reginleif] "%s" needs a specific Component class, but "%s" is not one.)", ann, dep_type.to_string()), p_variable);
+			}
+		} else if (dep_type.kind == GDScriptParser::DataType::CLASS && dep_type.class_type != nullptr) {
+			if (!is_component_class(dep_type.class_type)) {
+				push_error(vformat(R"([Reginleif] "%s" needs a Component class, but "%s" does not extend Component.)", ann, dep_type.to_string()), p_variable);
+			} else if (dep_type.class_type->get_global_name() == StringName()) {
+				push_error(vformat(R"([Reginleif] "%s" needs a Component class with a "class_name", so the Composer can find it.)", ann), p_variable);
+			}
+		} else {
+			push_error(vformat(R"([Reginleif] "%s" needs a specific Component class, not "%s".)", ann, dep_type.to_string()), p_variable);
+		}
+	}
 
 #ifdef DEBUG_ENABLED
 	is_shadowing(p_variable->identifier, kind, p_is_local);
@@ -5604,7 +5670,84 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 		}
 	}
 
+	if (!p_call->is_super && p_call->function_name == SNAME("get_parent") && p_call->arguments.is_empty() && base_type.kind == GDScriptParser::DataType::CLASS && base_type.class_type != nullptr && !is_component_class(base_type.class_type)) {
+		GDScriptParser::DataType attached;
+		if (make_component_host_type(base_type.class_type, attached)) {
+			call_type = attached;
+		}
+	}
+
+	if (!p_call->arguments.is_empty() && !p_call->is_super && (p_call->function_name == SNAME("add_child") || p_call->function_name == SNAME("reparent"))) {
+		GDScriptParser::DataType base_type;
+		if (is_self && parser->current_class != nullptr) {
+			base_type = parser->current_class->self_type;
+		} else if (p_call->get_callee_type() == GDScriptParser::Node::SUBSCRIPT) {
+			const GDScriptParser::SubscriptNode* subscript = static_cast<GDScriptParser::SubscriptNode*>(p_call->callee);
+			if (subscript->base != nullptr) {
+				base_type = subscript->base->type_constraint;
+			}
+		}
+		const GDScriptParser::DataType arg_type = p_call->arguments[0]->type_constraint;
+		if (p_call->function_name == SNAME("add_child")) {
+			check_static_attach(base_type, arg_type, p_call);
+		} else {
+			check_static_attach(arg_type, base_type, p_call);
+		}
+	}
+
 	p_call->type_constraint = call_type;
+}
+
+void GDScriptAnalyzer::check_static_attach(const GDScriptParser::DataType& p_parent, const GDScriptParser::DataType& p_child, const GDScriptParser::Node* p_error_node) {
+	using DataType = GDScriptParser::DataType;
+
+	auto usable = [](const DataType& p_type) {
+		return p_type.is_set() && !p_type.is_variant() && !p_type.is_meta_type && (p_type.kind == DataType::CLASS || p_type.kind == DataType::NATIVE);
+	};
+
+	if (!usable(p_parent) || !usable(p_child)) {
+		return;
+	}
+	auto native_of = [](const DataType& p_type) -> StringName {
+		return p_type.kind == DataType::NATIVE ? p_type.native_type : get_class_native_base(p_type.class_type);
+	};
+
+	const StringName parent_native = native_of(p_parent);
+	const StringName child_native = native_of(p_child);
+
+	if (child_native != StringName() && ClassDB::is_parent_class(child_native, "Component")) {
+		if (parent_native != StringName() && !ClassDB::is_parent_class(parent_native, "Composer") && !ClassDB::is_parent_class("Composer", parent_native)) {
+			push_error(vformat(R"([Reginleif] A Component can only be a child of a Composer, but the parent is "%s".)", p_parent.to_string()), p_error_node);
+		}
+		return;
+	}
+
+	if (p_child.kind != DataType::CLASS || p_child.class_type == nullptr) {
+		return;
+	}
+
+	DataType required;
+	if (!make_component_host_type(p_child.class_type, required)) {
+		return;
+	}
+
+	if (required.kind == DataType::NATIVE || required.kind == DataType::CLASS) {
+		DataType required_base = required;
+		required_base.trait_bound_names.clear();
+		if (!is_type_compatible(required_base, p_parent, false) && !is_type_compatible(p_parent, required_base, false)) {
+			push_error(vformat(R"([Reginleif] "%s" can only be attached to "%s", but the parent is "%s".)", p_child.to_string(), required_base.to_string(), p_parent.to_string()), p_error_node);
+			return;
+		}
+	}
+
+	if (!required.trait_bound_names.is_empty()) {
+		DataType trait_target;
+		trait_target.kind = DataType::TRAIT_OBJECT;
+		trait_target.trait_bound_names = required.trait_bound_names;
+		if (!is_type_compatible(trait_target, p_parent, false)) {
+			push_error(vformat(R"([Reginleif] "%s" needs a parent that implements all of its @attach_to traits, but "%s" does not.)", p_child.to_string(), p_parent.to_string()), p_error_node);
+		}
+	}
 }
 
 void GDScriptAnalyzer::reduce_cast(GDScriptParser::CastNode *p_cast) {
@@ -5867,6 +6010,53 @@ Ref<GDScript> GDScriptAnalyzer::get_depended_shallow_script(const String &p_path
 	parser->get_depended_parser_for(path);
 	Ref<GDScript> scr = GDScriptCache::get_shallow_script(path, r_error, parser->script_path);
 	return scr;
+}
+
+StringName GDScriptAnalyzer::get_class_native_base(const GDScriptParser::ClassNode* p_class) {
+	for (const GDScriptParser::ClassNode* c = p_class; c != nullptr;) {
+		const GDScriptParser::DataType& parent = c->base_type;
+		if (parent.kind == GDScriptParser::DataType::NATIVE) {
+			return parent.native_type;
+		}
+		c = (parent.kind == GDScriptParser::DataType::CLASS) ? parent.class_type : nullptr;
+	}
+	return StringName();
+}
+
+bool GDScriptAnalyzer::is_component_class(const GDScriptParser::ClassNode* p_class) {
+	const StringName native = get_class_native_base(p_class);
+	return native != StringName() && ClassDB::is_parent_class(native, "Component");
+}
+
+bool GDScriptAnalyzer::make_component_host_type(const GDScriptParser::ClassNode* p_class, GDScriptParser::DataType& r_type) {
+	GDScriptParser::DataType base;
+	Vector<StringName> traits;
+	for (const GDScriptParser::ClassNode* c = p_class; c != nullptr;) {
+		if (c->attach_to_base.is_set() && !base.is_set()) {
+			base = c->attach_to_base;
+		}
+		for (const StringName& t : c->attach_to_traits) {
+			if (!traits.has(t)) {
+				traits.push_back(t);
+			}
+		}
+		const GDScriptParser::DataType& parent = c->base_type;
+		c = (parent.kind == GDScriptParser::DataType::CLASS) ? parent.class_type : nullptr;
+	}
+	if (!base.is_set() && traits.is_empty()) {
+		return false;
+	}
+	if (base.is_set()) {
+		r_type = base;
+	} else {
+		r_type = GDScriptParser::DataType();
+		r_type.kind = GDScriptParser::DataType::TRAIT_OBJECT;
+	}
+	r_type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+	r_type.is_meta_type = false;
+	r_type.is_read_only = true;
+	r_type.trait_bound_names = traits;
+	return true;
 }
 
 void GDScriptAnalyzer::reduce_identifier_from_base_set_class(GDScriptParser::IdentifierNode *p_identifier, GDScriptParser::DataType p_identifier_datatype) {
@@ -6290,6 +6480,12 @@ void GDScriptAnalyzer::reduce_identifier_from_base(GDScriptParser::IdentifierNod
 				bool has_setter = ClassDB::get_property_setter(native, name) != StringName();
 				GDScriptParser::DataType ptype = type_from_property(getter->get_return_info(), false, p_identifier);
 				ptype.is_read_only = !has_setter;
+				if (name == SNAME("host") && ClassDB::is_parent_class(native, "Component") && parser->current_class != nullptr) {
+					GDScriptParser::DataType host_type;
+					if (make_component_host_type(parser->current_class, host_type)) {
+						ptype = host_type;
+					}
+				}
 				p_identifier->type_constraint = ptype;
 				p_identifier->source = GDScriptParser::IdentifierNode::INHERITED_VARIABLE;
 			}

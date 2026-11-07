@@ -2786,6 +2786,15 @@ static bool _guess_expression_type(GDScriptParser::CompletionContext &p_context,
 
 				// Apply additional behavior aware inference that the analyzer can't do.
 				if (base.type.is_set()) {
+					if (callee_type == GDScriptParser::Node::IDENTIFIER && !call->is_super && call->function_name == SNAME("get_parent") && call->arguments.is_empty() && p_context.current_class != nullptr && !GDScriptAnalyzer::is_component_class(p_context.current_class)) {
+						GDScriptParser::DataType attached;
+						if (GDScriptAnalyzer::make_component_host_type(p_context.current_class, attached)) {
+							r_type.type = attached;
+							found = true;
+							break;
+						}
+					}
+
 					// Maintain type for duplicate methods.
 					if (call->function_name == SNAME("duplicate")) {
 						if (base.type.builtin_type == Variant::OBJECT && (ClassDB::is_parent_class(base.type.native_type, SNAME("Resource")) || ClassDB::is_parent_class(base.type.native_type, SNAME("Node")))) {
@@ -3383,6 +3392,15 @@ static bool _guess_identifier_type_from_base(GDScriptParser::CompletionContext &
 
 	GDScriptParser::DataType base_type = p_base.type;
 	bool is_static = base_type.is_meta_type;
+
+	if (p_identifier == SNAME("host") && base_type.kind == GDScriptParser::DataType::CLASS && base_type.class_type != nullptr && !is_static && GDScriptAnalyzer::is_component_class(base_type.class_type)) {
+		GDScriptParser::DataType host_type;
+		if (GDScriptAnalyzer::make_component_host_type(base_type.class_type, host_type)) {
+			r_type.type = host_type;
+			return true;
+		}
+	}
+
 	while (base_type.is_set()) {
 		switch (base_type.kind) {
 			case GDScriptParser::DataType::CLASS:
@@ -4475,7 +4493,12 @@ static void _find_call_arguments(GDScriptParser::CompletionContext &p_context, c
 				break;
 			}
 			const GDScriptParser::AnnotationNode *annotation = static_cast<const GDScriptParser::AnnotationNode *>(completion_context.node);
-			_find_annotation_arguments(annotation, completion_context.current_argument, quote_style, options, r_call_hint);
+			if (annotation->name == SNAME("@attach_to")) {
+				_list_available_types(false, completion_context, options);
+				r_call_hint = "@attach_to(Class, impl Trait, ...)";
+			} else {
+				_find_annotation_arguments(annotation, completion_context.current_argument, quote_style, options, r_call_hint);
+			}
 			r_forced = true;
 		} break;
 		case GDScriptParser::COMPLETION_BUILT_IN_TYPE_CONSTANT_OR_STATIC_METHOD: {

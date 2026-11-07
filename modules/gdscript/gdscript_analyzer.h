@@ -201,6 +201,10 @@ public:
 	static bool check_type_compatibility(const GDScriptParser::DataType &p_target, const GDScriptParser::DataType &p_source, bool p_allow_implicit_conversion = false, const GDScriptParser::Node *p_source_node = nullptr, const GDScriptParser::ClassNode* p_class = nullptr, const GDScriptParser::FunctionNode* p_func = nullptr, GDScriptTraitAnalyzer* p_trait_analyzer = nullptr);
 	static GDScriptParser::DataType type_from_metatype(const GDScriptParser::DataType &p_meta_type);
 	static GDScriptParser::DataType substitute_generic_bindings(const GDScriptParser::DataType& p_type, const HashMap<StringName, GDScriptParser::DataType>& p_bindings);
+	static bool make_component_host_type(const GDScriptParser::ClassNode* p_class, GDScriptParser::DataType& r_type);
+	static StringName get_class_native_base(const GDScriptParser::ClassNode* p_class);
+	static bool is_component_class(const GDScriptParser::ClassNode* p_class);
+	void check_static_attach(const GDScriptParser::DataType& p_parent, const GDScriptParser::DataType& p_child, const GDScriptParser::Node* p_error_node);
 	static bool class_exists(const StringName &p_class);
 
 	GDScriptAnalyzer(GDScriptParser *p_parser);

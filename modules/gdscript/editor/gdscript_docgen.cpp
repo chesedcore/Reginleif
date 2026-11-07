@@ -381,6 +381,17 @@ void GDScriptDocGen::_generate_docs(GDScript *p_script, const GDP::ClassNode *p_
 
 	doc.brief_description = p_class->doc_data.brief;
 	doc.description = p_class->doc_data.description;
+	if (p_class->attach_to_base.is_set() || !p_class->attach_to_traits.is_empty()) {
+		String attach;
+		if (p_class->attach_to_base.is_set()) {
+			attach = "[code]" + p_class->attach_to_base.to_string() + "[/code]";
+		}
+		for (const StringName &trait_name : p_class->attach_to_traits) {
+			attach += String(attach.is_empty() ? "" : " + ") + "[code]impl " + String(trait_name) + "[/code]";
+		}
+		const String note = "[b]Attaches to:[/b] " + attach;
+		doc.description = doc.description.is_empty() ? note : doc.description + "\n\n" + note;
+	}
 	for (const Pair<String, String> &p : p_class->doc_data.tutorials) {
 		DocData::TutorialDoc td;
 		td.title = p.first;
