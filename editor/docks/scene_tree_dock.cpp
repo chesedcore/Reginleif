@@ -70,12 +70,17 @@
 #include "scene/gui/box_container.h"
 #include "scene/gui/check_box.h"
 #include "scene/gui/panel_container.h"
+#include "scene/main/attach_rules.h"
+#include "scene/main/component.h"
+#include "scene/main/composer.h"
 #include "scene/main/missing_node.h"
 #include "scene/main/scene_tree.h"
 #include "scene/property_utils.h"
 #include "scene/resources/packed_scene.h"
 #include "scene/resources/style_box_flat.h"
 #include "servers/display/display_server.h"
+
+static bool _validate_component_attach(AcceptDialog* p_accept, const Vector<Node*>& p_nodes, Node* p_new_parent);
 
 void SceneTreeDock::_nodes_drag_begin() {
 	pending_click_select = nullptr;
@@ -403,6 +408,16 @@ void SceneTreeDock::_perform_instantiate_scenes(const Vector<String> &p_files, N
 
 		instantiated_scene->set_scene_file_path(ProjectSettings::get_singleton()->localize_path(p_files[i]));
 
+		{
+			Vector<Node*> fucks_given;
+			fucks_given.push_back(instantiated_scene);
+			if (!_validate_component_attach(accept, fucks_given, p_parent)) {
+				memdelete(instantiated_scene);
+				error = true;
+				break;
+			}
+		}
+
 		instances.push_back(instantiated_scene);
 		Vector<NodePath> exposed_nodes = sdata->get_state()->get_exposed_nodes();
 		instantiated_scene->set_meta(META_CONTAINS_EXPOSED_NODES, exposed_nodes.size() > 0);
@@ -726,6 +741,25 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 						break;
 					}
 				}
+			}
+
+			{
+				Node* attached_fuck = nullptr;
+				if (p_tool == TOOL_NEW) {
+					const List<Node*> top_selected = editor_selection->get_top_selected_node_list();
+					if (top_selected.is_empty()) {
+						attached_fuck = edited_scene;
+					} else if (top_selected.size() == 1) {
+						attached_fuck = top_selected.front()->get();
+					}
+				}
+
+				///because i don't have a choice
+				if (const Composer* selected_composer = Object::cast_to<Composer>(attached_fuck)) {
+					Node* real_host = selected_composer->get_host();
+					attached_fuck = real_host != nullptr ? real_host : selected_composer->get_parent();
+				}
+				create_dialog->set_attach_host(attached_fuck);
 			}
 
 			create_dialog->popup_create(true);
