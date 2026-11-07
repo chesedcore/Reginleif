@@ -452,6 +452,9 @@ public:
 		StringName name;
 		LocalVector<ExpressionNode *> arguments;
 		LocalVector<Variant> resolved_arguments;
+		Vector<TypeNode *> type_arguments;
+		DataType attach_to_base;
+		Vector<StringName> attach_to_traits;
 
 		/** Information of the annotation. Might be null for unknown annotations. */
 		AnnotationInfo *info = nullptr;
@@ -836,6 +839,9 @@ public:
 
 		String icon_path;
 		String simplified_icon_path;
+		Vector<TypeNode *> attach_to_types;
+		DataType attach_to_base;
+		Vector<StringName> attach_to_traits;
 		LocalVector<Member> members;
 		HashMap<StringName, uint32_t> members_indices;
 		ClassNode *outer = nullptr;
