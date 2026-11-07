@@ -1,0 +1,2 @@
+GDTEST_ANALYZER_ERROR
+>> ERROR at line 2: "@attach_to" needs at least one class or "impl Trait".
