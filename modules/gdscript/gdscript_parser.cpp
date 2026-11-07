@@ -147,9 +147,12 @@ GDScriptParser::GDScriptParser() {
 		register_annotation(MethodInfo("@tool"), AnnotationInfo::SCRIPT, &GDScriptParser::tool_annotation);
 		register_annotation(MethodInfo("@icon", PropertyInfo(Variant::STRING, "icon_path")), AnnotationInfo::SCRIPT, &GDScriptParser::icon_annotation);
 		register_annotation(MethodInfo("@static_unload"), AnnotationInfo::SCRIPT, &GDScriptParser::static_unload_annotation);
+		register_annotation(MethodInfo("@attach_to"), AnnotationInfo::SCRIPT | AnnotationInfo::CLASS, &GDScriptParser::attach_to_annotation, Vector<Variant>(), true);
 		register_annotation(MethodInfo("@abstract"), AnnotationInfo::SCRIPT | AnnotationInfo::CLASS | AnnotationInfo::FUNCTION, &GDScriptParser::abstract_annotation);
 		// Onready annotation.
 		register_annotation(MethodInfo("@onready"), AnnotationInfo::VARIABLE, &GDScriptParser::onready_annotation);
+		register_annotation(MethodInfo("@requires"), AnnotationInfo::VARIABLE, &GDScriptParser::sibling_annotation);
+		register_annotation(MethodInfo("@if_present"), AnnotationInfo::VARIABLE, &GDScriptParser::sibling_annotation);
 		// Export annotations.
 		register_annotation(MethodInfo("@export"), AnnotationInfo::VARIABLE, &GDScriptParser::export_annotations<PROPERTY_HINT_NONE, Variant::NIL>);
 		register_annotation(MethodInfo("@export_enum", PropertyInfo(Variant::STRING, "names")), AnnotationInfo::VARIABLE, &GDScriptParser::export_annotations<PROPERTY_HINT_ENUM, Variant::NIL>, varray(), true);
@@ -2135,6 +2138,18 @@ GDScriptParser::AnnotationNode *GDScriptParser::parse_annotation(uint32_t p_vali
 			if (check(GDScriptTokenizer::Token::PARENTHESIS_CLOSE)) {
 				// Allow for trailing comma.
 				break;
+			}
+
+			if (annotation->name == SNAME("@attach_to")) {
+				TypeNode* type_arg = parse_type(false);
+				if (type_arg == nullptr) {
+					push_error(R"([Reginleif] Expected a class or a trait bound as the "@attach_to" argument.)");
+					valid = false;
+				} else {
+					annotation->type_arguments.push_back(type_arg);
+				}
+				argument_index++;
+				continue;
 			}
 
 			ExpressionNode *argument = parse_expression(false);
@@ -5095,6 +5110,41 @@ bool GDScriptParser::abstract_annotation(AnnotationNode *p_annotation, Node *p_t
 		return true;
 	}
 	ERR_FAIL_V_MSG(false, R"("@abstract" annotation can only be applied to classes and functions.)");
+}
+
+bool GDScriptParser::attach_to_annotation(AnnotationNode* p_annotation, Node* p_target, ClassNode* p_class) {
+	ERR_FAIL_COND_V_MSG(p_target->type != Node::CLASS, false, R"("@attach_to" annotation can only be applied to classes.)");
+	ClassNode* class_node = static_cast<ClassNode*>(p_target);
+	if (!class_node->attach_to_types.is_empty()) {
+		push_error(R"("@attach_to" annotation can only be used once per class.)", p_annotation);
+		return false;
+	}
+	if (p_annotation->type_arguments.is_empty()) {
+		push_error(R"("@attach_to" needs at least one class or "impl Trait".)", p_annotation);
+		return false;
+	}
+	for (TypeNode* t : p_annotation->type_arguments) {
+		class_node->attach_to_types.push_back(t);
+	}
+
+	class_node->attach_to_base = p_annotation->attach_to_base;
+	class_node->attach_to_traits = p_annotation->attach_to_traits;
+	return true;
+}
+
+bool GDScriptParser::sibling_annotation(AnnotationNode* p_annotation, Node* p_target, ClassNode* p_class) {
+	ERR_FAIL_COND_V_MSG(p_target->type != Node::VARIABLE, false, R"("@requires" and "@if_present" can only be applied to class variables.)");
+	VariableNode* variable = static_cast<VariableNode*>(p_target);
+	if (variable->is_static) {
+		push_error(vformat(R"("%s" annotation cannot be applied to a static variable.)", p_annotation->name), p_annotation);
+		return false;
+	}
+	if (variable->sibling_dep != VariableNode::SIBLING_NONE) {
+		push_error(R"(A variable can have only one of "@requires" and "@if_present".)", p_annotation);
+		return false;
+	}
+	variable->sibling_dep = p_annotation->name == SNAME("@requires") ? VariableNode::SIBLING_REQUIRED : VariableNode::SIBLING_IF_PRESENT;
+	return true;
 }
 
 bool GDScriptParser::onready_annotation(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class) {
