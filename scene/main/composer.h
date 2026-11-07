@@ -73,6 +73,7 @@ private:
 	bool _host_satisfies(const StringName& p_base, const Vector<StringName>& p_traits, const String& p_who, String& r_error) const;
 	bool _validate(Component* p_component, String& r_error) const;
 	void _revalidate();
+	void _constraints_changed();
 	int _find_siblings(const StringName& p_class, const Node* p_self, const Node* p_exclude, Node*& r_first) const;
 	void _resolve_siblings(const Node* p_exclude = nullptr);
 	void _check_dependencies();

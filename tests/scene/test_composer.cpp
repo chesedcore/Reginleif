@@ -200,4 +200,25 @@ TEST_CASE("[SceneTree][Composer] warnings flag noncomponent children") {
 	CHECK(rig.composer->get_configuration_warnings().size() > 0);
 }
 
+TEST_CASE("[SceneTree][Composer] extra_base proper updates and stuff") {
+	Rig rig;
+	Vector<String> errors;
+
+	rig.composer->set_extra_base("Control");
+	rig.composer->get_contract_errors(errors);
+	CHECK_FALSE(errors.is_empty());
+
+	errors.clear();
+	rig.composer->set_extra_base("../");
+	rig.composer->get_contract_errors(errors);
+	CHECK_FALSE(errors.is_empty());
+	CHECK(rig.composer->get_configuration_warnings().size() > 0);
+
+	errors.clear();
+	rig.composer->set_extra_base(StringName());
+	rig.composer->get_contract_errors(errors);
+	CHECK(errors.is_empty());
+	CHECK(rig.composer->get_configuration_warnings().is_empty());
+}
+
 } // namespace TestComposer

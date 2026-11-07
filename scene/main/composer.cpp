@@ -403,14 +403,27 @@ Component* Composer::get_component(const StringName& p_class) const {
 	return nullptr;
 }
 
-void Composer::set_extra_base(const StringName& p_base) {
-	extra_base = p_base;
+void Composer::_constraints_changed() {
 	update_configuration_warnings();
+	for (int i = 0; i < get_child_count(false); i++) {
+		Node* child = get_child(i, false);
+		if (Object::cast_to<Component>(child) != nullptr) {
+			child->update_configuration_warnings();
+		}
+	}
+}
+
+void Composer::set_extra_base(const StringName& p_base) {
+	if (extra_base == p_base) {
+		return;
+	}
+	extra_base = p_base;
+	_constraints_changed();
 }
 
 void Composer::set_extra_traits(const Vector<StringName>& p_traits) {
 	extra_traits = p_traits;
-	update_configuration_warnings();
+	_constraints_changed();
 }
 
 PackedStringArray Composer::get_configuration_warnings() const {
@@ -418,6 +431,11 @@ PackedStringArray Composer::get_configuration_warnings() const {
 	if (host == nullptr) {
 		warnings.push_back(RTR("A Composer needs a parent to be the host."));
 	}
+
+	if (extra_base != StringName() && !ClassDB::class_exists(extra_base) && !ScriptServer::is_global_class(extra_base)) {
+		warnings.push_back(vformat(RTR(R"(Extra Base "%s" is not a known class, so no host can satisfy it.)"), String(extra_base)));
+	}
+	
 	for (int i = 0; i < get_child_count(false); i++) {
 		Node* child = get_child(i, false);
 		if (Object::cast_to<Component>(child) == nullptr) {
