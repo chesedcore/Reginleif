@@ -33,6 +33,7 @@
 #include "core/io/resource_loader.h"
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
+#include "core/object/script_language.h"
 #include "editor/doc/editor_help.h"
 #include "editor/editor_node.h"
 #include "editor/editor_string_names.h"
@@ -45,6 +46,8 @@
 #include "scene/gui/button.h"
 #include "scene/gui/item_list.h"
 #include "scene/gui/menu_button.h"
+#include "scene/main/component.h"
+#include "scene/main/composer.h"
 #include "scene/gui/tree.h"
 
 void CreateDialog::popup_create(bool p_dont_clear, bool p_replace_mode, const String &p_current_type, const String &p_current_name) {
@@ -399,6 +402,47 @@ void CreateDialog::_add_type(const StringName &p_type, TypeCategory p_type_categ
 	_configure_search_option_item(item, p_type, p_type_category, p_match_keyword);
 }
 
+void CreateDialog::set_attach_host(Node* p_host) {
+	attach_host_id = p_host ? p_host->get_instance_id() : ObjectID();
+}
+
+String CreateDialog::_attach_block_reason(const StringName& p_type) const {
+	if (attach_host_id.is_null() || !is_base_type_node || !ScriptServer::is_global_class(p_type)) {
+		return String();
+	}
+	Node* selected = ObjectDB::get_instance<Node>(attach_host_id);
+	if (selected == nullptr) {
+		return String();
+	}
+	Ref<Script> script = ResourceLoader::load(ScriptServer::get_global_class_path(p_type), "Script");
+	if (script.is_null()) {
+		return String();
+	}
+	StringName base;
+	Vector<StringName> traits;
+	Component::get_script_attach_constraints(script, base, traits);
+	if (base == StringName() && traits.is_empty()) {
+		return String();
+	}
+
+	const bool is_component = ClassDB::is_parent_class(ScriptServer::get_global_class_native_base(p_type), "Component");
+	const Node* target = selected;
+	if (is_component) {
+		if (const Composer* composer = Object::cast_to<Composer>(selected)) {
+			target = composer->get_host();
+		}
+	}
+	if (target == nullptr) {
+		return String();
+	}
+
+	String reason;
+	if (Composer::host_satisfies(target, base, traits, vformat(TTR("\"%s\""), String(p_type)), reason)) {
+		return String();
+	}
+	return reason;
+}
+
 void CreateDialog::_configure_search_option_item(TreeItem *r_item, const StringName &p_type, TypeCategory p_type_category, const String &p_match_keyword) {
 	bool script_type = ScriptServer::is_global_class(p_type);
 	bool is_abstract = false;
@@ -452,6 +496,12 @@ void CreateDialog::_configure_search_option_item(TreeItem *r_item, const StringN
 			(p_type_category == TypeCategory::OTHER_TYPE && !(!allow_abstract_scripts && is_abstract));
 	bool instantiable = can_instantiate && !(ClassDB::class_exists(p_type) && ClassDB::is_virtual(p_type));
 
+	const String attach_block = _attach_block_reason(p_type);
+	if (!attach_block.is_empty()) {
+		instantiable = false;
+		r_item->set_meta(SNAME("__attach_block"), attach_block);
+	}
+
 	r_item->set_meta(SNAME("__instantiable"), instantiable);
 
 	r_item->set_icon(0, EditorNode::get_singleton()->get_class_icon(p_type));
@@ -483,7 +533,11 @@ void CreateDialog::_configure_search_option_item(TreeItem *r_item, const StringN
 	}
 
 	const String &description = DTR(class_doc ? class_doc->value.brief_description : "");
-	r_item->set_tooltip_text(0, description);
+	if (!attach_block.is_empty()) {
+		r_item->set_tooltip_text(0, attach_block + (description.is_empty() ? String() : "\n\n" + description));
+	} else {
+		r_item->set_tooltip_text(0, description);
+	}
 
 	if (p_type_category == TypeCategory::OTHER_TYPE && !script_type) {
 		Ref<Texture2D> icon = EditorNode::get_editor_data().get_custom_types()[custom_type_parents[p_type]][custom_type_indices[p_type]].icon;
@@ -693,7 +747,8 @@ void CreateDialog::select_type(const String &p_type, bool p_center_on_item) {
 		get_ok_button()->set_tooltip_text(String());
 	} else {
 		get_ok_button()->set_disabled(true);
-		get_ok_button()->set_tooltip_text(TTR("The selected class can't be instantiated."));
+		const String attach_block = to_select->get_meta("__attach_block", String());
+		get_ok_button()->set_tooltip_text(attach_block.is_empty() ? TTR("The selected class can't be instantiated.") : attach_block);
 	}
 }
 
