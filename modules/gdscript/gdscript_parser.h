@@ -1451,6 +1451,12 @@ public:
 
 		bool exported = false;
 		bool onready = false;
+		enum SiblingDep {
+			SIBLING_NONE,
+			SIBLING_REQUIRED,
+			SIBLING_IF_PRESENT,
+		};
+		SiblingDep sibling_dep = SIBLING_NONE;
 		PropertyInfo export_info;
 		int assignments = 0;
 		bool is_static = false;
@@ -1794,6 +1800,8 @@ private:
 	bool warning_ignore_annotation(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class);
 	bool warning_ignore_region_annotations(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class);
 	bool rpc_annotation(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class);
+	bool attach_to_annotation(AnnotationNode* p_annotation, Node* p_target, ClassNode* p_class);
+	bool sibling_annotation(AnnotationNode* p_annotation, Node* p_target, ClassNode* p_class);
 	// Statements.
 	Node *parse_statement();
 	VariableNode *parse_variable(bool p_is_static);
