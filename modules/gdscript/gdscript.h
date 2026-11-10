@@ -82,6 +82,8 @@ class GDScript : public Script {
 
 	Ref<GDScriptNativeClass> native;
 	Ref<GDScript> base;
+	int generic_param_count = 0;
+	Vector<ContainerTypeValidate> base_type_args;
 	GDScript *_owner = nullptr; //for subclasses
 
 	// Members are just indices to the instantiated script.
@@ -187,7 +189,7 @@ private:
 
 	GDScriptFunction *_super_constructor(GDScript *p_script);
 	void _super_implicit_constructor(GDScript *p_script, GDScriptInstance *p_instance, Callable::CallError &r_error);
-	GDScriptInstance *_create_instance(const Variant **p_args, int p_argcount, Object *p_owner, Callable::CallError &r_error);
+	GDScriptInstance *_create_instance(const Variant **p_args, int p_argcount, Object *p_owner, Callable::CallError &r_error, const Vector<ContainerTypeValidate>* p_type_args = nullptr);
 
 	String _get_debug_path() const;
 	String generic_type_args;
@@ -377,6 +379,7 @@ class GDScriptInstance : public ScriptInstance {
 	Object *owner = nullptr;
 	Ref<GDScript> script;
 	TightLocalVector<Variant> members;
+	Vector<ContainerTypeValidate> type_args;
 
 	SelfList<GDScriptFunctionState>::List pending_func_states;
 
@@ -465,6 +468,8 @@ class GDScriptLanguage : public ScriptLanguage {
 	friend class GDScriptInstance;
 
 	mutable Mutex mutex;
+	Vector<StringName> interned_enum_names;
+	HashMap<StringName, int> interned_enum_ids;
 
 	friend class GDScript;
 
@@ -510,6 +515,9 @@ public:
 	GDScriptFunction* get_script_class_impl_method(const StringName& p_script_class, const StringName& p_method_name) const;
 
 	GDScriptFunction* find_native_class_impl_method_cached(const StringName& p_concrete_class, const StringName& p_method_name) const;
+
+	int get_or_add_enum_id(const StringName& p_enum_key);
+	StringName get_enum_name_from_id(int p_id) const;
 
 	void register_enum_impl_method(const StringName& p_enum_key, const StringName& p_method_name, GDScriptFunction* p_function);
 	void unregister_enum_impl_methods_for_function(GDScriptFunction* p_function);
