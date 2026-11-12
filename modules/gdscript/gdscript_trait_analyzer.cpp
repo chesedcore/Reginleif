@@ -175,6 +175,7 @@ static Ref<GDScriptTraitSignatureSnapshot> _make_trait_method_signature_snapshot
 	}
 	snapshot->return_detached = GDScriptDetachedType::detach(p_method->return_type_constraint);
 	snapshot->is_vararg = p_method->is_vararg();
+	snapshot->is_static = p_method->is_static;
 
 	return snapshot;
 }
@@ -573,6 +574,9 @@ bool GDScriptTraitAnalyzer::_signatures_match(const Ref<GDScriptTraitSignatureSn
 		return false;
 	}
 	if (p_required->is_vararg != p_provided->is_vararg()) {
+		return false;
+	}
+	if (p_required->is_static != p_provided->is_static) {
 		return false;
 	}
 

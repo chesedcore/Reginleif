@@ -60,6 +60,7 @@ public:
 	Vector<StringName> param_names;
 	int default_arg_count = 0;
 	bool is_vararg = false;
+	bool is_static = false;
 
 	Vector<GDScriptDetachedType> param_detached;
 	GDScriptDetachedType return_detached;

@@ -45,6 +45,14 @@
 #include "core/io/resource_loader.h"
 #include "core/object/class_db.h"
 
+struct ImplTargetScope {
+	GDScriptParser::DataType& slot;
+	GDScriptParser::DataType previous;
+	ImplTargetScope(GDScriptParser::DataType& p_slot, const GDScriptParser::DataType& p_new) :
+			slot(p_slot), previous(p_slot) { slot = p_new; }
+	~ImplTargetScope() { slot = previous; }
+};
+
 bool GDScriptCompiler::_is_class_member_property(CodeGen &codegen, const StringName &p_name) {
 	if (codegen.function_node && codegen.function_node->is_static) {
 		return false;
@@ -272,6 +280,13 @@ GDScriptDataType GDScriptCompiler::_gdtype_from_datatype(const GDScriptParser::D
 				}
 				result.script_type = script.ptr();
 				result.native_type = p_datatype.native_type;
+
+				if (p_datatype.class_type != nullptr && p_datatype.class_type->generic_parameters.size() > 0 && !p_datatype.generic_type_bindings.is_empty()) {
+					for (int i = 0; i < p_datatype.class_type->generic_parameters.size(); i++) {
+						const GDScriptParser::DataType* binding = p_datatype.generic_type_bindings.getptr(p_datatype.class_type->generic_parameters[i]->name);
+						result.set_container_element_type(i, binding != nullptr ? _type_argument_from_datatype(*binding, p_owner) : GDScriptDataType());
+					}
+				}
 			}
 		} break;
 		case GDScriptParser::DataType::ENUM:
@@ -293,10 +308,65 @@ GDScriptDataType GDScriptCompiler::_gdtype_from_datatype(const GDScriptParser::D
 	}
 
 	for (int i = 0; i < p_datatype.container_element_types.size(); i++) {
+
+		if (p_datatype.get_container_element_type_or_variant(i).kind == GDScriptParser::DataType::GENERIC_TYPE) {
+			const int param_index = _generic_param_index_in_scope(p_datatype.get_container_element_type_or_variant(i));
+			if (param_index >= 0) {
+				GDScriptDataType param_element;
+				param_element.generic_param_index = param_index;
+				result.set_container_element_type(i, param_element);
+			}
+			continue;
+		}
 		result.set_container_element_type(i, _gdtype_from_datatype(p_datatype.get_container_element_type_or_variant(i), p_owner, false));
 	}
 
 	return result;
+}
+
+int GDScriptCompiler::_generic_param_index_in_scope(const GDScriptParser::DataType& p_type) const {
+	if (p_type.kind != GDScriptParser::DataType::GENERIC_TYPE) {
+		return -1;
+	}
+
+	const int class_param_count = reified_generic_class != nullptr ? reified_generic_class->generic_parameters.size() : 0;
+	if (reified_generic_class != nullptr && p_type.generic_owner_class == reified_generic_class) {
+		for (int i = 0; i < class_param_count; i++) {
+			if (reified_generic_class->generic_parameters[i]->name == p_type.generic_param) {
+				return i;
+			}
+		}
+	}
+	if (reified_generic_function != nullptr && p_type.generic_owner_function == reified_generic_function) {
+		for (int i = 0; i < reified_generic_function->generic_parameters.size(); i++) {
+			if (reified_generic_function->generic_parameters[i]->name == p_type.generic_param) {
+				return class_param_count + i;
+			}
+		}
+	}
+	return -1;
+}
+
+GDScriptDataType GDScriptCompiler::_type_argument_from_datatype(const GDScriptParser::DataType& p_type, GDScript* p_owner) {
+	if (p_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+		GDScriptDataType result;
+		result.generic_param_index = _generic_param_index_in_scope(p_type);
+		return result;
+	}
+
+	return _gdtype_from_datatype(p_type, p_owner, false);
+}
+
+static bool _datatype_mentions_generic(const GDScriptParser::DataType& p_type) {
+	if (p_type.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+		return true;
+	}
+	for (int i = 0; i < p_type.container_element_types.size(); i++) {
+		if (_datatype_mentions_generic(p_type.get_container_element_type_or_variant(i))) {
+			return true;
+		}
+	}
+	return false;
 }
 
 static bool _is_exact_type(const PropertyInfo &p_par_type, const GDScriptDataType &p_arg_type) {
@@ -735,7 +805,58 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				arguments.push_back(arg);
 			}
 
-			if (!call->is_super && call->callee->type == GDScriptParser::Node::IDENTIFIER && GDScriptParser::get_builtin_type(call->function_name) < Variant::VARIANT_MAX) {
+			const Vector<GDScriptParser::IdentifierNode*>* generic_params = nullptr;
+			StringName generic_fuckoff_name = call->function_name;
+			///man. just need to vent.
+			///...
+			///i'm so tired. so very tired. ugh. fuck me. fuck my life.
+			///i'm the only one with eyes on this goddamn engine. fuck.
+			///i feel so lonely, man. i just wish i had someone to vent to about how horrendous this codebase is
+			///i forget so much shit. c++ is so horrendous. why are there no tagged unions in this shit
+			///look at like. half of the if statements in my code. fucking ugly ass horrendous ass bullshit
+
+			if (call->generic_callee != nullptr) {
+				generic_params = &call->generic_callee->generic_parameters;
+			} else if (call->generic_new_class != nullptr) {
+				generic_params = &call->generic_new_class->generic_parameters;
+				generic_fuckoff_name = SNAME("new");
+			}
+			if (generic_params != nullptr) {
+				Vector<GDScriptDataType> type_args;
+				for (const GDScriptParser::IdentifierNode* generic_param : *generic_params) {
+					const GDScriptParser::DataType* bound = call->resolved_generic_bindings.getptr(generic_param->name);
+					type_args.push_back(bound != nullptr ? _type_argument_from_datatype(*bound, codegen.script) : GDScriptDataType());
+				}
+				gen->write_set_type_args(generic_fuckoff_name, type_args);
+			}
+
+			if (call->static_trait_call) {
+				GDScriptParser::DataType static_call_base;
+				if (call->callee != nullptr && call->callee->type == GDScriptParser::Node::SUBSCRIPT) {
+					static_call_base = static_cast<const GDScriptParser::SubscriptNode*>(call->callee)->base->type_constraint;
+				} else if (current_impl_target.is_set()) {
+					static_call_base = current_impl_target;
+				} else {
+					_set_error(R"*([Reginleif] Compiler bug (please report!): implicit static trait call outside of an impl body.)*", call);
+					r_error = ERR_COMPILATION_FAILED;
+					return GDScriptCodeGenerator::Address();
+				}
+
+				const GDScriptDataType static_call_type = _type_argument_from_datatype(static_call_base, codegen.script);
+				if (static_call_base.kind == GDScriptParser::DataType::GENERIC_TYPE && static_call_type.generic_param_index < 0) {
+					_set_error(vformat(R"*([Reginleif] The type parameter cannot be used to call "%s()" here. Its type argument is not available at runtime in this scope (lambdas and static members are not supported).)*", String(call->function_name)), call);
+					r_error = ERR_COMPILATION_FAILED;
+					return GDScriptCodeGenerator::Address();
+				}
+				if (static_call_base.kind == GDScriptParser::DataType::NATIVE) {
+					GDScriptCache::ensure_impl_providers_loaded_for_native_class(static_call_type.native_type);
+				} else if (static_call_base.kind == GDScriptParser::DataType::ENUM) {
+					GDScriptCache::ensure_impl_providers_loaded_for_enums();
+				} else if (static_call_base.kind == GDScriptParser::DataType::BUILTIN) {
+					GDScriptCache::ensure_impl_providers_loaded_for_builtin(static_call_type.builtin_type);
+				}
+				gen->write_call_on_type_arg(result, static_call_type, call->function_name, arguments);
+			} else if (!call->is_super && call->callee->type == GDScriptParser::Node::IDENTIFIER && GDScriptParser::get_builtin_type(call->function_name) < Variant::VARIANT_MAX) {
 				gen->write_construct(result, GDScriptParser::get_builtin_type(call->function_name), arguments);
 			} else if (!call->is_super && call->callee->type == GDScriptParser::Node::IDENTIFIER && Variant::has_utility_function(call->function_name)) {
 				// Variant utility function.
@@ -2243,6 +2364,11 @@ bool GDScriptCompiler::_no_reachable_subclass_overrides(const StringName& p_base
 
 ///chokepoint for the entire inline feature! everything inline related sets off here
 const GDScriptParser::FunctionNode* GDScriptCompiler::_get_inline_candidate(CodeGen& codegen, GDScript* p_owner_script, const StringName& p_function_name, bool p_is_static_call) {
+	///methods of generic classes read their type arguments from the instance they run on! inlining would bake in 
+	///the caller's... and you can probs tell why that isn't the most INCREDIBLE idea
+	if (p_owner_script != nullptr && p_owner_script->generic_param_count > 0) {
+		return nullptr;
+	}
 	static bool inlining_enabled_cached = false;
 	static bool inlining_enabled_resolved = false;
 	if (!inlining_enabled_resolved) {
@@ -2294,7 +2420,13 @@ const GDScriptParser::FunctionNode* GDScriptCompiler::_get_inline_candidate(Code
 	if (candidate->is_coroutine || candidate->is_vararg()) {
 		return nullptr;
 	}
+	if (candidate->has_generic_parameters() || _datatype_mentions_generic(candidate->return_type_constraint)) {
+		return nullptr;
+	}
 	for (const GDScriptParser::ParameterNode* parameter : candidate->parameters) {
+		if (_datatype_mentions_generic(parameter->type_constraint)) {
+			return nullptr;
+		}
 		if (parameter->type_constraint.is_variant()) {
 			return nullptr;
 		}
@@ -2846,6 +2978,27 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 	codegen.generator = memnew(GDScriptByteCodeGenerator);
 	inline_budget_used = p_enclosing_inline_budget_used;
 
+	struct ReifiedScope {
+		const GDScriptParser::FunctionNode*& function_slot;
+		const GDScriptParser::ClassNode*& class_slot;
+		const GDScriptParser::FunctionNode* previous_function;
+		const GDScriptParser::ClassNode* previous_class;
+		ReifiedScope(const GDScriptParser::FunctionNode*& p_function_slot, const GDScriptParser::ClassNode*& p_class_slot, const GDScriptParser::FunctionNode* p_function, const GDScriptParser::ClassNode* p_class) :
+				function_slot(p_function_slot), class_slot(p_class_slot), previous_function(p_function_slot), previous_class(p_class_slot) {
+			
+			function_slot = p_function;
+			class_slot = p_class;
+		}
+		~ReifiedScope() {
+			function_slot = previous_function;
+			class_slot = previous_class;
+		}
+	};
+	const bool can_reify = !p_for_lambda && !p_func_is_native_impl_method;
+	ReifiedScope reified_scope(reified_generic_function, reified_generic_class,
+			(can_reify && p_func != nullptr && p_func->has_generic_parameters()) ? p_func : nullptr,
+			(can_reify && p_class != nullptr && p_class->generic_parameters.size() > 0 && !(p_func != nullptr && p_func->is_static)) ? p_class : nullptr);
+
 	codegen.class_node = p_class;
 	codegen.script = p_script;
 	codegen.function_node = p_func;
@@ -2953,6 +3106,13 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 		}
 
 		method_info.default_arguments.append_array(p_func->default_arg_values);
+	}
+
+	if (reified_generic_class != nullptr) {
+		codegen.generator->write_load_instance_type_args(reified_generic_class->generic_parameters.size());
+	}
+	if (reified_generic_function != nullptr) {
+		codegen.generator->write_load_type_args(reified_generic_function->generic_parameters.size());
 	}
 
 	// Parse initializer if applies.
@@ -3281,6 +3441,7 @@ Error GDScriptCompiler::_parse_setter_getter(GDScript *p_script, const GDScriptP
 // WARNING: This function cannot initiate compilation of other classes, or it will result in
 // cyclic dependency issues.
 Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptParser::ClassNode *p_class, bool p_keep_state) {
+	p_script->generic_param_count = p_class->generic_parameters.size();
 	if (parsed_classes.has(p_script)) {
 		return OK;
 	}
@@ -3676,7 +3837,25 @@ Error GDScriptCompiler::_prepare_compilation(GDScript *p_script, const GDScriptP
 	return OK;
 }
 
-Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser::ClassNode *p_class, bool p_keep_state) {
+Error GDScriptCompiler::_compile_class(GDScript* p_script, const GDScriptParser::ClassNode* p_class, bool p_keep_state) {
+	p_script->base_type_args.clear();
+	if (p_class->base_type.kind == GDScriptParser::DataType::CLASS && p_class->base_type.class_type != nullptr && p_class->base_type.class_type->generic_parameters.size() > 0) {
+		
+		const GDScriptParser::ClassNode* previous_class = reified_generic_class;
+		const GDScriptParser::FunctionNode* previous_function = reified_generic_function;
+		reified_generic_class = p_class;
+		reified_generic_function = nullptr;
+
+		for (const GDScriptParser::IdentifierNode* generic_param : p_class->base_type.class_type->generic_parameters) {
+			const GDScriptParser::DataType* binding = p_class->base_type.generic_type_bindings.getptr(generic_param->name);
+			const GDScriptDataType argument = binding != nullptr ? _type_argument_from_datatype(*binding, p_script) : GDScriptDataType();
+			p_script->base_type_args.push_back(argument.make_element_validator());
+		}
+
+		reified_generic_class = previous_class;
+		reified_generic_function = previous_function;
+	}
+
 	///compile impl-provided methods!  these are funcs from `impl Trait for X` blocks, stashed by
 	///the trait analyzer onto the ImplNode itself since we've got no analyzer handle of our own :sob:
 	///what the fuck is this architecture
@@ -3686,6 +3865,7 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 		}
 
 		const GDScriptParser::DataType& impl_target = impl_node->resolved_gd_impl->impl_target_type;
+		ImplTargetScope impl_target_scope(current_impl_target, impl_target);
 
 		bool is_builtin_target = impl_target.kind == GDScriptParser::DataType::BUILTIN;
 		bool is_enum_target = impl_target.kind == GDScriptParser::DataType::ENUM;
@@ -3699,25 +3879,25 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 			const StringName method_name = impl_method_node->identifier->name;
 			explicit_impl_methods.insert(method_name);
 			Error err = OK;
-			GDScriptFunction* impl_function = _parse_function(err, p_script, p_class, impl_method_node, false, false, is_native_impl_target);
+			GDScriptFunction* impl_function = _parse_function(err, p_script, p_class, impl_method_node, false, false, is_native_impl_target && !impl_method_node->is_static);
 			if (err) {
 				return err;
 			}
 
 			if (is_builtin_target) {
-				impl_function->set_is_native_impl_method(true);
+				impl_function->set_is_native_impl_method(!impl_function->is_static());
 				///mangle the key so two impls of the same method for different targets
 				///don't overwrite each other in member_functions and fuckup the old pointer
 				StringName mangled_key = StringName("@impl:builtin:" + itos((int)impl_target.builtin_type) + "::" + String(method_name));
 				p_script->member_functions[mangled_key] = impl_function;
 				GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, method_name, impl_function);
 			} else if (is_enum_target) {
-				impl_function->set_is_native_impl_method(true);
+				impl_function->set_is_native_impl_method(!impl_function->is_static());
 				StringName mangled_key = StringName("@impl:enum:" + String(impl_target.native_type) + "::" + String(method_name));
 				p_script->member_functions[mangled_key] = impl_function;
 				GDScriptLanguage::get_singleton()->register_enum_impl_method(impl_target.native_type, method_name, impl_function);
 			} else if (is_native_class_target) {
-				impl_function->set_is_native_impl_method(true);
+				impl_function->set_is_native_impl_method(!impl_function->is_static());
 				StringName mangled_key = StringName("@impl:native:" + String(impl_target.native_type) + "::" + String(method_name));
 				p_script->member_functions[mangled_key] = impl_function;
 				GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, method_name, impl_function);
@@ -3743,23 +3923,23 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 						continue;
 					}
 					Error err = OK;
-					GDScriptFunction* impl_function = _parse_function(err, p_script, p_class, *default_method_node, false, false, is_native_impl_target);
+					GDScriptFunction* impl_function = _parse_function(err, p_script, p_class, *default_method_node, false, false, is_native_impl_target && !(*default_method_node)->is_static);
 					if (err) {
 						return err;
 					}
 
 					if (is_builtin_target) {
-						impl_function->set_is_native_impl_method(true);
+						impl_function->set_is_native_impl_method(!impl_function->is_static());
 						StringName mangled_key = StringName("@impl:builtin:" + itos((int)impl_target.builtin_type) + "::" + String(E.key));
 						p_script->member_functions[mangled_key] = impl_function;
 						GDScriptLanguage::get_singleton()->register_native_impl_method(impl_target.builtin_type, E.key, impl_function);
 					} else if (is_enum_target) {
-						impl_function->set_is_native_impl_method(true);
+						impl_function->set_is_native_impl_method(!impl_function->is_static());
 						StringName mangled_key = StringName("@impl:enum:" + String(impl_target.native_type) + "::" + String(E.key));
 						p_script->member_functions[mangled_key] = impl_function;
 						GDScriptLanguage::get_singleton()->register_enum_impl_method(impl_target.native_type, E.key, impl_function);
 					} else if (is_native_class_target) {
-						impl_function->set_is_native_impl_method(true);
+						impl_function->set_is_native_impl_method(!impl_function->is_static());
 						StringName mangled_key = StringName("@impl:native:" + String(impl_target.native_type) + "::" + String(E.key));
 						p_script->member_functions[mangled_key] = impl_function;
 						GDScriptLanguage::get_singleton()->register_native_class_impl_method(impl_target.native_type, E.key, impl_function);
@@ -4233,6 +4413,7 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 				}
 
 				const GDScriptParser::DataType& impl_target = impl_node->resolved_gd_impl->impl_target_type;
+				ImplTargetScope impl_target_scope(current_impl_target, impl_target);
 				bool is_builtin_target = impl_target.kind == GDScriptParser::DataType::BUILTIN;
 				bool is_enum_target = impl_target.kind == GDScriptParser::DataType::ENUM;
 				bool is_native_class_target = impl_target.kind == GDScriptParser::DataType::NATIVE;
@@ -4244,11 +4425,11 @@ Error GDScriptCompiler::compile(const GDScriptParser *p_parser, GDScript *p_scri
 				HashSet<StringName> explicit_impl_methods;
 				auto compile_and_register_impl_method = [&](const GDScriptParser::FunctionNode* p_impl_method_node, const StringName& p_method_name) -> Error {
 					Error err = OK;
-					GDScriptFunction* impl_function = _parse_function(err, p_script, root, p_impl_method_node, false, false, true);
+					GDScriptFunction* impl_function = _parse_function(err, p_script, root, p_impl_method_node, false, false, !p_impl_method_node->is_static);
 					if (err) {
 						return err;
 					}
-					impl_function->set_is_native_impl_method(true);
+					impl_function->set_is_native_impl_method(!impl_function->is_static());
 
 					///mangle format: @impl:<target>::<method>
 					String target_key_str;
