@@ -305,8 +305,8 @@ String GDScript::get_generic_type_args() const {
 #ifdef TOOLS_ENABLED
 Dictionary GDScript::get_generic_chain_info() const {
 	PackedStringArray params;
-	for (const StringName& name : generic_param_names) {
-		params.push_back(String(name));
+	for (const StringName& gp_name : generic_param_names) {
+		params.push_back(String(gp_name));
 	}
 	Dictionary base_args;
 	for (const KeyValue<StringName, StringName>& E : base_generic_args) {

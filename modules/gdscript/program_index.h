@@ -98,6 +98,7 @@ struct TypeRef {
 	Variant::Type builtin = Variant::NIL; ///BUILTIN
 	StringName name;                      ///NAMED: first ident in chain. GENERIC_PARAM: the parameter name
 	Vector<StringName> chain_tail;        ///NAMED: `A.B.C` -> [B, C]
+	bool callable_signature = false;
 	Vector<TypeRef> args;                 ///Array[T], Dictionary[K, V], Cock[T]
 	Vector<StringName> trait_bounds;      ///TRAIT_BOUND: `impl Cock + Balls`
 	TypeKey resolved;                     ///NAMED only. !!REMEMBER!! invalid until the ProgramIndexBuilder resolves it!

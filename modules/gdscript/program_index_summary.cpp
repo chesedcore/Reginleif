@@ -86,6 +86,9 @@ uint64_t TypeRef::hash() const {
 	for (const TypeRef& a : args) {
 		h = hash_combine(h, a.hash());
 	}
+	if (callable_signature) {
+		h = hash_combine(h, 0xca11ab1eULL);
+	}
 	for (const StringName& s : trait_bounds) {
 		h = hash_combine(h, s.hash());
 	}
@@ -302,6 +305,17 @@ TypeRef _make_type_ref(const GP::TypeNode* p_type, const HashSet<StringName>& p_
 
 	for (uint32_t i = 0; i < p_type->container_types.size(); i++) {
 		r.args.push_back(_make_type_ref(p_type->container_types[i], p_generics));
+	}
+
+	if (p_type->is_callable_signature && p_type->type_chain.size() == 1 && p_type->type_chain[0]->name == SNAME("Callable")) {
+		r.callable_signature = true;
+		if (p_type->callable_return != nullptr) {
+			r.args.push_back(_make_type_ref(p_type->callable_return, p_generics));
+		} else {
+			TypeRef void_ref;
+			void_ref.kind = TypeRef::VOID_TYPE;
+			r.args.push_back(void_ref);
+		}
 	}
 
 	const StringName first = p_type->type_chain[0]->name;
