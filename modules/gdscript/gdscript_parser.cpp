@@ -288,6 +288,14 @@ void GDScriptParser::push_warning(int p_start_line, int p_start_column, int p_en
 		return;
 	}
 
+	if (p_code == GDScriptWarning::ENUM_AS_TRAIT_BOUND) {
+		for (const PendingWarning& existing : pending_warnings) {
+			if (existing.code == p_code && existing.start_line == p_start_line && existing.start_column == p_start_column && existing.symbols == p_symbols) {
+				return;
+			}
+		}
+	}
+
 	PendingWarning pw;
 	pw.start_line = p_start_line;
 	pw.start_column = p_start_column;
@@ -4359,8 +4367,18 @@ GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
 
 		make_completion_context(COMPLETION_TRAIT_BODY, trait);
 
+		bool is_static_method = false;
+		if (match(GDScriptTokenizer::Token::STATIC)) {
+			is_static_method = true;
+			if (!check(GDScriptTokenizer::Token::FUNC)) {
+				push_error(R"([Reginleif] Expected "func" after "static" in trait body.)");
+				if (panic_mode) { synchronize(); }
+				continue;
+			}
+		}
+
 		if (match(GDScriptTokenizer::Token::FUNC)) {
-			FunctionNode* method = parse_function(false);
+			FunctionNode* method = parse_function(is_static_method);
 			if (method == nullptr) { continue; }
 #ifdef TOOLS_ENABLED
 			attach_function_doc(method);
@@ -4375,7 +4393,7 @@ GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
 			}
 		} else {
 			make_completion_context(COMPLETION_TRAIT_BODY, trait);
-			push_error(vformat(R"([Reginleif] Unexpected "%s" in trait body. Only "func" declarations and "impl for" implementations are allowed.)", current.get_name()));
+			push_error(vformat(R"([Reginleif] Unexpected "%s" in trait body. Only "func" and "static func" declarations and "impl for" implementations are allowed.)", current.get_name()));
 			advance();
 		}
 
@@ -4450,8 +4468,18 @@ GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
 
 		make_completion_context(COMPLETION_IMPL_BODY, impl, -1, true);
 
+		bool is_static_method = false;
+		if (match(GDScriptTokenizer::Token::STATIC)) {
+			is_static_method = true;
+			if (!check(GDScriptTokenizer::Token::FUNC)) {
+				push_error(R"([Reginleif] Expected "func" after "static" in impl body.)");
+				if (panic_mode) { synchronize(); }
+				continue;
+			}
+		}
+
 		if (match(GDScriptTokenizer::Token::FUNC)) {
-			FunctionNode* method = parse_function(false);
+			FunctionNode* method = parse_function(is_static_method);
 			if (method != nullptr) {
 				override_completion_context(method, COMPLETION_IMPL_BODY, impl);
 #ifdef TOOLS_ENABLED
@@ -4465,7 +4493,7 @@ GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
 				}
 			}
 		} else {
-			push_error(vformat(R"([Reginleif] Unexpected "%s" in impl body. Only "func" declarations are allowed.)", current.get_name()));
+			push_error(vformat(R"([Reginleif] Unexpected "%s" in impl body. Only "func" and "static func" declarations are allowed.)", current.get_name()));
 			advance();
 		}
 

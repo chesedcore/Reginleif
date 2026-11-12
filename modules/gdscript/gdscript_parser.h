@@ -594,6 +594,10 @@ public:
 		///
 		Vector<TypeNode*> explicit_generic_args;
 		bool has_explicit_generic_args = false;
+		HashMap<StringName, DataType> resolved_generic_bindings;
+		FunctionNode* generic_callee = nullptr;
+		ClassNode* generic_new_class = nullptr;
+		bool static_trait_call = false;
 
 		CallNode() {
 			type = CALL;
