@@ -953,7 +953,7 @@ const ContainerType &Array::get_element_type() const {
 	return _p->typed;
 }
 
-const ContainerTypeValidate &Array::get_element_validator() const {
+const ContainerTypeValidate& Array::get_element_validator() const {
 	return _p->typed;
 }
 
