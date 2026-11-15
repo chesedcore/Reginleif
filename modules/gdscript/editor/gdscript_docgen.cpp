@@ -108,6 +108,38 @@ void GDScriptDocGen::_doctype_from_datatype(const DataType &p_datatype, String &
 					return;
 				}
 			}
+
+			if (p_datatype.builtin_type == Variant::SIGNAL && p_datatype.has_signal_signature) {
+				String signal_signature = "Signal[";
+				for (int i = 0; i < p_datatype.callable_params.size(); i++) {
+					String param_type;
+					String param_enum;
+					_doctype_from_datatype(p_datatype.callable_params[i], param_type, param_enum);
+					signal_signature += (i > 0 ? ", " : "") + param_type;
+				}
+				r_type = signal_signature + "]";
+				return;
+			}
+			
+			if (p_datatype.builtin_type == Variant::CALLABLE && p_datatype.has_callable_signature && !p_datatype.callable_return.is_empty()) {
+				String signature = "Callable[";
+				for (int i = 0; i < p_datatype.callable_params.size(); i++) {
+					String param_type;
+					String param_enum;
+					_doctype_from_datatype(p_datatype.callable_params[i], param_type, param_enum);
+					signature += (i > 0 ? ", " : "") + param_type;
+				}
+				signature += "]";
+				String return_type;
+				String return_enum;
+				_doctype_from_datatype(p_datatype.callable_return[0], return_type, return_enum, true);
+				if (return_type != "void") {
+					signature += " -> " + return_type;
+				}
+				r_type = signature;
+				return;
+			}
+			
 			r_type = Variant::get_type_name(p_datatype.builtin_type);
 			return;
 		case DataType::NATIVE:
@@ -381,6 +413,17 @@ void GDScriptDocGen::_generate_docs(GDScript *p_script, const GDP::ClassNode *p_
 
 	doc.brief_description = p_class->doc_data.brief;
 	doc.description = p_class->doc_data.description;
+	if (p_class->attach_to_base.is_set() || !p_class->attach_to_traits.is_empty()) {
+		String attach;
+		if (p_class->attach_to_base.is_set()) {
+			attach = "[code]" + p_class->attach_to_base.to_string() + "[/code]";
+		}
+		for (const StringName &trait_name : p_class->attach_to_traits) {
+			attach += String(attach.is_empty() ? "" : " + ") + "[code]impl " + String(trait_name) + "[/code]";
+		}
+		const String note = "[b]Attaches to:[/b] " + attach;
+		doc.description = doc.description.is_empty() ? note : doc.description + "\n\n" + note;
+	}
 	for (const Pair<String, String> &p : p_class->doc_data.tutorials) {
 		DocData::TutorialDoc td;
 		td.title = p.first;

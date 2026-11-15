@@ -67,6 +67,7 @@ public:
 		UNSAFE_METHOD_ACCESS, // Function not found in the detected type (but can be in subtypes).
 		UNSAFE_CAST, // Casting a `Variant` value to non-`Variant`.
 		UNSAFE_CALL_ARGUMENT, // Function call argument is of a supertype of the required type.
+		UNSAFE_CALLABLE_ASSIGNMENT, // An untyped Callable is used where a typed Callable is expected.
 		UNSAFE_VOID_RETURN, // Function returns void but returned a call to a function that can't be type checked.
 		RETURN_VALUE_DISCARDED, // Function call returns something but the value isn't used.
 		STATIC_CALLED_ON_INSTANCE, // A static method was called on an instance of a class instead of on the class itself.
@@ -93,6 +94,7 @@ public:
 		GET_NODE_DEFAULT_WITHOUT_ONREADY, // A class variable uses `get_node()` (or the `$` notation) as its default value, but does not use the @onready annotation.
 		ONREADY_WITH_EXPORT, // The `@onready` annotation will set the value after `@export` which is likely not intended.
 		ONREADY_WITH_CAST, // The cast will silently assign `null` if the node has a wrong type. This is likely not intended.
+		ENUM_AS_TRAIT_BOUND, ///an enum was used where a trait bound is required
 #ifndef DISABLE_DEPRECATED
 		PROPERTY_USED_AS_FUNCTION, // Function not found, but there's a property with the same name.
 		CONSTANT_USED_AS_FUNCTION, // Function not found, but there's a constant with the same name.
@@ -127,6 +129,7 @@ public:
 		IGNORE, // UNSAFE_METHOD_ACCESS // Too common in untyped scenarios.
 		IGNORE, // UNSAFE_CAST // Too common in untyped scenarios.
 		IGNORE, // UNSAFE_CALL_ARGUMENT // Too common in untyped scenarios.
+		WARN, // UNSAFE_CALLABLE_ASSIGNMENT
 		WARN, // UNSAFE_VOID_RETURN
 		IGNORE, // RETURN_VALUE_DISCARDED // Too spammy by default on common cases (connect, Tween, etc.).
 		WARN, // STATIC_CALLED_ON_INSTANCE
@@ -153,6 +156,7 @@ public:
 		ERROR, // GET_NODE_DEFAULT_WITHOUT_ONREADY // May not work as expected.
 		ERROR, // ONREADY_WITH_EXPORT // May not work as expected.
 		WARN, // ONREADY_WITH_CAST
+		WARN, // ENUM_AS_TRAIT_BOUND
 #ifndef DISABLE_DEPRECATED
 		WARN, // PROPERTY_USED_AS_FUNCTION
 		WARN, // CONSTANT_USED_AS_FUNCTION

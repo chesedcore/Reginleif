@@ -31,9 +31,235 @@
 #include "gdscript_function.h"
 
 #include "gdscript.h"
+#include "gdscript_cache.h"
 
 #include "core/object/class_db.h"
 #include "core/variant/container_type_validate.h"
+
+ContainerTypeValidate GDScriptDataType::make_element_validator() const {
+	ContainerTypeValidate validator;
+	if (generic_param_index >= 0) {
+		validator.param_index = (int16_t)generic_param_index;
+		validator.has_param = true;
+		return validator;
+	}
+
+	validator.variant_type = builtin_type;
+	validator.class_name = native_type;
+	if (enum_native_type != StringName()) {
+		validator.enum_id = (int16_t)GDScriptLanguage::get_singleton()->get_or_add_enum_id(enum_native_type);
+	}
+
+	if (script_type != nullptr) {
+		validator.script = Ref<Script>(script_type);
+	}
+
+	int count = 0;
+	if (has_container_element_types()) {
+		if (kind == BUILTIN) {
+			if (builtin_type == Variant::ARRAY) {
+				count = 1;
+			} else if (builtin_type == Variant::DICTIONARY) {
+				count = 2;
+			}
+		} else if (kind == GDSCRIPT || kind == SCRIPT) {
+			count = container_element_types.size();
+		}
+	}
+
+	for (int i = 0; i < count; i++) {
+		validator.nested_types.push_back(get_container_element_type_or_variant(i).make_element_validator());
+		validator.has_param = validator.has_param || validator.nested_types[i].has_param;
+	}
+	return validator;
+}
+
+String GDScriptFunction::describe_validator(const ContainerTypeValidate& p_validator) {
+	if (p_validator.param_index >= 0) {
+		return "<type arg " + itos(p_validator.param_index) + ">";
+	}
+
+	String name;
+	if (p_validator.script.is_valid()) {
+		name = GDScript::debug_get_script_name(p_validator.script);
+	} else if (p_validator.class_name != StringName()) {
+		name = p_validator.class_name;
+	} else if (p_validator.enum_id > 0) {
+		name = GDScriptLanguage::get_singleton()->get_enum_name_from_id(p_validator.enum_id);
+	} else if (p_validator.variant_type == Variant::NIL) {
+		name = "Variant";
+	} else {
+		name = Variant::get_type_name(p_validator.variant_type);
+	}
+	if (p_validator.nested_types.size() > 0) {
+		name += "[";
+		for (int i = 0; i < p_validator.nested_types.size(); i++) {
+			if (i > 0) {
+				name += ", ";
+			}
+			name += describe_validator(p_validator.nested_types[i]);
+		}
+		name += "]";
+	}
+	return name;
+}
+
+bool GDScriptFunction::resolve_instance_type_args(GDScriptInstance* p_instance, const Script* p_target, Vector<ContainerTypeValidate>& r_args) {
+	Vector<ContainerTypeValidate> args = p_instance->type_args;
+	GDScript* current = p_instance->script.ptr();
+	while (current != nullptr) {
+		if (current == p_target) {
+			r_args = args;
+			return true;
+		}
+		Vector<ContainerTypeValidate> base_args;
+		base_args.resize(current->base_type_args.size());
+		for (int i = 0; i < base_args.size(); i++) {
+			base_args.write[i] = current->base_type_args[i].resolved(args.ptr(), args.size());
+		}
+		args = base_args;
+		current = current->base.ptr();
+	}
+	return false;
+}
+
+bool GDScriptFunction::generic_instance_matches(Object* p_object, const ContainerTypeValidate& p_expected) {
+	if (p_object == nullptr) {
+		return true;
+	}
+	ScriptInstance* script_instance = p_object->get_script_instance();
+	if (script_instance == nullptr || script_instance->get_language() != GDScriptLanguage::get_singleton()) {
+		return false;
+	}
+
+	Vector<ContainerTypeValidate> args;
+	if (!resolve_instance_type_args(static_cast<GDScriptInstance *>(script_instance), p_expected.script.ptr(), args)) {
+		return false;
+	}
+	if (args.size() != p_expected.nested_types.size()) {
+		return false;
+	}
+
+	for (int i = 0; i < args.size(); i++) {
+		if (args[i] != p_expected.nested_types[i]) {
+			return false;
+		}
+	}
+	return true;
+}
+
+GDScriptFunction* GDScriptFunction::find_static_impl_function(const ContainerTypeValidate& p_type, const StringName& p_method) {
+	GDScriptLanguage* language = GDScriptLanguage::get_singleton();
+
+	for (int attempt = 0; attempt < 2; attempt++) {
+		GDScriptFunction* found = nullptr;
+		if (p_type.script.is_valid()) {
+			const GDScript* current = Object::cast_to<GDScript>(p_type.script.ptr());
+
+			while (current != nullptr && found == nullptr) {
+
+				HashMap<StringName, GDScriptFunction*>::ConstIterator E = current->member_functions.find(p_method);
+				if (E && E->value != nullptr && E->value->is_static()) {
+					found = E->value;
+					break;
+				}
+				
+				GDScriptFunction* provided = language->get_script_class_impl_method(StringName(current->fully_qualified_name), p_method);
+				if (provided != nullptr && provided->is_static()) {
+					found = provided;
+					break;
+				}
+
+				current = current->base.ptr();
+			}
+
+		} else if (p_type.class_name != StringName()) {
+			if (attempt == 1) {
+				GDScriptCache::ensure_impl_providers_loaded_for_native_class(p_type.class_name);
+			}
+			found = language->find_native_class_impl_method_cached(p_type.class_name, p_method);
+
+		} else if (p_type.enum_id > 0) {
+			if (attempt == 1) {
+				GDScriptCache::ensure_impl_providers_loaded_for_enums();
+			}
+			found = language->get_enum_impl_method(language->get_enum_name_from_id(p_type.enum_id), p_method);
+
+		} else if (p_type.variant_type != Variant::NIL && p_type.variant_type != Variant::OBJECT) {
+			if (attempt == 1) {
+				GDScriptCache::ensure_impl_providers_loaded_for_builtin(p_type.variant_type);
+			}
+			found = language->get_native_impl_method(p_type.variant_type, p_method);
+		}
+		if (found != nullptr && found->is_static()) {
+			return found;
+		}
+		if (p_type.script.is_valid()) {
+			break; ///script providers having a lazy loader would be REALLY funny
+		}
+	}
+	return nullptr;
+}
+
+String GDScriptFunction::describe_generic_instance(Object* p_object) {
+	if (p_object == nullptr) {
+		return "null";
+	}
+
+	ScriptInstance* script_instance = p_object->get_script_instance();
+	if (script_instance == nullptr || script_instance->get_language() != GDScriptLanguage::get_singleton()) {
+		return p_object->get_class();
+	}
+
+	GDScriptInstance* instance = static_cast<GDScriptInstance*>(script_instance);
+
+	String name = GDScript::debug_get_script_name(instance->script);
+	if (instance->script.is_valid() && instance->script->generic_param_count > 0) {
+		if (instance->type_args.is_empty()) {
+			name += "[<erased>]";
+		} else {
+			name += "[";
+			for (int i = 0; i < instance->type_args.size(); i++) {
+				if (i > 0) {
+					name += ", ";
+				}
+				name += describe_validator(instance->type_args[i]);
+			}
+			name += "]";
+		}
+	}
+	return name;
+}
+
+void GDScriptPendingTypeArgs::push(const StringName& p_function_name, const Vector<ContainerTypeValidate>& p_args) {
+	static constexpr int MAX_ENTRIES = 256;
+	if (entries.size() >= MAX_ENTRIES) {
+		entries.remove_at(0);
+	}
+	Entry entry;
+	entry.function_name = p_function_name;
+	entry.args = p_args;
+	entries.push_back(entry);
+}
+
+bool GDScriptPendingTypeArgs::take(const StringName& p_function_name, int p_count, Vector<ContainerTypeValidate>& r_args) {
+	for (int i = entries.size() - 1; i >= 0; i--) {
+
+		if (entries[i].function_name == p_function_name && entries[i].args.size() == p_count) {
+			r_args = entries[i].args;
+			entries.resize(i);
+			return true;
+		}
+
+	}
+
+	return false;
+}
+
+GDScriptPendingTypeArgs& GDScriptPendingTypeArgs::get() {
+	static thread_local GDScriptPendingTypeArgs pending; ///:sob:
+	return pending;
+}
 
 bool GDScriptDataType::is_type_exact(const ContainerType &p_container_type) const {
 	if (p_container_type.script.is_valid()) {
@@ -43,6 +269,40 @@ bool GDScriptDataType::is_type_exact(const ContainerType &p_container_type) cons
 	} else {
 		return kind == BUILTIN && builtin_type == p_container_type.variant_type;
 	}
+}
+
+static bool _datatype_matches_validator(const GDScriptDataType& p_type, const ContainerTypeValidate& p_validator) {
+	if (p_type.generic_param_index >= 0) {
+		return true;
+	}
+
+	if (p_validator.variant_type != p_type.builtin_type || p_validator.class_name != p_type.native_type) {
+		return false;
+	}
+	const Script* expected_script = p_type.script_type;
+	if (p_validator.script.ptr() != expected_script) {
+		return false;
+	}
+
+	int expected_nested = 0;
+	if (p_type.kind == GDScriptDataType::BUILTIN && p_type.has_container_element_types()) {
+		if (p_type.builtin_type == Variant::ARRAY) {
+			expected_nested = 1;
+		} else if (p_type.builtin_type == Variant::DICTIONARY) {
+			expected_nested = 2;
+		}
+	}
+
+	if (p_validator.nested_types.size() != expected_nested) {
+		return false;
+	}
+
+	for (int i = 0; i < expected_nested; i++) {
+		if (!_datatype_matches_validator(p_type.get_container_element_type_or_variant(i), p_validator.nested_types[i])) {
+			return false;
+		}
+	}
+	return true;
 }
 
 bool GDScriptDataType::is_type(const Variant &p_variant, bool p_allow_implicit_conversion) const {
@@ -55,26 +315,11 @@ bool GDScriptDataType::is_type(const Variant &p_variant, bool p_allow_implicit_c
 			bool valid = builtin_type == var_type;
 			if (valid && builtin_type == Variant::ARRAY && has_container_element_type(0)) {
 				Array array = p_variant;
-				if (array.is_typed()) {
-					valid = container_element_types[0].is_type_exact(array.get_element_type());
-				} else {
-					valid = false;
-				}
+				valid = _datatype_matches_validator(container_element_types[0], array.get_element_validator());
 			} else if (valid && builtin_type == Variant::DICTIONARY && has_container_element_types()) {
 				Dictionary dictionary = p_variant;
-				if (dictionary.is_typed()) {
-					if (dictionary.is_typed_key()) {
-						GDScriptDataType key = get_container_element_type_or_variant(0);
-						valid = key.is_type_exact(dictionary.get_key_type());
-					}
-
-					if (valid && dictionary.is_typed_value()) {
-						GDScriptDataType value = get_container_element_type_or_variant(1);
-						valid = value.is_type_exact(dictionary.get_value_type());
-					}
-				} else {
-					valid = false;
-				}
+				valid = _datatype_matches_validator(get_container_element_type_or_variant(0), dictionary.get_key_validator()) &&
+						_datatype_matches_validator(get_container_element_type_or_variant(1), dictionary.get_value_validator());
 			} else if (!valid && p_allow_implicit_conversion) {
 				valid = Variant::can_convert_strict(var_type, builtin_type);
 			}
@@ -122,6 +367,12 @@ bool GDScriptDataType::is_type(const Variant &p_variant, bool p_allow_implicit_c
 					break;
 				}
 				base = base->get_base_script().ptr();
+			}
+			if (valid && has_container_element_types()) {
+				const ContainerTypeValidate expected = make_element_validator();
+				if (!expected.has_param) {
+					valid = GDScriptFunction::generic_instance_matches(obj, expected);
+				}
 			}
 			return valid;
 		} break;

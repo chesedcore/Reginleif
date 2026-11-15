@@ -102,6 +102,9 @@
 #include "scene/main/canvas_layer.h"
 #include "scene/main/http_request.h"
 #include "scene/main/instance_placeholder.h"
+#include "scene/main/attach_rules.h"
+#include "scene/main/component.h"
+#include "scene/main/composer.h"
 #include "scene/main/missing_node.h"
 #include "scene/main/multiplayer_api.h"
 #include "scene/main/resource_preloader.h"
@@ -472,6 +475,11 @@ void register_scene_types() {
 
 	GDREGISTER_CLASS(HTTPRequest);
 	GDREGISTER_CLASS(Timer);
+	GDREGISTER_CLASS(Component);
+	GDREGISTER_CLASS(Composer);
+#ifdef DEBUG_ENABLED
+	Node::attach_validator = &AttachRules::validate;
+#endif
 	GDREGISTER_CLASS(CanvasLayer);
 	GDREGISTER_CLASS(ResourcePreloader);
 	GDREGISTER_CLASS(Window);

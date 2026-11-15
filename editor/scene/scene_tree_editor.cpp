@@ -56,6 +56,7 @@
 #include "scene/gui/flow_container.h"
 #include "scene/gui/label.h"
 #include "scene/gui/texture_rect.h"
+#include "scene/main/attach_rules.h"
 #include "scene/main/canvas_layer.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/window.h"
@@ -265,6 +266,19 @@ void SceneTreeEditor::_cell_button_pressed(Object *p_item, int p_column, int p_i
 			undo_redo->add_undo_method(CanvasItemEditor::get_singleton(), "emit_signal", "item_lock_status_changed");
 		}
 		undo_redo->commit_action();
+	} else if (p_id == BUTTON_CONTRACT) {
+		Vector<String> contract_errors;
+		AttachRules::get_node_errors(n, contract_errors);
+		if (contract_errors.is_empty()) {
+			return;
+		}
+		String text;
+		for (const String& e : contract_errors) {
+			text += String(U"•  ") + e + "\n";
+		}
+		error->set_title(TTR("Oops"));
+		error->set_text(text.strip_edges());
+		error->popup_centered();
 	} else if (p_id == BUTTON_WARNING) {
 		PackedStringArray warnings = _get_node_configuration_warnings(n);
 		if (accessibility_warnings) {
@@ -723,6 +737,19 @@ void SceneTreeEditor::_update_node(Node *p_node, TreeItem *p_item, bool p_part_o
 	}
 
 	if (can_rename) { // TODO Should be can edit..
+		Vector<String> contract_errors;
+		AttachRules::get_node_errors(p_node, contract_errors);
+		if (!contract_errors.is_empty()) {
+			String all_errors;
+			for (const String& e : contract_errors) {
+				all_errors += String("\n\n") + U"•  " + e.replace("\n", "\n    ");
+			}
+			if (contract_errors.size() == 1) {
+				all_errors.remove_at(0);
+			}
+			p_item->add_button(0, get_editor_theme_icon(SNAME("StatusError")), BUTTON_CONTRACT, false, TTR("Attach contract violated:") + all_errors);
+		}
+
 		PackedStringArray warnings = _get_node_configuration_warnings(p_node);
 		if (accessibility_warnings) {
 			warnings.append_array(_get_node_accessibility_configuration_warnings(p_node));

@@ -30,9 +30,11 @@
 
 #pragma once
 
+#include "core/object/object_id.h"
 #include "scene/gui/dialogs.h"
 
 class Button;
+class Node;
 class EditorHelpBit;
 class FilterLineEdit;
 class ItemList;
@@ -73,6 +75,7 @@ class CreateDialog : public ConfirmationDialog {
 	bool allow_abstract_scripts = false;
 	String icon_fallback;
 	String preferred_search_result_type;
+	ObjectID attach_host_id;
 
 	Button *favorite = nullptr;
 	Vector<String> favorite_list;
@@ -98,6 +101,7 @@ class CreateDialog : public ConfirmationDialog {
 	void _configure_search_option_item(TreeItem *r_item, const StringName &p_type, TypeCategory p_type_category, const String &p_match_keyword);
 	float _score_type(const String &p_type, const String &p_search) const;
 	bool _is_type_preferred(const String &p_type) const;
+	String _attach_block_reason(const StringName& p_type) const;
 	void _script_button_clicked(TreeItem *p_item, int p_column, int p_button_id, MouseButton p_mouse_button_index);
 
 	void _fill_type_list();
@@ -147,6 +151,7 @@ public:
 
 	void set_type_blocklist(const HashSet<StringName> &p_blocklist) { custom_type_blocklist = p_blocklist; }
 	void set_preferred_search_result_type(const String &p_preferred_type) { preferred_search_result_type = p_preferred_type; }
+	void set_attach_host(Node* p_host);
 
 	void popup_create(bool p_dont_clear, bool p_replace_mode = false, const String &p_current_type = "", const String &p_current_name = "");
 	void for_inherit();

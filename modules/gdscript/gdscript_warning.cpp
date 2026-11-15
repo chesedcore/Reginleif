@@ -104,6 +104,9 @@ String GDScriptWarning::get_message() const {
 		case UNSAFE_CALL_ARGUMENT:
 			CHECK_SYMBOLS(5);
 			return vformat(R"*(The argument %s of the %s "%s()" requires the subtype "%s" but the supertype "%s" was provided.)*", symbols[0], symbols[1], symbols[2], symbols[3], symbols[4]);
+		case UNSAFE_CALLABLE_ASSIGNMENT:
+			CHECK_SYMBOLS(1);
+			return vformat(R"([Reginleif] An untyped Callable is used where "%s" is expected, so its signature can't be checked.)", symbols[0]);
 		case UNSAFE_VOID_RETURN:
 			CHECK_SYMBOLS(2);
 			return vformat(R"*(The method "%s()" returns "void" but it's trying to return a call to "%s()" that can't be ensured to also be "void".)*", symbols[0], symbols[1]);
@@ -173,6 +176,9 @@ String GDScriptWarning::get_message() const {
 			return R"("@onready" will set the default value after "@export" takes effect and will override it.)";
 		case ONREADY_WITH_CAST:
 			return vformat(R"("as" will silently return "null" if the type of "%s" is wrong. Prefer assigning the node directly to an explicitly typed variable to get an error in such cases.)", symbols[0]);
+		case ENUM_AS_TRAIT_BOUND:
+			CHECK_SYMBOLS(1);
+			return vformat(R"(The enum "%s" is used where a trait bound is required. At runtime an enum value is an integer, so instance methods called on a value of this type dispatch to the implementation for "int", not the one for the enum. Static methods called on the type are not affected.)", symbols[0]);
 #ifndef DISABLE_DEPRECATED
 		// Never produced. These warnings migrated from 3.x by mistake.
 		case PROPERTY_USED_AS_FUNCTION: // There is already an error.
@@ -226,6 +232,7 @@ String GDScriptWarning::get_name_from_code(Code p_code) {
 		PNAME("UNSAFE_METHOD_ACCESS"),
 		PNAME("UNSAFE_CAST"),
 		PNAME("UNSAFE_CALL_ARGUMENT"),
+		PNAME("UNSAFE_CALLABLE_ASSIGNMENT"),
 		PNAME("UNSAFE_VOID_RETURN"),
 		PNAME("RETURN_VALUE_DISCARDED"),
 		PNAME("STATIC_CALLED_ON_INSTANCE"),
@@ -252,6 +259,7 @@ String GDScriptWarning::get_name_from_code(Code p_code) {
 		PNAME("GET_NODE_DEFAULT_WITHOUT_ONREADY"),
 		PNAME("ONREADY_WITH_EXPORT"),
 		PNAME("ONREADY_WITH_CAST"),
+		PNAME("ENUM_AS_TRAIT_BOUND"),
 #ifndef DISABLE_DEPRECATED
 		"PROPERTY_USED_AS_FUNCTION",
 		"CONSTANT_USED_AS_FUNCTION",

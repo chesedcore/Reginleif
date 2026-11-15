@@ -62,6 +62,7 @@ class ProgramIndexBuilder {
 
 	void _pass_declarations(const Vector<String>& p_paths);
 	void _pass_bases(const Vector<String>& p_paths);
+	void _pass_attach(const Vector<String>& p_paths);
 	void _pass_traits();
 	void _pass_impls(const Vector<String>& p_paths);
 	void _validate();
@@ -296,6 +297,22 @@ void ProgramIndexBuilder::_pass_bases(const Vector<String>& p_paths) {
 //i'm genuinely so tired, boss... i hope, by the end of making this immut snapshot table,
 //future features are easier to make without running into a billion re-entrancy issues... 
 
+void ProgramIndexBuilder::_pass_attach(const Vector<String>& p_paths) {
+	for (const String& path : p_paths) {
+		const FileSummary& fs = *idx->files[path].ptr();
+		for (const ClassDecl& c : fs.classes) {
+			ProgramIndex::ClassEntry* e = idx->classes.getptr(c.key);
+			if (e == nullptr || e->path != path) {
+				continue;
+			}
+			e->attach_to = c.attach_to;
+			for (int i = 0; i < e->attach_to.size(); i++) {
+				_resolve_ref(e->attach_to.write[i], c.key);
+			}
+		}
+	}
+}
+
 void ProgramIndexBuilder::_pass_traits() {
 	for (KeyValue<StringName, ProgramIndex::TraitEntry>& T : idx->traits) {
 		for (KeyValue<StringName, MethodDecl>& M : T.value.required) {
@@ -466,6 +483,7 @@ Ref<ProgramIndex> ProgramIndexBuilder::build(const HashMap<String, Ref<FileSumma
 
 	b._pass_declarations(paths);
 	b._pass_bases(paths);
+	b._pass_attach(paths);
 	b._pass_traits();
 	b._pass_impls(paths);
 	b._validate();

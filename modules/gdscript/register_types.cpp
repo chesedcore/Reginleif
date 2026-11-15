@@ -75,6 +75,8 @@
 #include "tests/test_macros.h"
 #endif
 
+void register_component_support();
+
 GDScriptLanguage *script_language_gd = nullptr;
 Ref<ResourceFormatLoaderGDScript> resource_loader_gd;
 Ref<ResourceFormatSaverGDScript> resource_saver_gd;
@@ -191,6 +193,8 @@ void initialize_gdscript_module(ModuleInitializationLevel p_level) {
 		gdscript_cache = memnew(GDScriptCache);
 
 		GDScriptUtilityFunctions::register_functions();
+
+		register_component_support();
 	}
 
 #ifdef TOOLS_ENABLED

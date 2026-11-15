@@ -52,7 +52,13 @@ struct ContainerTypeValidate : ContainerType {
 	///           type is an `Array`. `nested_types` holds the validators for what's inside, recursively.
 	Vector<ContainerTypeValidate> nested_types;
 
+	int16_t enum_id = 0;
+	int16_t param_index = -1;
+	bool has_param = false;
+
 	const char *where = "container";
+
+	ContainerTypeValidate resolved(const ContainerTypeValidate *p_args, int p_count) const;
 
 private:
 	struct TypePair {
@@ -167,7 +173,7 @@ public:
 			const ContainerTypeValidate &lhs = *current.lhs;
 			const ContainerTypeValidate &rhs = *current.rhs;
 
-			if (lhs.variant_type != rhs.variant_type || lhs.class_name != rhs.class_name || lhs.script != rhs.script) {
+			if (lhs.variant_type != rhs.variant_type || lhs.class_name != rhs.class_name || lhs.script != rhs.script || lhs.param_index != rhs.param_index) {
 				return false;
 			}
 			if (lhs.nested_types.size() != rhs.nested_types.size()) {

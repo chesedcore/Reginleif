@@ -263,6 +263,10 @@ void EditorRunBar::_run_scene(const String &p_scene_path, const Vector<String> &
 		return;
 	}
 
+	if (!EditorNode::get_singleton()->validate_contracts_for_run()) {
+		return;
+	}
+
 	_reset_play_buttons();
 
 	String resource_path = ProjectSettings::get_singleton()->get_resource_path();
@@ -375,6 +379,10 @@ void EditorRunBar::_run_scene(const String &p_scene_path, const Vector<String> &
 }
 
 void EditorRunBar::_run_native(const Ref<EditorExportPreset> &p_preset) {
+	if (!EditorNode::get_singleton()->validate_contracts_for_run()) {
+		return;
+	}
+
 	EditorNode::get_singleton()->try_autosave();
 
 	if (run_native->is_deploy_debug_remote_enabled()) {
