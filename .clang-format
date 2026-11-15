@@ -194,7 +194,7 @@ PackConstructorInitializers: NextLine
 # PenaltyExcessCharacter: 1000000
 # PenaltyIndentedWhitespace: 0
 # PenaltyReturnTypeOnItsOwnLine: 60
-# PointerAlignment: Right
+PointerAlignment: Left
 QualifierAlignment: Left
 # ReferenceAlignment: Pointer
 # ReflowComments: true
