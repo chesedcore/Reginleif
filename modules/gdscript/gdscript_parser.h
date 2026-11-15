@@ -160,10 +160,14 @@ public:
 		/// [Monarch] I was new to the codebase when I wrote the generic owner class stuff. Man I wish I had the same level of enthusiasm
 		///           and diligence to comment shit properly back then. But yeah, have a function owner field, bucko
 		FunctionNode* generic_owner_function = nullptr;
-		/// [Monarch] Reginleif addition. A dedicated generic parameter field!
 		StringName generic_param;
-		/// [Monarch] Reginleif addition. Stores concrete type argument bindings for generic classes.
 		HashMap<StringName, DataType> generic_type_bindings;
+
+		bool has_callable_signature = false;
+		bool has_signal_signature = false;
+		Vector<DataType> callable_params;
+		Vector<DataType> callable_return;
+		int callable_default_count = 0;
 
 		_FORCE_INLINE_ bool is_set() const { return kind != RESOLVING && kind != UNRESOLVED; }
 		_FORCE_INLINE_ bool is_resolving() const { return kind == RESOLVING; }
@@ -249,7 +253,32 @@ public:
 				case VARIANT:
 					return true; // All variants are the same.
 				case BUILTIN:
-					return builtin_type == p_other.builtin_type;
+					if (has_signal_signature && p_other.has_signal_signature && builtin_type == p_other.builtin_type) {
+						if (callable_params.size() != p_other.callable_params.size()) {
+							return false;
+						}
+						for (int i = 0; i < callable_params.size(); i++) {
+							if (callable_params[i] != p_other.callable_params[i]) {
+								return false;
+							}
+						}
+						return true;
+					}
+					if (builtin_type != p_other.builtin_type || has_callable_signature != p_other.has_callable_signature || has_signal_signature != p_other.has_signal_signature) {
+						return false;
+					}
+					if (has_callable_signature) {
+						if (callable_params.size() != p_other.callable_params.size()) {
+							return false;
+						}
+						for (int i = 0; i < callable_params.size(); i++) {
+							if (callable_params[i] != p_other.callable_params[i]) {
+								return false;
+							}
+						}
+						return callable_return[0] == p_other.callable_return[0];
+					}
+					return true;
 				case NATIVE:
 				case ENUM: // Enums use native_type to identify the enum and its base class.
 					return native_type == p_other.native_type;
@@ -323,6 +352,11 @@ public:
 			generic_param = p_other.generic_param;
 			generic_type_bindings = p_other.generic_type_bindings;
 			generic_owner_function = p_other.generic_owner_function;
+			has_callable_signature = p_other.has_callable_signature;
+			callable_params = p_other.callable_params;
+			callable_return = p_other.callable_return;
+			callable_default_count = p_other.callable_default_count;
+			has_signal_signature = p_other.has_signal_signature;
 		}
 
 		DataType() = default;
@@ -452,6 +486,9 @@ public:
 		StringName name;
 		LocalVector<ExpressionNode *> arguments;
 		LocalVector<Variant> resolved_arguments;
+		Vector<TypeNode *> type_arguments;
+		DataType attach_to_base;
+		Vector<StringName> attach_to_traits;
 
 		/** Information of the annotation. Might be null for unknown annotations. */
 		AnnotationInfo *info = nullptr;
@@ -591,6 +628,10 @@ public:
 		///
 		Vector<TypeNode*> explicit_generic_args;
 		bool has_explicit_generic_args = false;
+		HashMap<StringName, DataType> resolved_generic_bindings;
+		FunctionNode* generic_callee = nullptr;
+		ClassNode* generic_new_class = nullptr;
+		bool static_trait_call = false;
 
 		CallNode() {
 			type = CALL;
@@ -836,6 +877,9 @@ public:
 
 		String icon_path;
 		String simplified_icon_path;
+		Vector<TypeNode *> attach_to_types;
+		DataType attach_to_base;
+		Vector<StringName> attach_to_traits;
 		LocalVector<Member> members;
 		HashMap<StringName, uint32_t> members_indices;
 		ClassNode *outer = nullptr;
@@ -986,6 +1030,7 @@ public:
 		bool is_static = false; // For lambdas it's determined in the analyzer.
 		bool is_coroutine = false;
 		bool has_explicit_body = false;
+		bool is_closure = false;
 		Variant rpc_config;
 		MethodInfo info;
 		LambdaNode *source_lambda = nullptr;
@@ -1126,6 +1171,8 @@ public:
 	};
 
 	struct ParameterNode : public AssignableNode {
+		bool is_closure_param = false;
+
 		ParameterNode() {
 			type = PARAMETER;
 		}
@@ -1188,6 +1235,7 @@ public:
 		ExpressionNode *return_value = nullptr;
 		bool void_return = false;
 		bool use_conversion = false;
+		bool is_implicit_closure_return = false;
 
 		ReturnNode() {
 			type = RETURN;
@@ -1386,6 +1434,9 @@ public:
 
 		Vector<IdentifierNode*> trait_bounds;
 
+		bool is_callable_signature = false;
+		TypeNode* callable_return = nullptr;
+
 		DataType resolved_type;
 
 		TypeNode *get_container_type_or_null(uint32_t p_index) const {
@@ -1445,6 +1496,12 @@ public:
 
 		bool exported = false;
 		bool onready = false;
+		enum SiblingDep {
+			SIBLING_NONE,
+			SIBLING_REQUIRED,
+			SIBLING_IF_PRESENT,
+		};
+		SiblingDep sibling_dep = SIBLING_NONE;
 		PropertyInfo export_info;
 		int assignments = 0;
 		bool is_static = false;
@@ -1788,6 +1845,8 @@ private:
 	bool warning_ignore_annotation(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class);
 	bool warning_ignore_region_annotations(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class);
 	bool rpc_annotation(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class);
+	bool attach_to_annotation(AnnotationNode* p_annotation, Node* p_target, ClassNode* p_class);
+	bool sibling_annotation(AnnotationNode* p_annotation, Node* p_target, ClassNode* p_class);
 	// Statements.
 	Node *parse_statement();
 	VariableNode *parse_variable(bool p_is_static);
@@ -1835,6 +1894,7 @@ private:
 	ExpressionNode *parse_invalid_token(ExpressionNode *p_previous_operand, bool p_can_assign);
 	///
 	ExpressionNode* parse_generic_call(ExpressionNode* p_previous_operand, bool p_can_assign);
+	ExpressionNode* parse_closure(ExpressionNode* p_previous_operand, bool p_can_assign);
 	TypeNode *parse_type(bool p_allow_void = false);
 	// TODO: Remove in 5.x.
 	bool parse_standalone_string();

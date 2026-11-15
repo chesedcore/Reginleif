@@ -47,6 +47,7 @@ STATIC_ASSERT_INCOMPLETE_TYPE(class, Engine);
 #include "core/object/script_language.h"
 #include "core/string/print_string.h"
 #include "scene/animation/tween.h"
+#include "scene/main/composer.h"
 #include "scene/main/instance_placeholder.h"
 #include "scene/main/multiplayer_api.h"
 #include "scene/main/scene_tree.h"
@@ -61,6 +62,7 @@ STATIC_ASSERT_INCOMPLETE_TYPE(class, Engine);
 
 #ifdef DEBUG_ENABLED
 SafeNumeric<uint64_t> Node::total_node_count{ 0 };
+Node::AttachValidator Node::attach_validator = nullptr;
 #endif
 
 thread_local Node *Node::current_process_thread_group = nullptr;
@@ -352,6 +354,15 @@ void Node::_propagate_enter_tree() {
 	if (!data.viewport && data.parent) {
 		data.viewport = data.parent->data.viewport;
 	}
+
+#ifdef DEBUG_ENABLED
+	if (attach_validator != nullptr && data.parent != nullptr) {
+		String attach_error;
+		if (!attach_validator(this, data.parent, attach_error)) {
+			Composer::fail_contract(attach_error);
+		}
+	}
+#endif
 
 	for (KeyValue<StringName, GroupData> &E : data.grouped) {
 		E.value.group = data.tree->add_to_group(E.key, this);
@@ -1719,6 +1730,16 @@ void Node::add_child(RequiredParam<Node> p_child, bool p_force_readable_name, In
 	ERR_FAIL_COND_MSG(child->is_ancestor_of(this), vformat("Can't add child '%s' to '%s' as it would result in a cyclic dependency since '%s' is already a parent of '%s'.", child->get_name(), get_name(), child->get_name(), get_name()));
 #endif
 	ERR_FAIL_COND_MSG(data.blocked > 0, "Parent node is busy setting up children, `add_child()` failed. Consider using `add_child.call_deferred(child)` instead.");
+
+#ifdef DEBUG_ENABLED
+	if (attach_validator != nullptr) {
+		String attach_error;
+		if (!attach_validator(child, this, attach_error)) {
+			Composer::fail_contract(attach_error);
+			ERR_FAIL_MSG(attach_error);
+		}
+	}
+#endif
 
 	_validate_child_name(child, p_force_readable_name);
 

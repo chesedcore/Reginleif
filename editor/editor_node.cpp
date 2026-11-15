@@ -170,6 +170,7 @@
 #include "scene/gui/rich_text_label.h"
 #include "scene/gui/split_container.h"
 #include "scene/gui/tab_container.h"
+#include "scene/main/attach_rules.h"
 #include "scene/main/scene_tree.h"
 #include "scene/main/timer.h"
 #include "scene/main/window.h"
@@ -2428,6 +2429,43 @@ bool EditorNode::_validate_scene_recursive(const String &p_filename, Node *p_nod
 		}
 	}
 
+	return false;
+}
+
+void EditorNode::collect_contract_errors(Vector<String>& r_errors) {
+	for (int i = 0; i < editor_data.get_edited_scene_count(); i++) {
+		Node* root = editor_data.get_edited_scene_root(i);
+
+		if (root == nullptr) {
+			///not really sure how this case can even happen
+			///or what to even do if you run into this
+			continue;
+		}
+
+		Vector<String> scene_errors;
+		AttachRules::collect_scene_errors(root, scene_errors);
+		const String scene_name = editor_data.get_scene_title(i);
+		for (const String& e : scene_errors) {
+			r_errors.push_back(vformat("[%s] %s", scene_name, e));
+		}
+	}
+}
+
+bool EditorNode::validate_contracts_for_run() {
+	Vector<String> errors;
+	collect_contract_errors(errors);
+	if (errors.is_empty()) {
+		return true;
+	}
+	const int max_shown = 12;
+	String text = TTR("Can't run! These scenes break an attachment related contract. Consider fixing them and run again?") + "\n\n";
+	for (int i = 0; i < errors.size() && i < max_shown; i++) {
+		text += String(U"•  ") + errors[i] + "\n";
+	}
+	if (errors.size() > max_shown) {
+		text += vformat(TTR("…and %d more. Whew."), errors.size() - max_shown);
+	}
+	show_warning(text.strip_edges(), TTR("You messed up, and that's alright"));
 	return false;
 }
 

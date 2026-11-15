@@ -147,9 +147,12 @@ GDScriptParser::GDScriptParser() {
 		register_annotation(MethodInfo("@tool"), AnnotationInfo::SCRIPT, &GDScriptParser::tool_annotation);
 		register_annotation(MethodInfo("@icon", PropertyInfo(Variant::STRING, "icon_path")), AnnotationInfo::SCRIPT, &GDScriptParser::icon_annotation);
 		register_annotation(MethodInfo("@static_unload"), AnnotationInfo::SCRIPT, &GDScriptParser::static_unload_annotation);
+		register_annotation(MethodInfo("@attach_to"), AnnotationInfo::SCRIPT | AnnotationInfo::CLASS, &GDScriptParser::attach_to_annotation, Vector<Variant>(), true);
 		register_annotation(MethodInfo("@abstract"), AnnotationInfo::SCRIPT | AnnotationInfo::CLASS | AnnotationInfo::FUNCTION, &GDScriptParser::abstract_annotation);
 		// Onready annotation.
 		register_annotation(MethodInfo("@onready"), AnnotationInfo::VARIABLE, &GDScriptParser::onready_annotation);
+		register_annotation(MethodInfo("@requires"), AnnotationInfo::VARIABLE, &GDScriptParser::sibling_annotation);
+		register_annotation(MethodInfo("@if_present"), AnnotationInfo::VARIABLE, &GDScriptParser::sibling_annotation);
 		// Export annotations.
 		register_annotation(MethodInfo("@export"), AnnotationInfo::VARIABLE, &GDScriptParser::export_annotations<PROPERTY_HINT_NONE, Variant::NIL>);
 		register_annotation(MethodInfo("@export_enum", PropertyInfo(Variant::STRING, "names")), AnnotationInfo::VARIABLE, &GDScriptParser::export_annotations<PROPERTY_HINT_ENUM, Variant::NIL>, varray(), true);
@@ -283,6 +286,14 @@ void GDScriptParser::push_warning(int p_start_line, int p_start_column, int p_en
 	const GDScriptWarning::WarnLevel warn_level = warning_levels[p_code];
 	if (warn_level == GDScriptWarning::IGNORE) {
 		return;
+	}
+
+	if (p_code == GDScriptWarning::ENUM_AS_TRAIT_BOUND) {
+		for (const PendingWarning& existing : pending_warnings) {
+			if (existing.code == p_code && existing.start_line == p_start_line && existing.start_column == p_start_column && existing.symbols == p_symbols) {
+				return;
+			}
+		}
 	}
 
 	PendingWarning pw;
@@ -2137,6 +2148,18 @@ GDScriptParser::AnnotationNode *GDScriptParser::parse_annotation(uint32_t p_vali
 				break;
 			}
 
+			if (annotation->name == SNAME("@attach_to")) {
+				TypeNode* type_arg = parse_type(false);
+				if (type_arg == nullptr) {
+					push_error(R"([Reginleif] Expected a class or a trait bound as the "@attach_to" argument.)");
+					valid = false;
+				} else {
+					annotation->type_arguments.push_back(type_arg);
+				}
+				argument_index++;
+				continue;
+			}
+
 			ExpressionNode *argument = parse_expression(false);
 
 			if (argument == nullptr) {
@@ -3175,7 +3198,9 @@ GDScriptParser::ExpressionNode *GDScriptParser::parse_precedence(Precedence p_pr
 		// Allow keywords that can be treated as identifiers.
 		token_type = GDScriptTokenizer::Token::IDENTIFIER;
 	}
-	ParseFunction prefix_rule = get_rule(token_type)->prefix;
+
+	ParseFunction prefix_rule = (token_type == GDScriptTokenizer::Token::PIPE || token_type == GDScriptTokenizer::Token::PIPE_PIPE) ? 
+		&GDScriptParser::parse_closure : get_rule(token_type)->prefix;
 
 	if (prefix_rule == nullptr) {
 		// Expected expression. Let the caller give the proper error message.
@@ -4172,6 +4197,127 @@ GDScriptParser::ExpressionNode *GDScriptParser::parse_lambda(ExpressionNode *p_p
 	return lambda;
 }
 
+GDScriptParser::ExpressionNode* GDScriptParser::parse_closure(ExpressionNode* p_previous_operand, bool p_can_assign) {
+	LambdaNode* lambda = alloc_node<LambdaNode>();
+	lambda->parent_function = current_function;
+	lambda->parent_lambda = current_lambda;
+
+	FunctionNode* function = alloc_node<FunctionNode>();
+	function->source_lambda = lambda;
+	function->is_closure = true;
+	function->is_static = current_function != nullptr ? current_function->is_static : false;
+
+	const bool has_params = previous.type == GDScriptTokenizer::Token::PIPE;
+	const bool multiline_context = multiline_stack.back()->get();
+
+	push_completion_call(nullptr);
+
+	FunctionNode* previous_function = current_function;
+	current_function = function;
+	LambdaNode* previous_lambda = current_lambda;
+	current_lambda = lambda;
+
+	SuiteNode* body = alloc_node<SuiteNode>();
+	body->parent_function = function;
+	body->parent_block = current_suite;
+	SuiteNode* previous_suite = current_suite;
+
+	if (has_params) {
+		push_multiline(true);
+		if (!check(GDScriptTokenizer::Token::PIPE)) {
+			do {
+				if (check(GDScriptTokenizer::Token::PIPE)) {
+					break;
+				}
+				ParameterNode* parameter = parse_parameter();
+				if (parameter == nullptr) {
+					break;
+				}
+				if (parameter->initializer != nullptr) {
+					push_error(R"([Reginleif] Closure parameters cannot have default values.)");
+				}
+				parameter->is_closure_param = true;
+				if (function->parameters_indices.has(parameter->identifier->name)) {
+					push_error(vformat(R"(Parameter with name "%s" was already declared for this closure.)", parameter->identifier->name));
+				} else {
+					function->parameters_indices[parameter->identifier->name] = function->parameters.size();
+					function->parameters.push_back(parameter);
+					body->add_local(parameter, function);
+				}
+			} while (match(GDScriptTokenizer::Token::COMMA));
+		}
+		pop_multiline();
+		consume(GDScriptTokenizer::Token::PIPE, R"([Reginleif] Expected "|" after closure parameters.)");
+	}
+
+	if (match(GDScriptTokenizer::Token::FORWARD_ARROW)) {
+		function->return_type = parse_type(true);
+		if (function->return_type == nullptr) {
+			push_error(R"([Reginleif] Expected return type or "void" after "->".)");
+		}
+	}
+
+	function->header_end_line = previous.end_line;
+	function->header_end_column = previous.end_column;
+
+	const bool previous_in_lambda = in_lambda;
+	const bool could_break = can_break;
+	const bool could_continue = can_continue;
+	can_break = false;
+	can_continue = false;
+
+	if (check(GDScriptTokenizer::Token::BRACE_OPEN)) {
+		in_lambda = true;
+		push_multiline(false);
+		if (multiline_context) {
+			tokenizer->push_expression_indented_block();
+		}
+		function->has_explicit_body = true;
+		function->body = parse_suite("closure body", body, true);
+		complete_extents(function);
+		complete_extents(lambda);
+		pop_multiline();
+		if (multiline_context) {
+			while (check(GDScriptTokenizer::Token::DEDENT) || check(GDScriptTokenizer::Token::INDENT) || check(GDScriptTokenizer::Token::NEWLINE)) {
+				current = tokenizer->scan();
+			}
+			tokenizer->pop_expression_indented_block();
+		}
+	} else {
+		current_suite = body;
+		ExpressionNode* expression = parse_expression(true);
+		current_suite = previous_suite;
+		if (expression == nullptr) {
+			push_error(R"([Reginleif] Expected closure body.)");
+		} else if (expression->type == Node::ASSIGNMENT) {
+			body->statements.push_back(expression);
+		} else {
+			ReturnNode* implicit_return = alloc_node<ReturnNode>();
+			implicit_return->return_value = expression;
+			implicit_return->is_implicit_closure_return = true;
+			complete_extents(implicit_return);
+			body->statements.push_back(implicit_return);
+			body->has_return = true;
+		}
+		complete_extents(body);
+		function->has_explicit_body = true;
+		function->body = body;
+		complete_extents(function);
+		complete_extents(lambda);
+	}
+
+	pop_completion_call();
+
+	current_function = previous_function;
+	current_lambda = previous_lambda;
+	in_lambda = previous_in_lambda;
+	can_break = could_break;
+	can_continue = could_continue;
+	lambda->function = function;
+
+	return lambda;
+}
+
 GDScriptParser::ExpressionNode *GDScriptParser::parse_type_test(ExpressionNode *p_previous_operand, bool p_can_assign) {
 	// x is not int
 	// ^        ^^^ ExpressionNode, TypeNode
@@ -4279,6 +4425,35 @@ GDScriptParser::TypeNode *GDScriptParser::parse_type(bool p_allow_void) {
 
 	type->type_chain.push_back(type_element);
 
+	const bool is_signal_type = type_element->name == SNAME("Signal");
+	if ((type_element->name == SNAME("Callable") || is_signal_type) && match(GDScriptTokenizer::Token::BRACKET_OPEN)) {
+		type->is_callable_signature = true;
+		if (!check(GDScriptTokenizer::Token::BRACKET_CLOSE)) {
+			do {
+				TypeNode* param_type = parse_type(false);
+				if (param_type == nullptr) {
+					push_error(R"([Reginleif] Expected parameter type in Callable signature.)");
+					complete_extents(type);
+					return nullptr;
+				}
+				type->container_types.push_back(param_type);
+			} while (match(GDScriptTokenizer::Token::COMMA));
+		}
+		consume(GDScriptTokenizer::Token::BRACKET_CLOSE, R"([Reginleif] Expected "]" after Callable signature.)");
+		if (is_signal_type) {
+			complete_extents(type);
+			return type;
+		}
+		if (match(GDScriptTokenizer::Token::FORWARD_ARROW)) {
+			type->callable_return = parse_type(true);
+			if (type->callable_return == nullptr) {
+				push_error(R"([Reginleif] Expected return type or "void" after "->" in Callable signature.)");
+			}
+		}
+		complete_extents(type);
+		return type;
+	}
+
 	if (match(GDScriptTokenizer::Token::BRACKET_OPEN)) {
 		// Typed collection (like Array[int], Dictionary[String, int]).
 		bool first_pass = true;
@@ -4344,8 +4519,18 @@ GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
 
 		make_completion_context(COMPLETION_TRAIT_BODY, trait);
 
+		bool is_static_method = false;
+		if (match(GDScriptTokenizer::Token::STATIC)) {
+			is_static_method = true;
+			if (!check(GDScriptTokenizer::Token::FUNC)) {
+				push_error(R"([Reginleif] Expected "func" after "static" in trait body.)");
+				if (panic_mode) { synchronize(); }
+				continue;
+			}
+		}
+
 		if (match(GDScriptTokenizer::Token::FUNC)) {
-			FunctionNode* method = parse_function(false);
+			FunctionNode* method = parse_function(is_static_method);
 			if (method == nullptr) { continue; }
 #ifdef TOOLS_ENABLED
 			attach_function_doc(method);
@@ -4360,7 +4545,7 @@ GDScriptParser::TraitNode* GDScriptParser::parse_trait() {
 			}
 		} else {
 			make_completion_context(COMPLETION_TRAIT_BODY, trait);
-			push_error(vformat(R"([Reginleif] Unexpected "%s" in trait body. Only "func" declarations and "impl for" implementations are allowed.)", current.get_name()));
+			push_error(vformat(R"([Reginleif] Unexpected "%s" in trait body. Only "func" and "static func" declarations and "impl for" implementations are allowed.)", current.get_name()));
 			advance();
 		}
 
@@ -4435,8 +4620,18 @@ GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
 
 		make_completion_context(COMPLETION_IMPL_BODY, impl, -1, true);
 
+		bool is_static_method = false;
+		if (match(GDScriptTokenizer::Token::STATIC)) {
+			is_static_method = true;
+			if (!check(GDScriptTokenizer::Token::FUNC)) {
+				push_error(R"([Reginleif] Expected "func" after "static" in impl body.)");
+				if (panic_mode) { synchronize(); }
+				continue;
+			}
+		}
+
 		if (match(GDScriptTokenizer::Token::FUNC)) {
-			FunctionNode* method = parse_function(false);
+			FunctionNode* method = parse_function(is_static_method);
 			if (method != nullptr) {
 				override_completion_context(method, COMPLETION_IMPL_BODY, impl);
 #ifdef TOOLS_ENABLED
@@ -4450,7 +4645,7 @@ GDScriptParser::ImplNode* GDScriptParser::parse_impl() {
 				}
 			}
 		} else {
-			push_error(vformat(R"([Reginleif] Unexpected "%s" in impl body. Only "func" declarations are allowed.)", current.get_name()));
+			push_error(vformat(R"([Reginleif] Unexpected "%s" in impl body. Only "func" and "static func" declarations are allowed.)", current.get_name()));
 			advance();
 		}
 
@@ -5095,6 +5290,41 @@ bool GDScriptParser::abstract_annotation(AnnotationNode *p_annotation, Node *p_t
 		return true;
 	}
 	ERR_FAIL_V_MSG(false, R"("@abstract" annotation can only be applied to classes and functions.)");
+}
+
+bool GDScriptParser::attach_to_annotation(AnnotationNode* p_annotation, Node* p_target, ClassNode* p_class) {
+	ERR_FAIL_COND_V_MSG(p_target->type != Node::CLASS, false, R"("@attach_to" annotation can only be applied to classes.)");
+	ClassNode* class_node = static_cast<ClassNode*>(p_target);
+	if (!class_node->attach_to_types.is_empty()) {
+		push_error(R"("@attach_to" annotation can only be used once per class.)", p_annotation);
+		return false;
+	}
+	if (p_annotation->type_arguments.is_empty()) {
+		push_error(R"("@attach_to" needs at least one class or "impl Trait".)", p_annotation);
+		return false;
+	}
+	for (TypeNode* t : p_annotation->type_arguments) {
+		class_node->attach_to_types.push_back(t);
+	}
+
+	class_node->attach_to_base = p_annotation->attach_to_base;
+	class_node->attach_to_traits = p_annotation->attach_to_traits;
+	return true;
+}
+
+bool GDScriptParser::sibling_annotation(AnnotationNode* p_annotation, Node* p_target, ClassNode* p_class) {
+	ERR_FAIL_COND_V_MSG(p_target->type != Node::VARIABLE, false, R"("@requires" and "@if_present" can only be applied to class variables.)");
+	VariableNode* variable = static_cast<VariableNode*>(p_target);
+	if (variable->is_static) {
+		push_error(vformat(R"("%s" annotation cannot be applied to a static variable.)", p_annotation->name), p_annotation);
+		return false;
+	}
+	if (variable->sibling_dep != VariableNode::SIBLING_NONE) {
+		push_error(R"(A variable can have only one of "@requires" and "@if_present".)", p_annotation);
+		return false;
+	}
+	variable->sibling_dep = p_annotation->name == SNAME("@requires") ? VariableNode::SIBLING_REQUIRED : VariableNode::SIBLING_IF_PRESENT;
+	return true;
 }
 
 bool GDScriptParser::onready_annotation(AnnotationNode *p_annotation, Node *p_target, ClassNode *p_class) {
@@ -6070,6 +6300,25 @@ String GDScriptParser::DataType::to_string() const {
 			}
 			if (builtin_type == Variant::DICTIONARY && has_container_element_types()) {
 				return vformat("Dictionary[%s, %s]", get_container_element_type_or_variant(0).to_string(), get_container_element_type_or_variant(1).to_string());
+			}
+			if (builtin_type == Variant::SIGNAL && has_signal_signature) {
+				String signature = "Signal[";
+				for (int i = 0; i < callable_params.size(); i++) {
+					signature += (i > 0 ? ", " : "") + callable_params[i].to_string();
+				}
+				return signature + "]";
+			}
+			if (builtin_type == Variant::CALLABLE && has_callable_signature) {
+				String signature = "Callable[";
+				for (int i = 0; i < callable_params.size(); i++) {
+					signature += (i > 0 ? ", " : "") + callable_params[i].to_string();
+				}
+				signature += "]";
+				const DataType& return_type = callable_return[0];
+				if (!(return_type.kind == BUILTIN && return_type.builtin_type == Variant::NIL)) {
+					signature += " -> " + return_type.to_string();
+				}
+				return signature;
 			}
 			return Variant::get_type_name(builtin_type);
 		

@@ -191,6 +191,7 @@ public:
 	bool is_same_instance(const Array &p_other) const;
 
 	const ContainerType &get_element_type() const _LIFETIME_BOUND_;
+	const ContainerTypeValidate& get_element_validator() const _LIFETIME_BOUND_;
 	uint32_t get_typed_builtin() const;
 	StringName get_typed_class_name() const;
 	Variant get_typed_script() const;

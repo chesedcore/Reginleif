@@ -145,6 +145,10 @@ public:
 	virtual void write_lambda(const Address &p_target, GDScriptFunction *p_function, const Vector<Address> &p_captures, bool p_use_self) = 0;
 	virtual void write_construct(const Address &p_target, Variant::Type p_type, const Vector<Address> &p_arguments) = 0;
 	virtual void write_construct_array(const Address &p_target, const Vector<Address> &p_arguments) = 0;
+	virtual void write_set_type_args(const StringName& p_function_name, const Vector<GDScriptDataType>& p_type_args) = 0;
+	virtual void write_load_type_args(int p_count) = 0;
+	virtual void write_load_instance_type_args(int p_count) = 0;
+	virtual void write_call_on_type_arg(const Address& p_target, const GDScriptDataType& p_type, const StringName& p_method, const Vector<Address>& p_arguments) = 0;
 	virtual void write_construct_typed_array(const Address &p_target, const GDScriptDataType &p_element_type, const Vector<Address> &p_arguments) = 0;
 	virtual void write_construct_dictionary(const Address &p_target, const Vector<Address> &p_arguments) = 0;
 	virtual void write_construct_typed_dictionary(const Address &p_target, const GDScriptDataType &p_key_type, const GDScriptDataType &p_value_type, const Vector<Address> &p_arguments) = 0;

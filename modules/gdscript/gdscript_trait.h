@@ -49,6 +49,9 @@ struct GDScriptDetachedType {
 	Vector<GDScriptDetachedType> elements; ///container_element_types
 	HashMap<StringName, GDScriptDetachedType> bindings; ///generic_type_bindings
 
+	Vector<GDScriptDetachedType> callable_param_types;
+	Vector<GDScriptDetachedType> callable_return_types;
+
 	static GDScriptDetachedType detach(const GDScriptParser::DataType& p_type);
 	GDScriptParser::DataType resolve(GDScriptParser* p_current) const;
 };
@@ -60,6 +63,7 @@ public:
 	Vector<StringName> param_names;
 	int default_arg_count = 0;
 	bool is_vararg = false;
+	bool is_static = false;
 
 	Vector<GDScriptDetachedType> param_detached;
 	GDScriptDetachedType return_detached;

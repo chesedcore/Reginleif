@@ -102,9 +102,18 @@ GDScriptDetachedType GDScriptDetachedType::detach(const GDScriptParser::DataType
 	out.base.generic_owner_function = nullptr;
 	out.base.container_element_types.clear();
 	out.base.generic_type_bindings.clear();
+	out.base.callable_params.clear();
+	out.base.callable_return.clear();
 
 	for (const GDScriptParser::DataType& element : p_type.container_element_types) {
 		out.elements.push_back(detach(element));
+	}
+
+	for (int i = 0; i < p_type.callable_params.size(); i++) {
+		out.callable_param_types.push_back(detach(p_type.callable_params[i]));
+	}
+	for (int i = 0; i < p_type.callable_return.size(); i++) {
+		out.callable_return_types.push_back(detach(p_type.callable_return[i]));
 	}
 
 	for (const KeyValue<StringName, GDScriptParser::DataType>& B : p_type.generic_type_bindings) {
@@ -141,6 +150,14 @@ GDScriptParser::DataType GDScriptDetachedType::resolve(GDScriptParser* p_current
 	for (const GDScriptDetachedType& element : elements) {
 		out.container_element_types.push_back(element.resolve(p_current));
 	}
+	out.callable_params.clear();
+	for (int i = 0; i < callable_param_types.size(); i++) {
+		out.callable_params.push_back(callable_param_types[i].resolve(p_current));
+	}
+	out.callable_return.clear();
+	for (int i = 0; i < callable_return_types.size(); i++) {
+		out.callable_return.push_back(callable_return_types[i].resolve(p_current));
+	}
 	out.generic_type_bindings.clear();
 	for (const KeyValue<StringName, GDScriptDetachedType>& B : bindings) {
 		out.generic_type_bindings[B.key] = B.value.resolve(p_current);
@@ -175,6 +192,7 @@ static Ref<GDScriptTraitSignatureSnapshot> _make_trait_method_signature_snapshot
 	}
 	snapshot->return_detached = GDScriptDetachedType::detach(p_method->return_type_constraint);
 	snapshot->is_vararg = p_method->is_vararg();
+	snapshot->is_static = p_method->is_static;
 
 	return snapshot;
 }
@@ -573,6 +591,9 @@ bool GDScriptTraitAnalyzer::_signatures_match(const Ref<GDScriptTraitSignatureSn
 		return false;
 	}
 	if (p_required->is_vararg != p_provided->is_vararg()) {
+		return false;
+	}
+	if (p_required->is_static != p_provided->is_static) {
 		return false;
 	}
 

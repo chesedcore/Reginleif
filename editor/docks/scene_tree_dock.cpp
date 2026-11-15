@@ -70,12 +70,17 @@
 #include "scene/gui/box_container.h"
 #include "scene/gui/check_box.h"
 #include "scene/gui/panel_container.h"
+#include "scene/main/attach_rules.h"
+#include "scene/main/component.h"
+#include "scene/main/composer.h"
 #include "scene/main/missing_node.h"
 #include "scene/main/scene_tree.h"
 #include "scene/property_utils.h"
 #include "scene/resources/packed_scene.h"
 #include "scene/resources/style_box_flat.h"
 #include "servers/display/display_server.h"
+
+static bool _validate_component_attach(AcceptDialog* p_accept, const Vector<Node*>& p_nodes, Node* p_new_parent);
 
 void SceneTreeDock::_nodes_drag_begin() {
 	pending_click_select = nullptr;
@@ -403,6 +408,16 @@ void SceneTreeDock::_perform_instantiate_scenes(const Vector<String> &p_files, N
 
 		instantiated_scene->set_scene_file_path(ProjectSettings::get_singleton()->localize_path(p_files[i]));
 
+		{
+			Vector<Node*> fucks_given;
+			fucks_given.push_back(instantiated_scene);
+			if (!_validate_component_attach(accept, fucks_given, p_parent)) {
+				memdelete(instantiated_scene);
+				error = true;
+				break;
+			}
+		}
+
 		instances.push_back(instantiated_scene);
 		Vector<NodePath> exposed_nodes = sdata->get_state()->get_exposed_nodes();
 		instantiated_scene->set_meta(META_CONTAINS_EXPOSED_NODES, exposed_nodes.size() > 0);
@@ -728,6 +743,25 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 				}
 			}
 
+			{
+				Node* attached_fuck = nullptr;
+				if (p_tool == TOOL_NEW) {
+					const List<Node*> top_selected = editor_selection->get_top_selected_node_list();
+					if (top_selected.is_empty()) {
+						attached_fuck = edited_scene;
+					} else if (top_selected.size() == 1) {
+						attached_fuck = top_selected.front()->get();
+					}
+				}
+
+				///because i don't have a choice
+				if (const Composer* selected_composer = Object::cast_to<Composer>(attached_fuck)) {
+					Node* real_host = selected_composer->get_host();
+					attached_fuck = real_host != nullptr ? real_host : selected_composer->get_parent();
+				}
+				create_dialog->set_attach_host(attached_fuck);
+			}
+
 			create_dialog->popup_create(true);
 		} break;
 		case TOOL_INSTANTIATE: {
@@ -872,6 +906,7 @@ void SceneTreeDock::_tool_selected(int p_tool, bool p_confirm_override) {
 			}
 
 			if (selected) {
+				create_dialog->set_attach_host(nullptr);
 				create_dialog->popup_create(false, true, selected->get_class(), selected->get_name());
 			}
 		} break;
@@ -2585,6 +2620,18 @@ void SceneTreeDock::_node_reparent(NodePath p_path, bool p_keep_global_xform) {
 	_do_reparent(new_parent, -1, nodes, p_keep_global_xform);
 }
 
+static bool _validate_component_attach(AcceptDialog* p_accept, const Vector<Node*>& p_nodes, Node* p_new_parent) {
+	for (Node* n : p_nodes) {
+		String err;
+		if (!AttachRules::validate(n, p_new_parent, err)) {
+			p_accept->set_text(err);
+			p_accept->popup_centered();
+			return false;
+		}
+	}
+	return true;
+}
+
 void SceneTreeDock::_do_reparent(Node *p_new_parent, int p_position_in_parent, Vector<Node *> p_nodes, bool p_keep_global_xform) {
 	ERR_FAIL_NULL(p_new_parent);
 
@@ -2593,6 +2640,10 @@ void SceneTreeDock::_do_reparent(Node *p_new_parent, int p_position_in_parent, V
 	}
 
 	p_nodes.sort_custom<Node::Comparator>(); //Makes result reliable.
+
+	if (!_validate_component_attach(accept, p_nodes, p_new_parent)) {
+		return;
+	}
 
 	const int first_idx = p_position_in_parent == -1 ? p_new_parent->get_child_count(false) : p_position_in_parent;
 	int nodes_before = first_idx;
@@ -3257,6 +3308,50 @@ Node *SceneTreeDock::_do_create(Node *p_parent) {
 	Node *child = create_dialog->instantiate_selected<Node>();
 	ERR_FAIL_NULL_V(child, nullptr);
 
+	Node* attach_parent = p_parent;
+	Composer* new_composer = nullptr;
+	if (Component* comp = Object::cast_to<Component>(child)) {
+		String err;
+
+		if (Composer* h = Object::cast_to<Composer>(p_parent)) {
+			if (!h->can_accept(comp, err)) {
+				accept->set_text(err);
+				accept->popup_centered();
+				memdelete(child);
+				return nullptr;
+			}
+		} else if (edited_scene) {
+
+			Composer* existing = Composer::find_composer(p_parent);
+			const bool ok = existing != nullptr ? existing->can_accept(comp, err) : Composer::host_accepts(p_parent, comp, err);
+			
+			if (!ok) {
+				accept->set_text(err);
+				accept->popup_centered();
+				memdelete(child);
+				return nullptr;
+			}
+
+			if (existing != nullptr) {
+				attach_parent = existing;
+			} else {
+				new_composer = memnew(Composer);
+				new_composer->set_name(p_parent->prevalidate_child_name(new_composer, "Composer"));
+				attach_parent = new_composer;
+			}
+		}
+	}
+
+	if (Object::cast_to<Component>(child) == nullptr) {
+		String err;
+		if (!AttachRules::validate(child, p_parent, err)) {
+			accept->set_text(err);
+			accept->popup_centered();
+			memdelete(child);
+			return nullptr;
+		}
+	}
+
 	String new_name = child->get_name();
 	if (new_name.is_empty()) {
 		new_name = child->get_class();
@@ -3264,21 +3359,36 @@ Node *SceneTreeDock::_do_create(Node *p_parent) {
 	if (GLOBAL_GET("editor/naming/node_name_casing").operator int() != NAME_CASING_PASCAL_CASE) {
 		new_name = adjust_name_casing(new_name);
 	}
-	new_name = p_parent->prevalidate_child_name(child, new_name);
+
+	if (new_composer == nullptr) {
+		new_name = attach_parent->prevalidate_child_name(child, new_name);
+	}
+
 	child->set_name(new_name);
 
 	EditorUndoRedoManager *undo_redo = EditorUndoRedoManager::get_singleton();
 	undo_redo->create_action_for_history(TTR("Create Node"), editor_data->get_current_edited_scene_history_id());
 
 	if (edited_scene) {
-		undo_redo->add_do_method(p_parent, "add_child", child, true);
+		if (new_composer != nullptr) {
+			undo_redo->add_do_method(p_parent, "add_child", new_composer, true);
+			undo_redo->add_do_method(new_composer, "set_owner", edited_scene);
+			undo_redo->add_do_reference(new_composer);
+			undo_redo->add_undo_method(p_parent, "remove_child", new_composer);
+			undo_redo->add_do_method(new_composer, "add_child", child, true);
+		} else {
+			undo_redo->add_do_method(attach_parent, "add_child", child, true);
+			undo_redo->add_undo_method(attach_parent, "remove_child", child);
+		}
 		undo_redo->add_do_method(child, "set_owner", edited_scene);
 		undo_redo->add_do_reference(child);
-		undo_redo->add_undo_method(p_parent, "remove_child", child);
 
-		EditorDebuggerNode *ed = EditorDebuggerNode::get_singleton();
-		undo_redo->add_do_method(ed, "live_debug_create_node", edited_scene->get_path_to(p_parent), child->get_class(), new_name);
-		undo_redo->add_undo_method(ed, "live_debug_remove_node", NodePath(String(edited_scene->get_path_to(p_parent)).path_join(new_name)));
+		///thanks to live debug not being able to create 2 levels at once, i now need to turn myself into an earthen jar of dirt and jet fuel
+		if (new_composer == nullptr) {
+			EditorDebuggerNode* ed = EditorDebuggerNode::get_singleton();
+			undo_redo->add_do_method(ed, "live_debug_create_node", edited_scene->get_path_to(attach_parent), child->get_class(), new_name);
+			undo_redo->add_undo_method(ed, "live_debug_remove_node", NodePath(String(edited_scene->get_path_to(attach_parent)).path_join(new_name)));
+		}
 
 	} else {
 		undo_redo->add_do_method(EditorNode::get_singleton(), "set_edited_scene", child);
@@ -4836,6 +4946,17 @@ List<Node *> SceneTreeDock::paste_nodes(bool p_paste_as_sibling) {
 	}
 	if (!owner) {
 		owner = paste_parent;
+	}
+
+	if (paste_parent) {
+		Vector<Node*> clipboard_nodes;
+		for (Node* E : node_clipboard) {
+			clipboard_nodes.push_back(E);
+		}
+		
+		if (!_validate_component_attach(accept, clipboard_nodes, paste_parent)) {
+			return pasted_nodes;
+		}
 	}
 
 	EditorUndoRedoManager *ur = EditorUndoRedoManager::get_singleton();

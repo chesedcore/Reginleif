@@ -173,3 +173,24 @@ const Variant* ContainerTypeValidate::_validate_nested(const Variant* p_validate
 
 	return p_validated;
 }
+
+ContainerTypeValidate ContainerTypeValidate::resolved(const ContainerTypeValidate* p_args, int p_count) const {
+	if (!has_param) {
+		return *this;
+	}
+
+	if (param_index >= 0) {
+		if (p_args != nullptr && param_index < p_count) {
+			return p_args[param_index];
+		}
+		return ContainerTypeValidate(); ///boom >.<
+	}
+
+	ContainerTypeValidate result = *this;
+	result.has_param = false;
+	for (int i = 0; i < result.nested_types.size(); i++) {
+		result.nested_types.write[i] = nested_types[i].resolved(p_args, p_count);
+	}
+	
+	return result;
+}

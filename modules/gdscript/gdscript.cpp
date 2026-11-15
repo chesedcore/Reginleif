@@ -44,6 +44,7 @@
 #include "core/object/callable_mp.h"
 #include "core/object/class_db.h"
 #include "core/templates/rb_set.h"
+#include "scene/main/attach_rules.h"
 
 #ifdef TOOLS_ENABLED
 #include "editor/gdscript_docgen.h"
@@ -161,10 +162,13 @@ void GDScript::_super_implicit_constructor(GDScript *p_script, GDScriptInstance 
 	}
 }
 
-GDScriptInstance *GDScript::_create_instance(const Variant **p_args, int p_argcount, Object *p_owner, Callable::CallError &r_error) {
+GDScriptInstance *GDScript::_create_instance(const Variant **p_args, int p_argcount, Object *p_owner, Callable::CallError &r_error, const Vector<ContainerTypeValidate>* p_type_args) {
 	/* STEP 1, CREATE */
 
 	GDScriptInstance *instance = memnew(GDScriptInstance);
+	if (p_type_args != nullptr) {
+		instance->type_args = *p_type_args;
+	}
 	instance->members.resize(member_indices.size());
 	instance->script = Ref<GDScript>(this);
 	instance->owner = p_owner;
@@ -224,6 +228,13 @@ Variant GDScript::_new(const Variant **p_args, int p_argcount, Callable::CallErr
 		return "Can't instantiate an abstract class.";
 	}
 
+	Vector<ContainerTypeValidate> type_args;
+	if (generic_param_count > 0) {
+		if (!GDScriptPendingTypeArgs::get().take(SNAME("new"), generic_param_count, type_args)) {
+			ERR_FAIL_V_MSG(Variant(), vformat(R"(Cannot instantiate generic class "%s" without type arguments. Generic classes must be instantiated with a direct 'new()' call. Callables, call("new"), and reflection are not supported.)", get_global_name() != StringName() ? String(get_global_name()) : String(local_name)));
+		}
+	}
+
 	Ref<RefCounted> ref;
 	Object *owner = nullptr;
 
@@ -250,7 +261,7 @@ Variant GDScript::_new(const Variant **p_args, int p_argcount, Callable::CallErr
 		return "Can't inherit from a virtual class.";
 	}
 
-	GDScriptInstance *instance = _create_instance(p_args, p_argcount, owner, r_error);
+	GDScriptInstance *instance = _create_instance(p_args, p_argcount, owner, r_error, generic_param_count > 0 ? &type_args : nullptr);
 	if (!instance) {
 		if (ref.is_null()) {
 			memdelete(owner);
@@ -294,8 +305,8 @@ String GDScript::get_generic_type_args() const {
 #ifdef TOOLS_ENABLED
 Dictionary GDScript::get_generic_chain_info() const {
 	PackedStringArray params;
-	for (const StringName& name : generic_param_names) {
-		params.push_back(String(name));
+	for (const StringName& gp_name : generic_param_names) {
+		params.push_back(String(gp_name));
 	}
 	Dictionary base_args;
 	for (const KeyValue<StringName, StringName>& E : base_generic_args) {
@@ -1017,6 +1028,11 @@ Variant GDScript::callp(const StringName &p_method, const Variant **p_args, int 
 	if (_is_abstract && p_method == SNAME("new")) {
 		r_error.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
 		return "Can't instantiate an abstract class.";
+	}
+
+	if (generic_param_count > 0 && p_method == SNAME("new")) {
+		r_error.error = Callable::CallError::CALL_ERROR_INVALID_METHOD;
+		return Variant();
 	}
 
 	if (native.is_valid()) {
@@ -2748,6 +2764,7 @@ void GDScriptLanguage::reload_scripts(const Array &p_scripts) {
 		}
 	}
 
+	AttachRules::revalidate_all();
 #endif // DEBUG_ENABLED
 }
 
@@ -3059,6 +3076,34 @@ bool GDScriptLanguage::has_native_impl_methods(Variant::Type p_type) const {
 GDScriptFunction* GDScriptLanguage::get_native_impl_method(Variant::Type p_type, const StringName& p_method_name) const {
 	MutexLock lock(mutex);
 	return impl_table.find(RuntimeImplTable::Key::builtin(p_type), p_method_name);
+}
+
+int GDScriptLanguage::get_or_add_enum_id(const StringName& p_enum_key) {
+	if (p_enum_key == StringName()) {
+		return 0;
+	}
+
+	MutexLock lock(mutex);
+	HashMap<StringName, int>::Iterator E = interned_enum_ids.find(p_enum_key);
+	if (E) { return E->value; }
+
+	if (interned_enum_names.is_empty()) {
+		interned_enum_names.push_back(StringName());
+	}
+
+	ERR_FAIL_COND_V_MSG(interned_enum_names.size() >= INT16_MAX, 0, "What the flying fuck are you doing making more than 65535 enums bro :sob:");
+	const int cock = interned_enum_names.size();
+	interned_enum_names.push_back(p_enum_key);
+	interned_enum_ids[p_enum_key] = cock;
+	return cock;
+}
+
+StringName GDScriptLanguage::get_enum_name_from_id(int p_id) const {
+	MutexLock lock(mutex);
+	if (p_id <= 0 || p_id >= interned_enum_names.size()) {
+		return StringName();
+	}
+	return interned_enum_names[p_id];
 }
 
 void GDScriptLanguage::register_enum_impl_method(const StringName& p_enum_key, const StringName& p_method_name, GDScriptFunction* p_function) {

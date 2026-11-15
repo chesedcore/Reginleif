@@ -189,6 +189,12 @@ class GDScriptCompiler {
 
 	GDScriptDataType _gdtype_from_datatype(const GDScriptParser::DataType &p_datatype, GDScript *p_owner, bool p_handle_metatype = true);
 
+	const GDScriptParser::FunctionNode* reified_generic_function = nullptr;
+	const GDScriptParser::ClassNode* reified_generic_class = nullptr;
+	GDScriptParser::DataType current_impl_target;
+	int _generic_param_index_in_scope(const GDScriptParser::DataType& p_type) const;
+	GDScriptDataType _type_argument_from_datatype(const GDScriptParser::DataType& p_type, GDScript* p_owner);
+
 	GDScriptCodeGenerator::Address _parse_expression(CodeGen &codegen, Error &r_error, const GDScriptParser::ExpressionNode *p_expression, bool p_root = false, bool p_initializer = false);
 	GDScriptCodeGenerator::Address _parse_match_pattern(CodeGen &codegen, Error &r_error, const GDScriptParser::PatternNode *p_pattern, const GDScriptCodeGenerator::Address &p_value_addr, const GDScriptCodeGenerator::Address &p_type_addr, const GDScriptCodeGenerator::Address &p_previous_test, bool p_is_first, bool p_is_nested);
 	List<GDScriptCodeGenerator::Address> _add_block_locals(CodeGen &codegen, const GDScriptParser::SuiteNode *p_block, GDScriptOptimiser::SiblingSlotPool* p_sibling_pool = nullptr);

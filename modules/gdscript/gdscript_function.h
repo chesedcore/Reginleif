@@ -37,6 +37,7 @@
 #include "core/string/string_name.h"
 #include "core/templates/pair.h"
 #include "core/templates/self_list.h"
+#include "core/variant/container_type_validate.h"
 #include "core/variant/variant.h"
 
 struct ContainerType;
@@ -62,6 +63,9 @@ public:
 	StringName enum_native_type;
 	Script *script_type = nullptr;
 	Ref<Script> script_type_ref;
+	int generic_param_index = -1;
+
+	ContainerTypeValidate make_element_validator() const;
 
 	_FORCE_INLINE_ bool has_type() const { return kind != VARIANT; }
 
@@ -123,6 +127,7 @@ public:
 
 	bool operator==(const GDScriptDataType &p_other) const {
 		return kind == p_other.kind &&
+				generic_param_index == p_other.generic_param_index &&
 				builtin_type == p_other.builtin_type &&
 				native_type == p_other.native_type &&
 				enum_native_type == p_other.enum_native_type &&
@@ -142,6 +147,7 @@ public:
 		script_type = p_other.script_type;
 		script_type_ref = p_other.script_type_ref;
 		container_element_types = p_other.container_element_types;
+		generic_param_index = p_other.generic_param_index;
 	}
 
 	GDScriptDataType(const GDScriptDataType &p_other) {
@@ -151,8 +157,27 @@ public:
 	~GDScriptDataType() {}
 };
 
+struct GDScriptPendingTypeArgs {
+	struct Entry {
+		StringName function_name;
+		Vector<ContainerTypeValidate> args;
+	};
+	Vector<Entry> entries;
+
+	void push(const StringName& p_function_name, const Vector<ContainerTypeValidate>& p_args);
+	bool take(const StringName& p_function_name, int p_count, Vector<ContainerTypeValidate>& r_args);
+
+	static GDScriptPendingTypeArgs& get();
+};
+
 class GDScriptFunction {
 public:
+	static bool generic_instance_matches(Object* p_object, const ContainerTypeValidate& p_expected);
+	static bool resolve_instance_type_args(GDScriptInstance* p_instance, const Script* p_target, Vector<ContainerTypeValidate>& r_args);
+	static String describe_generic_instance(Object* p_object);
+	static GDScriptFunction* find_static_impl_function(const ContainerTypeValidate& p_type, const StringName& p_method);
+	static String describe_validator(const ContainerTypeValidate& p_validator);
+
 	enum Opcode {
 		OPCODE_OPERATOR,
 		OPCODE_OPERATOR_VALIDATED,
@@ -335,12 +360,15 @@ public:
 		OPCODE_RESERVED_12,
 		OPCODE_RESERVED_13,
 		OPCODE_RESERVED_14,
-		OPCODE_ASSIGN_TYPED_ARRAY_NESTED,
-		OPCODE_ASSIGN_TYPED_DICTIONARY_NESTED,
-		OPCODE_RETURN_TYPED_DICTIONARY_NESTED,
 		OPCODE_CHECK_TYPED_ARRAY_ARG,
 		OPCODE_CHECK_TYPED_DICTIONARY_ARG,
-		OPCODE_END
+		OPCODE_SET_TYPE_ARGS,
+		OPCODE_LOAD_TYPE_ARGS,
+		OPCODE_LOAD_INSTANCE_TYPE_ARGS,
+		OPCODE_CHECK_GENERIC_INSTANCE,
+		OPCODE_TYPE_TEST_GENERIC,
+		OPCODE_CALL_ON_TYPE_ARG,
+		OPCODE_END,
 	};
 
 	enum Address {
@@ -420,6 +448,7 @@ private:
 	Vector<const MethodBind *> methods;
 	Vector<GDScriptFunction *> lambdas;
 	Vector<GDScriptFunction*> native_impl_call_functions;
+	Vector<ContainerTypeValidate> container_validators;
 
 	int _code_size = 0;
 	int _default_arg_count = 0;
@@ -439,9 +468,9 @@ private:
 	int _methods_count = 0;
 	int _native_impl_call_functions_count = 0;
 	int _lambdas_count = 0;
+	int _container_validators_count = 0;
 
 #ifdef DEBUG_ENABLED
-	///looked at only after a runtime error, so regular inline calls remain (mostly) free
 	struct InlineCall {
 		int start = 0;
 		int end = 0;
@@ -475,6 +504,7 @@ private:
 	const MethodBind *const *_methods_ptr = nullptr;
 	GDScriptFunction **_lambdas_ptr = nullptr;
 	GDScriptFunction** _native_impl_call_functions_ptr = nullptr;
+	const ContainerTypeValidate* _container_validators_ptr = nullptr;
 
 #ifdef DEBUG_ENABLED
 	CharString func_cname;
@@ -528,6 +558,7 @@ public:
 		int ip = 0;
 		int line = 0;
 		int defarg = 0;
+		Vector<ContainerTypeValidate> type_args;
 		Variant result;
 	};
 

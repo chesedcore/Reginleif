@@ -117,6 +117,7 @@ class GDScriptByteCodeGenerator : public GDScriptCodeGenerator {
 	RBMap<const MethodBind *, int> method_bind_map;
 	RBMap<GDScriptFunction *, int> lambdas_map;
 	RBMap<GDScriptFunction*, int> native_impl_call_function_map;
+	Vector<ContainerTypeValidate> container_validators;
 
 #ifdef DEBUG_ENABLED
 	// Keep method and property names for pointer and validated operations.
@@ -351,6 +352,16 @@ class GDScriptByteCodeGenerator : public GDScriptCodeGenerator {
 		return pos;
 	}
 
+	int get_container_validator_pos(const ContainerTypeValidate& p_validator) {
+		for (int i = 0; i < container_validators.size(); i++) {
+			if (container_validators[i] == p_validator) {
+				return i;
+			}
+		}
+		container_validators.push_back(p_validator);
+		return container_validators.size() - 1;
+	}
+
 	int get_method_bind_pos(const MethodBind *p_method) {
 		if (method_bind_map.has(p_method)) {
 			return method_bind_map[p_method];
@@ -575,6 +586,10 @@ public:
 	virtual void write_construct_typed_array(const Address &p_target, const GDScriptDataType &p_element_type, const Vector<Address> &p_arguments) override;
 	virtual void write_construct_dictionary(const Address &p_target, const Vector<Address> &p_arguments) override;
 	virtual void write_construct_typed_dictionary(const Address &p_target, const GDScriptDataType &p_key_type, const GDScriptDataType &p_value_type, const Vector<Address> &p_arguments) override;
+	virtual void write_set_type_args(const StringName& p_function_name, const Vector<GDScriptDataType>& p_type_args) override;
+	virtual void write_load_type_args(int p_count) override;
+	virtual void write_load_instance_type_args(int p_count) override;
+	virtual void write_call_on_type_arg(const Address& p_target, const GDScriptDataType& p_type, const StringName& p_method, const Vector<Address>& p_arguments) override;
 	virtual void write_await(const Address &p_target, const Address &p_operand) override;
 	virtual void write_if(const Address &p_condition) override;
 	virtual void write_else() override;
