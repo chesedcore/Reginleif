@@ -178,7 +178,7 @@ def configure(env: "SConsEnvironment"):
                     "-fsanitize=undefined,shift,shift-exponent,integer-divide-by-zero,unreachable,vla-bound,null,return,signed-integer-overflow,bounds,float-divide-by-zero,float-cast-overflow,nonnull-attribute,returns-nonnull-attribute,bool,enum,vptr,pointer-overflow,builtin"
                 ]
             )
-            env.Append(LINKFLAGS=["-fsanitize=undefined"])
+            env.Append(LINKFLAGS=["-fsanitize=undefined,vptr"])
             if env["use_llvm"]:
                 env.Append(
                     CCFLAGS=[
@@ -211,6 +211,9 @@ def configure(env: "SConsEnvironment"):
             env.Append(LINKFLAGS=["-fsanitize=memory"])
 
     env.Append(CCFLAGS=["-ffp-contract=off"])
+
+    if env["debug_symbols"]:
+        env.Append(LINKFLAGS=["-Wl,--build-id"])
 
     if env["library_type"] == "shared_library":
         env.Append(CCFLAGS=["-fPIC"])

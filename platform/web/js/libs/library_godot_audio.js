@@ -95,7 +95,7 @@ function GodotSampleDriver(audioContext, positionWorkletPath) {
 	 *   loopEnd: number,
 	 *   loopMode: LoopMode,
 	 *   length: number,
-	 *   copyBuffer: function(): !AudioBuffer,
+	 *   getBuffer: function(): !AudioBuffer,
 	 * }}
 	 */
 	var GodotStream; // eslint-disable-line no-var, no-unassigned-vars
@@ -255,17 +255,12 @@ function GodotSampleDriver(audioContext, positionWorkletPath) {
 			/** @type {number} */ loopEnd: options.loopEnd ?? 0,
 			/** @type {number} */ length: sourceBuffer.length,
 		};
-		/** @return {!AudioBuffer} */
-		stream.copyBuffer = function () {
-			const channels = new Array(sourceBuffer.numberOfChannels);
-			for (let i = 0; i < sourceBuffer.numberOfChannels; i++) {
-				channels[i] = new Float32Array(sourceBuffer.getChannelData(i));
-			}
-			const buffer = ctx.createBuffer(sourceBuffer.numberOfChannels, sourceBuffer.length, sourceBuffer.sampleRate);
-			for (let i = 0; i < channels.length; i++) {
-				buffer.copyToChannel(channels[i], i, 0);
-			}
-			return buffer;
+		/**
+		 * The same AudioBuffer can be used by multiple AudioBufferSourceNodes.
+		 * @return {!AudioBuffer}
+		 */
+		stream.getBuffer = function () {
+			return sourceBuffer;
 		};
 		streams.set(streamId, stream);
 		return stream;
@@ -408,7 +403,7 @@ function GodotSampleDriver(audioContext, positionWorkletPath) {
 
 			// Source
 			source = ctx.createBufferSource();
-			source.buffer = getStream(streamId).copyBuffer();
+			source.buffer = getStream(streamId).getBuffer();
 			source.onended = (_) => {
 				if (paused) {
 					return;
@@ -904,8 +899,8 @@ const _GodotAudioSampleDriver = {
 	},
 
 	godot_audio_sample_start__proxy: 'sync',
-	godot_audio_sample_start__sig: 'viiiifi',
-	godot_audio_sample_start: function (p_playback, p_stream, p_bus, p_offset, p_pitch_scale, p_volume) {
+	godot_audio_sample_start__sig: 'viiiifii',
+	godot_audio_sample_start: function (p_playback, p_stream, p_bus, p_offset, p_pitch_scale, p_volume, p_paused) {
 		if (!GodotAudio.sample_driver) {
 			return;
 		}
@@ -920,6 +915,7 @@ const _GodotAudioSampleDriver = {
 		playback.setVolumes([p_bus], volume);
 		playback.setPitchScale(p_pitch_scale);
 		playback.start(p_offset);
+		playback.pause(Boolean(p_paused));
 	},
 
 	godot_audio_sample_stop__proxy: 'sync',

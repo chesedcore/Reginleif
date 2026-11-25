@@ -441,16 +441,16 @@ Dictionary CanvasItemEditor::_get_context_data() {
 bool CanvasItemEditor::_select_click_on_item(const Variant &p_node, bool p_append) {
 	Node *node = Object::cast_to<Node>(p_node);
 	bool still_selected = true;
-	const List<Node *> &top_node_list = editor_selection->get_top_selected_node_list();
+	const List<Node *> &full_node_list = editor_selection->get_full_selected_node_list();
 
-	if (p_append && !top_node_list.is_empty()) {
+	if (p_append && !full_node_list.is_empty()) {
 		if (editor_selection->is_selected(node)) {
 			// Already in the selection, remove it from the selected nodes
 			editor_selection->remove_node(node);
 			still_selected = false;
 
-			if (top_node_list.size() == 1) {
-				EditorNode::get_singleton()->push_item(top_node_list.front()->get());
+			if (full_node_list.size() == 1) {
+				EditorNode::get_singleton()->push_item(full_node_list.front()->get());
 			}
 		} else {
 			// Add the item to the selection
@@ -2639,7 +2639,6 @@ void CanvasItemEditor::_notification(int p_what) {
 					callable_mp(EditorNode::get_singleton(), &EditorNode::get_edited_scene),
 					callable_mp(this, &CanvasItemEditor::_select_click_on_item),
 					callable_mp(this, &CanvasItemEditor::_get_selection_callback),
-					callable_mp(viewport_scrollable, &Control::get_transform),
 					callable_mp((Viewport *)EditorNode::get_singleton()->get_scene_root(), &Viewport::get_global_canvas_transform),
 					callable_mp((CanvasItem *)viewport, &CanvasItem::get_local_mouse_position),
 					callable_mp(EditorNode::get_singleton()->get_editor_plugins_over(), &EditorPluginList::forward_gui_input));
@@ -4078,6 +4077,7 @@ CanvasItemEditor::CanvasItemEditor() {
 
 	ci_manipulator.instantiate();
 	ci_manipulator->set_editor_mode_enabled(true);
+	ci_manipulator->set_local_space_enabled(true);
 	ci_manipulator->set_scale(EDSCALE);
 	// Enable pixel snapping even if pixel snap rendering is disabled in the Project Settings.
 	// This results in crisper visuals by preventing 2D nodes from being placed at subpixel coordinates.
@@ -4519,7 +4519,7 @@ void CanvasItemEditorPlugin::edit(Object *p_object) {
 }
 
 bool CanvasItemEditorPlugin::handles(Object *p_object) const {
-	return Object::cast_to<CanvasItem>(p_object);
+	return Object::cast_to<CanvasItem>(p_object) != nullptr || Object::cast_to<CanvasLayer>(p_object) != nullptr || Object::cast_to<Window>(p_object) != nullptr;
 }
 
 void CanvasItemEditorPlugin::make_visible(bool p_visible) {

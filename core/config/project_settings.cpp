@@ -1449,14 +1449,45 @@ bool ProjectSettings::check_changed_settings_in_group(const String &p_setting_pr
 
 void ProjectSettings::refresh_global_class_list() {
 	// This is called after mounting a new PCK file to pick up class changes.
-	is_global_class_list_loaded = false; // Make sure we read from the freshly mounted PCK.
-	Array script_classes = get_global_class_list();
-	for (int i = 0; i < script_classes.size(); i++) {
-		Dictionary c = script_classes[i];
-		if (!c.has("class") || !c.has("language") || !c.has("path") || !c.has("base") || !c.has("is_abstract") || !c.has("is_tool")) {
+
+	// Reloading here would be wrong for the class list; instead we must merge
+	// the new class list into the old.
+
+	Ref<ConfigFile> cf;
+	cf.instantiate();
+	if (cf->load(get_global_class_list_path()) != OK) {
+#ifndef TOOLS_ENABLED
+		// Script classes can't be recreated in exported project, so print an error.
+		ERR_PRINT("Could not load global script cache.");
+#endif
+		return;
+	}
+
+	Array mounted_global_class_list = cf->get_value("", "list", Array());
+	for (const Variant &new_entry_variant : mounted_global_class_list) {
+		Dictionary new_entry = new_entry_variant;
+		if (!new_entry.has("class") || !new_entry.has("language") || !new_entry.has("path") || !new_entry.has("base") || !new_entry.has("is_abstract") || !new_entry.has("is_tool")) {
 			continue;
 		}
-		ScriptServer::add_global_class(c["class"], c["base"], c["language"], c["path"], c["is_abstract"], c["is_tool"]);
+		StringName new_class_name = new_entry["class"];
+		String new_class_path = new_entry["path"];
+
+		bool found = false;
+		for (Variant &v : global_class_list) {
+			Dictionary existing_entry = v;
+			if (existing_entry["class"].to<StringName>() == new_class_name) {
+				if (existing_entry["path"] != new_class_path) {
+					WARN_PRINT(vformat("A mounted resource pack moved global class '%s' from path '%s' to '%s'. This is not supported and might lead to issues.", new_entry["class"], existing_entry["path"], new_class_path));
+				}
+				v = new_entry;
+				found = true;
+				break;
+			}
+		}
+		if (!found) {
+			global_class_list.push_back(new_entry);
+		}
+		ScriptServer::add_global_class(new_entry["class"], new_entry["base"], new_entry["language"], new_entry["path"], new_entry["is_abstract"], new_entry["is_tool"]);
 	}
 }
 
@@ -1715,7 +1746,6 @@ ProjectSettings::ProjectSettings() {
 	GLOBAL_DEF("application/run/disable_stderr", false);
 	GLOBAL_DEF("application/run/print_header", true);
 	GLOBAL_DEF("application/run/enable_alt_space_menu", false);
-	GLOBAL_DEF("application/run/use_game_mode", true);
 	GLOBAL_DEF_RST("application/config/use_hidden_project_data_directory", true);
 	GLOBAL_DEF("application/config/use_custom_user_dir", false);
 	GLOBAL_DEF("application/config/custom_user_dir_name", "");
@@ -1896,6 +1926,7 @@ ProjectSettings::ProjectSettings() {
 	GLOBAL_DEF_BASIC(PropertyInfo(Variant::INT, "input_devices/pointing/android/rotary_input_scroll_axis", PROPERTY_HINT_ENUM, "Horizontal,Vertical"), 1);
 	GLOBAL_DEF("input_devices/pointing/android/override_volume_buttons", false);
 	GLOBAL_DEF_BASIC("input_devices/pointing/android/disable_scroll_deadzone", false);
+	GLOBAL_DEF_BASIC("input_devices/compatibility/windows/disable_raw_event_bulk_processing", false);
 
 	// These properties will not show up in the dialog. If you want to exclude whole groups, use add_hidden_prefix().
 	GLOBAL_DEF_INTERNAL("application/config/features", PackedStringArray());

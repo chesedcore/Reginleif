@@ -848,6 +848,21 @@ msgstr "ワーカープール"
 msgid "Low Priority Thread Ratio"
 msgstr "優先度の低いスレッドの比率"
 
+msgid "Target"
+msgstr "ターゲット"
+
+msgid "Start Offset"
+msgstr "始点オフセット"
+
+msgid "Max Results"
+msgstr "最大表示件数"
+
+msgid "Names"
+msgstr "名前"
+
+msgid "Strings"
+msgstr "文字列"
+
 msgid "Locale"
 msgstr "ロケール"
 
@@ -910,9 +925,6 @@ msgstr "ハンドルモード"
 
 msgid "Stream"
 msgstr "ストリーム"
-
-msgid "Start Offset"
-msgstr "始点オフセット"
 
 msgid "End Offset"
 msgstr "終点オフセット"
@@ -998,9 +1010,6 @@ msgstr "プッシュ通知"
 msgid "Access Wi-Fi"
 msgstr "Wi-Fiのアクセス"
 
-msgid "Performance Gaming Tier"
-msgstr "ゲーミング性能ランク"
-
 msgid "Shader Baker"
 msgstr "シェーダーベイカー"
 
@@ -1060,6 +1069,12 @@ msgstr "スライダーを隠す"
 
 msgid "Editing Integer"
 msgstr "整数を編集中"
+
+msgid "Font Size"
+msgstr "フォントサイズ"
+
+msgid "Focus"
+msgstr "フォーカス"
 
 msgid "Zoom"
 msgstr "ズーム"
@@ -1520,12 +1535,6 @@ msgstr "垂直"
 msgid "Layout"
 msgstr "レイアウト"
 
-msgid "Fix Alpha Border"
-msgstr "アルファ境界を修正"
-
-msgid "Premult Alpha"
-msgstr "乗算済みアルファ"
-
 msgid "Normal Map"
 msgstr "法線マップ"
 
@@ -1534,6 +1543,12 @@ msgstr "ラフネス"
 
 msgid "Src Normal"
 msgstr "ラフネス用の法線マップ"
+
+msgid "Fix Alpha Border"
+msgstr "アルファ境界を修正"
+
+msgid "Premult Alpha"
+msgstr "乗算済みアルファ"
 
 msgid "Process"
 msgstr "インポートプロセス"
@@ -1691,27 +1706,6 @@ msgstr "バージョンコントロール"
 
 msgid "Plugin Name"
 msgstr "プラグイン名"
-
-msgid "ID"
-msgstr "ID"
-
-msgid "Texture"
-msgstr "テクスチャ"
-
-msgid "Margins"
-msgstr "マージン"
-
-msgid "Separation"
-msgstr "分離"
-
-msgid "Alternative ID"
-msgstr "代替ID"
-
-msgid "Speed"
-msgstr "速さ"
-
-msgid "Frames Count"
-msgstr "フレーム数"
 
 msgid "Editors"
 msgstr "エディター"
@@ -1872,11 +1866,11 @@ msgstr "継続的に更新"
 msgid "Collapse Main Menu"
 msgstr "メインメニューを折りたたむ"
 
-msgid "Derive Script Globals by Name"
-msgstr "名前からスクリプト内のグローバルスコープを推論する"
-
 msgid "Scene Tree"
 msgstr "シーンツリー"
+
+msgid "Derive Script Globals by Name"
+msgstr "名前からスクリプト内のグローバルスコープを推論する"
 
 msgid "Ask Before Revoking Unique Name"
 msgstr "ユニーク名を無効にする前に確認する"
@@ -2072,9 +2066,6 @@ msgstr "表示モード"
 
 msgid "Thumbnail Size"
 msgstr "サムネイルのサイズ"
-
-msgid "Max Results"
-msgstr "最大表示件数"
 
 msgid "Blender"
 msgstr "Blender"
@@ -2298,11 +2289,11 @@ msgstr "シーンを変更したとき、そのシーンにアタッチしたス
 msgid "Drop Preload Resources as UID"
 msgstr "プリロードリソースをUIDとしてドロップ"
 
-msgid "Documentation"
-msgstr "ドキュメント"
-
 msgid "Enable Tooltips"
 msgstr "ツールチップを有効化"
+
+msgid "Documentation"
+msgstr "ドキュメント"
 
 msgid "Script List"
 msgstr "スクリプト一覧"
@@ -2697,9 +2688,6 @@ msgstr "実行前に保存"
 msgid "Output"
 msgstr "出力"
 
-msgid "Font Size"
-msgstr "フォントサイズ"
-
 msgid "Platforms"
 msgstr "プラットフォーム"
 
@@ -3011,9 +2999,6 @@ msgstr "Windowsアイコン"
 
 msgid "Text Driver"
 msgstr "テキストドライバー"
-
-msgid "Search in File Extensions"
-msgstr "ファイル拡張子で検索"
 
 msgid "Mouse Cursor"
 msgstr "マウスカーソル"
@@ -3474,17 +3459,83 @@ msgstr "最大異方性"
 msgid "Bone Update"
 msgstr "ボーン更新"
 
-msgid "Names"
-msgstr "名前"
+msgid "ID"
+msgstr "ID"
 
-msgid "Strings"
-msgstr "文字列"
+msgid "Texture"
+msgstr "テクスチャ"
+
+msgid "Margins"
+msgstr "マージン"
+
+msgid "Separation"
+msgstr "分離"
+
+msgid "Alternative ID"
+msgstr "代替ID"
+
+msgid "Speed"
+msgstr "速さ"
+
+msgid "Frames Count"
+msgstr "フレーム数"
+
+msgid "Tile Set"
+msgstr "タイルセット"
+
+msgid "Y Sort Origin"
+msgstr "Yソート原点"
+
+msgid "Terrains"
+msgstr "地形"
+
+msgid "Custom Data"
+msgstr "カスタムデータ"
+
+msgid "Tile Size"
+msgstr "タイルサイズ"
+
+msgid "Physics Layers"
+msgstr "物理レイヤー"
+
+msgid "Scene"
+msgstr "シーン"
+
+msgid "Polygons Count"
+msgstr "ポリゴン数"
+
+msgid "Points"
+msgstr "点"
+
+msgid "Flip H"
+msgstr "水平反転"
+
+msgid "Flip V"
+msgstr "垂直反転"
+
+msgid "Transpose"
+msgstr "行列(縦横)入れ替え"
+
+msgid "Texture Origin"
+msgstr "テクスチャの原点"
+
+msgid "Modulate"
+msgstr "変調"
+
+msgid "Z Index"
+msgstr "Zインデックス"
+
+msgid "Probability"
+msgstr "確率"
 
 msgid "Flags"
 msgstr "フラグ"
 
 msgid "Expression"
 msgstr "式"
+
+msgid "Group"
+msgstr "グループ"
 
 msgid "Constant"
 msgstr "コンスタント"
@@ -3635,6 +3686,9 @@ msgstr "権限"
 
 msgid "Custom Permissions"
 msgstr "カスタムの権限"
+
+msgid "Performance Gaming Tier"
+msgstr "ゲーミング性能ランク"
 
 msgid "Spotlight 80 X 80"
 msgstr "Spotlight 80 x 80"
@@ -3885,12 +3939,6 @@ msgstr "スピードスケール"
 msgid "Centered"
 msgstr "中央"
 
-msgid "Flip H"
-msgstr "水平反転"
-
-msgid "Flip V"
-msgstr "垂直反転"
-
 msgid "Current"
 msgstr "現在"
 
@@ -3974,9 +4022,6 @@ msgstr "放出シェイプ"
 
 msgid "Shape"
 msgstr "シェイプ"
-
-msgid "Points"
-msgstr "点"
 
 msgid "Colors"
 msgstr "カラー"
@@ -4248,12 +4293,6 @@ msgstr "横フレーム数"
 msgid "Vframes"
 msgstr "縦フレーム数"
 
-msgid "Tile Set"
-msgstr "タイルセット"
-
-msgid "Y Sort Origin"
-msgstr "Yソート原点"
-
 msgid "Enabling"
 msgstr "有効化"
 
@@ -4350,9 +4389,6 @@ msgstr "パラメーター"
 
 msgid "Emission Energy"
 msgstr "発光エネルギー"
-
-msgid "Modulate"
-msgstr "変調"
 
 msgid "Albedo Mix"
 msgstr "アルベドミックス"
@@ -4513,11 +4549,8 @@ msgstr "プロファイル"
 msgid "Show Rest Only"
 msgstr "レストのみを表示"
 
-msgid "Target"
-msgstr "ターゲット"
-
-msgid "Track Physics Step"
-msgstr "物理ステップの追跡"
+msgid "Max Length"
+msgstr "最大長"
 
 msgid "Sorting"
 msgstr "ソート"
@@ -4642,17 +4675,80 @@ msgstr "ボタン押下"
 msgid "Button Group"
 msgstr "ボタングループ"
 
+msgid "Hover Pressed"
+msgstr "ホバー押下"
+
+msgid "Font Pressed Color"
+msgstr "フォントの押下色"
+
+msgid "Font Hover Color"
+msgstr "フォントのホバー色"
+
+msgid "Font Hover Pressed Color"
+msgstr "フォントのホバー押下色"
+
+msgid "Font Outline Color"
+msgstr "フォントのアウトラインの色"
+
+msgid "Icon Pressed Color"
+msgstr "アイコンの押下色"
+
+msgid "Icon Hover Color"
+msgstr "アイコンのホバー色"
+
+msgid "Icon Hover Pressed Color"
+msgstr "アイコンのホバー押下色"
+
 msgid "Indentation"
 msgstr "インデント"
+
+msgid "Code Folding Color"
+msgstr "折り畳まれたコードの色"
+
+msgid "Folded Code Region Color"
+msgstr "折り畳まれたコード領域の色"
+
+msgid "Breakpoint Color"
+msgstr "ブレークポイントの色"
+
+msgid "Bookmark Color"
+msgstr "ブックマークの色"
+
+msgid "Executing Line Color"
+msgstr "実行中の行の色"
+
+msgid "Line Number Color"
+msgstr "行番号の色"
+
+msgid "Completion Scroll Color"
+msgstr "補完ウインドウのスクロールの色"
+
+msgid "Completion Scroll Hovered Color"
+msgstr "補完ウインドウのスクロールのホバー色"
+
+msgid "Completion Background Color"
+msgstr "補完の背景色"
+
+msgid "Completion Selected Color"
+msgstr "補完の選択中の色"
+
+msgid "Completion Existing Color"
+msgstr "既に補完されている箇所の色"
+
+msgid "Line Length Guideline Color"
+msgstr "行の長さのガイド線の色"
+
+msgid "Brace Mismatch Color"
+msgstr "波括弧ミスマッチの色"
+
+msgid "Screen Picker"
+msgstr "スクリーンピッカー"
 
 msgid "Theme Overrides"
 msgstr "テーマのオーバーライド"
 
 msgid "Tooltip"
 msgstr "ツールチップ"
-
-msgid "Focus"
-msgstr "フォーカス"
 
 msgid "Previous"
 msgstr "前"
@@ -4675,8 +4771,29 @@ msgstr "フィルター"
 msgid "Options"
 msgstr "オプション"
 
+msgid "Reload"
+msgstr "再読み込み"
+
+msgid "Favorite"
+msgstr "お気に入り"
+
+msgid "Toggle Hidden"
+msgstr "非表示の切り替え"
+
+msgid "Folder"
+msgstr "フォルダー"
+
+msgid "File"
+msgstr "ファイル"
+
+msgid "Thumbnail Mode"
+msgstr "サムネイルモード"
+
 msgid "Title Position"
 msgstr "タイトルの位置"
+
+msgid "Title Panel"
+msgstr "タイトルパネル"
 
 msgid "Zoom Min"
 msgstr "最小ズーム"
@@ -4693,11 +4810,17 @@ msgstr "ツールバーメニュー"
 msgid "Show Menu"
 msgstr "メニューを表示する"
 
+msgid "Menu Panel"
+msgstr "メニューパネル"
+
 msgid "Draggable"
 msgstr "ドラッグ可能"
 
 msgid "Selected"
 msgstr "選択中"
+
+msgid "Titlebar"
+msgstr "タイトルバー"
 
 msgid "Select Mode"
 msgstr "選択モード"
@@ -4711,14 +4834,35 @@ msgstr "アイコンモード"
 msgid "Icon Scale"
 msgstr "アイコンスケール"
 
+msgid "Cursor"
+msgstr "カーソル"
+
 msgid "Label Settings"
 msgstr "ラベル設定"
 
-msgid "Max Length"
-msgstr "最大長"
+msgid "Caret Color"
+msgstr "キャレットの色"
+
+msgid "Selection Color"
+msgstr "選択色"
+
+msgid "Clear"
+msgstr "クリア"
 
 msgid "URI"
 msgstr "URI"
+
+msgid "Separator"
+msgstr "セパレーター"
+
+msgid "Indeterminate"
+msgstr "不定表示"
+
+msgid "Submenu"
+msgstr "サブメニュー"
+
+msgid "Font Separator"
+msgstr "フォントセパレータ"
 
 msgid "Fill Mode"
 msgstr "充填方向"
@@ -4726,11 +4870,11 @@ msgstr "充填方向"
 msgid "Show Percentage"
 msgstr "割合を表示"
 
-msgid "Indeterminate"
-msgstr "不定表示"
-
 msgid "Preview Indeterminate"
 msgstr "不定表示をプレビュー"
+
+msgid "Background"
+msgstr "背景"
 
 msgid "Min Value"
 msgstr "最小値"
@@ -4762,11 +4906,23 @@ msgstr "タブサイズ"
 msgid "Progress Bar Delay"
 msgstr "プログレスバーのディレイ"
 
+msgid "Shadow Offset X"
+msgstr "シャドウのオフセットX"
+
+msgid "Shadow Offset Y"
+msgstr "シャドウのオフセットY"
+
 msgid "Scrollable"
 msgstr "スクロール可能"
 
 msgid "Update on Text Changed"
 msgstr "テキスト変更時の更新"
+
+msgid "Format"
+msgstr "フォーマット"
+
+msgid "Autohide"
+msgstr "自動非表示"
 
 msgid "Current Tab"
 msgstr "現在のタブ"
@@ -4780,11 +4936,35 @@ msgstr "ドラッグして再配置可能"
 msgid "Tabs"
 msgstr "タブ"
 
+msgid "Close"
+msgstr "閉じる"
+
 msgid "Tabs Position"
 msgstr "タブの位置"
 
+msgid "Menu"
+msgstr "メニュー"
+
 msgid "Syntax Highlighter"
 msgstr "シンタックスハイライト"
+
+msgid "Search Result Color"
+msgstr "検索結果の色"
+
+msgid "Search Result Border Color"
+msgstr "検索結果のボーダーの色"
+
+msgid "Caret Background Color"
+msgstr "キャレットの背景色"
+
+msgid "Tab"
+msgstr "タブ"
+
+msgid "Current Line Color"
+msgstr "現在の行の色"
+
+msgid "Word Highlighted Color"
+msgstr "ハイライトされた単語の色"
 
 msgid "Auto Tooltip"
 msgstr "自動ツールチップ"
@@ -4794,9 +4974,6 @@ msgstr "オーディオトラック"
 
 msgid "Expand"
 msgstr "拡大"
-
-msgid "Z Index"
-msgstr "Zインデックス"
 
 msgid "Use Parent Material"
 msgstr "親のマテリアルを使用"
@@ -4821,9 +4998,6 @@ msgstr "ノード名と番号の区切り"
 
 msgid "Node Name Casing"
 msgstr "ノード名の命名規則"
-
-msgid "Group"
-msgstr "グループ"
 
 msgid "Shape Color"
 msgstr "シェイプ色"
@@ -4860,9 +5034,6 @@ msgstr "ライトとシャドウ"
 
 msgid "SDF"
 msgstr "SDF"
-
-msgid "Menu"
-msgstr "メニュー"
 
 msgid "Wait Time"
 msgstr "待機時間"
@@ -4921,6 +5092,24 @@ msgstr "最小サイズ"
 msgid "Max Size"
 msgstr "最大サイズ"
 
+msgid "Title Font"
+msgstr "タイトルのフォント"
+
+msgid "Title Font Size"
+msgstr "タイトルのフォントサイズ"
+
+msgid "Title Height"
+msgstr "タイトルの高さ"
+
+msgid "Title Outline Modulate"
+msgstr "タイトルのアウトライン変調"
+
+msgid "Title Outline Size"
+msgstr "タイトルのアウトラインサイズ"
+
+msgid "Close Pressed"
+msgstr "閉じる押下"
+
 msgid "Layer Names"
 msgstr "レイヤー名"
 
@@ -4954,38 +5143,8 @@ msgstr "B"
 msgid "Use Gravity"
 msgstr "重力を使用"
 
-msgid "Terrains"
-msgstr "地形"
-
-msgid "Custom Data"
-msgstr "カスタムデータ"
-
-msgid "Tile Size"
-msgstr "タイルサイズ"
-
-msgid "Physics Layers"
-msgstr "物理レイヤー"
-
-msgid "Scene"
-msgstr "シーン"
-
-msgid "Polygons Count"
-msgstr "ポリゴン数"
-
-msgid "Transpose"
-msgstr "行列(縦横)入れ替え"
-
-msgid "Texture Origin"
-msgstr "テクスチャの原点"
-
-msgid "Probability"
-msgstr "確率"
-
 msgid "Distance"
 msgstr "距離"
-
-msgid "Item"
-msgstr "アイテム"
 
 msgid "Add UV2"
 msgstr "UV2を追加"
@@ -5053,8 +5212,14 @@ msgstr "一時停止"
 msgid "Atlas"
 msgstr "アトラス"
 
-msgid "Format"
-msgstr "フォーマット"
+msgid "Buffer Length"
+msgstr "バッファサイズ"
+
+msgid "Playback Mode"
+msgstr "再生モード"
+
+msgid "Random Volume Offset dB"
+msgstr "ランダム音量オフセット (dB)"
 
 msgid "Exposure"
 msgstr "露出"
@@ -5109,9 +5274,6 @@ msgstr "F値"
 
 msgid "Light Mode"
 msgstr "ライトモード"
-
-msgid "Background"
-msgstr "背景"
 
 msgid "Ambient Light"
 msgstr "環境光"
@@ -5449,174 +5611,6 @@ msgstr "関数の色"
 msgid "Member Variable Color"
 msgstr "メンバー変数の色"
 
-msgid "File"
-msgstr "ファイル"
-
-msgid "Font Pressed Color"
-msgstr "フォントの押下色"
-
-msgid "Font Hover Color"
-msgstr "フォントのホバー色"
-
-msgid "Font Hover Pressed Color"
-msgstr "フォントのホバー押下色"
-
-msgid "Font Outline Color"
-msgstr "フォントのアウトラインの色"
-
-msgid "Icon Pressed Color"
-msgstr "アイコンの押下色"
-
-msgid "Icon Hover Color"
-msgstr "アイコンのホバー色"
-
-msgid "Icon Hover Pressed Color"
-msgstr "アイコンのホバー押下色"
-
-msgid "Hover Pressed"
-msgstr "ホバー押下"
-
-msgid "Shadow Offset X"
-msgstr "シャドウのオフセットX"
-
-msgid "Shadow Offset Y"
-msgstr "シャドウのオフセットY"
-
-msgid "Caret Color"
-msgstr "キャレットの色"
-
-msgid "Selection Color"
-msgstr "選択色"
-
-msgid "Clear"
-msgstr "クリア"
-
-msgid "Tab"
-msgstr "タブ"
-
-msgid "Current Line Color"
-msgstr "現在の行の色"
-
-msgid "Caret Background Color"
-msgstr "キャレットの背景色"
-
-msgid "Word Highlighted Color"
-msgstr "ハイライトされた単語の色"
-
-msgid "Search Result Color"
-msgstr "検索結果の色"
-
-msgid "Search Result Border Color"
-msgstr "検索結果のボーダーの色"
-
-msgid "Completion Background Color"
-msgstr "補完の背景色"
-
-msgid "Completion Selected Color"
-msgstr "補完の選択中の色"
-
-msgid "Completion Existing Color"
-msgstr "既に補完されている箇所の色"
-
-msgid "Completion Scroll Color"
-msgstr "補完ウインドウのスクロールの色"
-
-msgid "Completion Scroll Hovered Color"
-msgstr "補完ウインドウのスクロールのホバー色"
-
-msgid "Bookmark Color"
-msgstr "ブックマークの色"
-
-msgid "Breakpoint Color"
-msgstr "ブレークポイントの色"
-
-msgid "Executing Line Color"
-msgstr "実行中の行の色"
-
-msgid "Code Folding Color"
-msgstr "折り畳まれたコードの色"
-
-msgid "Folded Code Region Color"
-msgstr "折り畳まれたコード領域の色"
-
-msgid "Brace Mismatch Color"
-msgstr "波括弧ミスマッチの色"
-
-msgid "Line Number Color"
-msgstr "行番号の色"
-
-msgid "Line Length Guideline Color"
-msgstr "行の長さのガイド線の色"
-
-msgid "Title Font"
-msgstr "タイトルのフォント"
-
-msgid "Title Font Size"
-msgstr "タイトルのフォントサイズ"
-
-msgid "Title Outline Modulate"
-msgstr "タイトルのアウトライン変調"
-
-msgid "Title Outline Size"
-msgstr "タイトルのアウトラインサイズ"
-
-msgid "Title Height"
-msgstr "タイトルの高さ"
-
-msgid "Close"
-msgstr "閉じる"
-
-msgid "Close Pressed"
-msgstr "閉じる押下"
-
-msgid "Load"
-msgstr "読み込む"
-
-msgid "Save"
-msgstr "保存"
-
-msgid "Reload"
-msgstr "再読み込み"
-
-msgid "Favorite"
-msgstr "お気に入り"
-
-msgid "Toggle Hidden"
-msgstr "非表示の切り替え"
-
-msgid "Folder"
-msgstr "フォルダー"
-
-msgid "Thumbnail Mode"
-msgstr "サムネイルモード"
-
-msgid "Separator"
-msgstr "セパレーター"
-
-msgid "Submenu"
-msgstr "サブメニュー"
-
-msgid "Font Separator"
-msgstr "フォントセパレータ"
-
-msgid "Titlebar"
-msgstr "タイトルバー"
-
-msgid "Cursor"
-msgstr "カーソル"
-
-msgid "Screen Picker"
-msgstr "スクリーンピッカー"
-
-msgid "Autohide"
-msgstr "自動非表示"
-
-msgid "Menu Panel"
-msgstr "メニューパネル"
-
-msgid "Title Panel"
-msgstr "タイトルパネル"
-
 msgid "Default Theme Scale"
 msgstr "デフォルトのテーマスケール"
 
@@ -5649,15 +5643,6 @@ msgstr "入力デバイス"
 
 msgid "Playback Speed Scale"
 msgstr "再生スピードスケール"
-
-msgid "Playback Mode"
-msgstr "再生モード"
-
-msgid "Random Volume Offset dB"
-msgstr "ランダム音量オフセット (dB)"
-
-msgid "Buffer Length"
-msgstr "バッファサイズ"
 
 msgid "Dry"
 msgstr "ドライ"

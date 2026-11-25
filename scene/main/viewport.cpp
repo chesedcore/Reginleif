@@ -3618,7 +3618,8 @@ void Viewport::_push_shortcut_input_internal(const Ref<InputEvent> &p_event) {
 	ERR_FAIL_COND(!is_inside_tree());
 	get_tree()->_call_input_pause(shortcut_input_group, SceneTree::CALL_INPUT_TYPE_SHORTCUT_INPUT, p_event, this);
 
-	if (!propagate_shortcuts_to_parent || is_input_handled()) {
+	// Only InputEventKey needs to be propagated, since it's a per-window event.
+	if (!propagate_shortcuts_to_parent || Object::cast_to<InputEventKey>(*p_event) == nullptr || is_input_handled()) {
 		return;
 	}
 
@@ -5900,7 +5901,7 @@ void Viewport::CameraOverride<T>::enable(Viewport *p_viewport, const T *p_curren
 	}
 
 	T *override_camera = memnew(T);
-	override_camera->set_name(vformat("Override%s", T ::get_class_static()));
+	override_camera->set_name(vformat("Override%s", T::get_class_static()));
 	p_viewport->add_child(override_camera, false, Node::INTERNAL_MODE_BACK);
 
 	override_camera->make_current();

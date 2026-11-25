@@ -1601,6 +1601,10 @@ Error RenderingDeviceDriverVulkan::_initialize_allocator() {
 	if (buffer_device_address_support) {
 		allocator_info.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 	}
+	// See GH-125146 for context.
+	if (physical_device_properties.vendorID == RenderingContextDriver::Vendor::VENDOR_AMD && physical_device_properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+		allocator_info.flags |= VMA_ALLOCATOR_CREATE_IGNORE_MAX_MEMORY_ALLOCATION_COUNT_BIT;
+	}
 	VkResult err = vmaCreateAllocator(&allocator_info, &allocator);
 	ERR_FAIL_COND_V_MSG(err, ERR_CANT_CREATE, vformat("Couldn't create Vulkan memory allocator (VkResult error %d).", err));
 
@@ -2301,6 +2305,10 @@ VkSampleCountFlagBits RenderingDeviceDriverVulkan::_ensure_supported_sample_coun
 	return VK_SAMPLE_COUNT_1_BIT;
 }
 
+RDD::TextureSamples RenderingDeviceDriverVulkan::texture_get_nearest_supported_samples(const TextureFormat &p_format) {
+	return TextureSamples(Math::get_shift_from_power_of_2((uint32_t)_ensure_supported_sample_count(p_format.samples)));
+}
+
 RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &p_format, const TextureView &p_view) {
 	VkImageCreateInfo create_info = {};
 	create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -2351,7 +2359,8 @@ RDD::TextureID RenderingDeviceDriverVulkan::texture_create(const TextureFormat &
 	create_info.mipLevels = p_format.mipmaps;
 	create_info.arrayLayers = p_format.array_layers;
 
-	create_info.samples = _ensure_supported_sample_count(p_format.samples);
+	ERR_FAIL_COND_V_MSG(texture_get_nearest_supported_samples(p_format) != p_format.samples, TextureID(), "Unsupported sample count.");
+	create_info.samples = RD_TO_VK_SAMPLE_COUNT[p_format.samples];
 	create_info.tiling = (p_format.usage_bits & TEXTURE_USAGE_CPU_READ_BIT) ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL;
 
 	// Usage.

@@ -1385,6 +1385,21 @@ static BOOL CALLBACK _MonitorEnumProcOrigin(HMONITOR hMonitor, HDC hdcMonitor, L
 	return TRUE;
 }
 
+typedef struct {
+	bool found;
+	RECT rect;
+} EnumMatchScreen;
+
+static BOOL CALLBACK _MonitorEnumMatchScreen(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData) {
+	EnumMatchScreen *data = (EnumMatchScreen *)dwData;
+	if (data->rect.left == lprcMonitor->left && data->rect.right == lprcMonitor->right && data->rect.top == lprcMonitor->top && data->rect.bottom == lprcMonitor->bottom) {
+		data->found = true;
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
 Point2i DisplayServerWindows::_get_screens_origin() const {
 	_THREAD_SAFE_METHOD_
 
@@ -2794,6 +2809,16 @@ void DisplayServerWindows::window_set_mode(DisplayServerEnums::WindowMode p_mode
 			rect.bottom = wd.height;
 		}
 
+		// Move window a bit if its client area fully matches area of a screen.
+		EnumMatchScreen data = { false, rect };
+		EnumDisplayMonitors(nullptr, nullptr, _MonitorEnumMatchScreen, (LPARAM)&data);
+		if (data.found) {
+			rect.left += GetSystemMetrics(SM_CXSIZEFRAME);
+			rect.top += GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CYCAPTION);
+			rect.right += GetSystemMetrics(SM_CXSIZEFRAME);
+			rect.bottom += GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CYCAPTION);
+		}
+
 		ShowWindow(wd.hWnd, SW_RESTORE);
 		MoveWindow(wd.hWnd, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, TRUE);
 
@@ -3247,6 +3272,10 @@ Vector2i DisplayServerWindows::ime_get_selection() const {
 	_THREAD_SAFE_METHOD_
 
 	DisplayServerEnums::WindowID window_id = _get_focused_window_or_popup();
+	// Find focusable parent.
+	while (windows.has(window_id) && windows[window_id].no_focus && windows[window_id].transient_parent != DisplayServerEnums::INVALID_WINDOW_ID) {
+		window_id = windows[window_id].transient_parent;
+	}
 	const WindowData &wd = windows[window_id];
 	if (!wd.ime_active) {
 		return Vector2i();
@@ -3279,6 +3308,10 @@ String DisplayServerWindows::ime_get_text() const {
 	_THREAD_SAFE_METHOD_
 
 	DisplayServerEnums::WindowID window_id = _get_focused_window_or_popup();
+	// Find focusable parent.
+	while (windows.has(window_id) && windows[window_id].no_focus && windows[window_id].transient_parent != DisplayServerEnums::INVALID_WINDOW_ID) {
+		window_id = windows[window_id].transient_parent;
+	}
 	const WindowData &wd = windows[window_id];
 	if (!wd.ime_active) {
 		return String();
@@ -3298,8 +3331,13 @@ String DisplayServerWindows::ime_get_text() const {
 void DisplayServerWindows::window_set_ime_active(const bool p_active, DisplayServerEnums::WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-	ERR_FAIL_COND(!windows.has(p_window));
-	WindowData &wd = windows[p_window];
+	DisplayServerEnums::WindowID window_id = p_window;
+	ERR_FAIL_COND(!windows.has(window_id));
+	// Find focusable parent.
+	while (windows.has(window_id) && windows[window_id].no_focus && windows[window_id].transient_parent != DisplayServerEnums::INVALID_WINDOW_ID) {
+		window_id = windows[window_id].transient_parent;
+	}
+	WindowData &wd = windows[window_id];
 
 	if (p_active) {
 		wd.ime_active = true;
@@ -3316,10 +3354,17 @@ void DisplayServerWindows::window_set_ime_active(const bool p_active, DisplaySer
 void DisplayServerWindows::window_set_ime_position(const Point2i &p_pos, DisplayServerEnums::WindowID p_window) {
 	_THREAD_SAFE_METHOD_
 
-	ERR_FAIL_COND(!windows.has(p_window));
-	WindowData &wd = windows[p_window];
+	DisplayServerEnums::WindowID window_id = p_window;
+	ERR_FAIL_COND(!windows.has(window_id));
+	Vector2 offset = windows[window_id].last_pos;
+	// Find focusable parent.
+	while (windows.has(window_id) && windows[window_id].no_focus && windows[window_id].transient_parent != DisplayServerEnums::INVALID_WINDOW_ID) {
+		window_id = windows[window_id].transient_parent;
+	}
+	offset = offset - windows[window_id].last_pos;
+	WindowData &wd = windows[window_id];
 
-	wd.im_position = p_pos;
+	wd.im_position = p_pos + offset;
 
 	HIMC himc = ImmGetContext(wd.hWnd);
 	if (himc == (HIMC) nullptr) {
@@ -3492,6 +3537,12 @@ void DisplayServerWindows::cursor_set_custom_image(const Ref<Resource> &p_cursor
 		cursor_shape = DisplayServerEnums::CURSOR_MAX;
 		cursor_set_shape(c);
 	}
+}
+
+void DisplayServerWindows::cursor_clear_custom_image_cache() {
+	_THREAD_SAFE_METHOD_
+
+	cursors_cache.clear();
 }
 
 bool DisplayServerWindows::get_swap_cancel_ok() {
@@ -4524,7 +4575,10 @@ void DisplayServerWindows::process_events() {
 
 	_THREAD_SAFE_LOCK_
 
-	bool has_touch_events = process_raw_input();
+	bool has_touch_events = true;
+	if (!disable_bulk_raw_input) {
+		has_touch_events = process_raw_input();
+	}
 
 	DisplayServerEnums::WindowID window_id = _get_focused_window_or_popup();
 	const WindowData &wd = windows[window_id];
@@ -8057,6 +8111,7 @@ DisplayServerWindows::DisplayServerWindows(const String &p_rendering_driver, Dis
 		return;
 	}
 
+	disable_bulk_raw_input = GLOBAL_GET("input_devices/compatibility/windows/disable_raw_event_bulk_processing");
 	_register_raw_input_devices(DisplayServerEnums::INVALID_WINDOW_ID);
 
 	String appname;

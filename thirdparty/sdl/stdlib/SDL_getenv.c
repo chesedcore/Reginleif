@@ -55,9 +55,6 @@ extern char **environ;
 static char **environ;
 #endif
 
-#if defined(SDL_PLATFORM_LINUX) || defined(SDL_PLATFORM_MACOS) || defined(SDL_PLATFORM_FREEBSD)
-#include <stdlib.h>
-#endif
 
 struct SDL_Environment
 {

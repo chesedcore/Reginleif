@@ -37,7 +37,6 @@
 #include "core/object/class_db.h"
 #include "core/os/keyboard.h"
 #include "core/string/translation_server.h"
-#include "editor/editor_string_names.h"
 #include "editor/settings/editor_settings.h"
 #include "editor/themes/editor_scale.h"
 #include "scene/theme/theme_db.h"
@@ -729,7 +728,7 @@ void EditorSpinSlider::_focus_entered(bool p_hide_focus) {
 	value_input->set_focus_previous(find_prev_valid_focus()->get_path());
 	callable_mp((CanvasItem *)value_input, &CanvasItem::show).call_deferred();
 	callable_mp((Control *)value_input, &Control::grab_focus).call_deferred(p_hide_focus);
-	callable_mp(value_input, &LineEdit ::select_all).call_deferred();
+	callable_mp(value_input, &LineEdit::select_all).call_deferred();
 	emit_signal("value_focus_entered");
 }
 

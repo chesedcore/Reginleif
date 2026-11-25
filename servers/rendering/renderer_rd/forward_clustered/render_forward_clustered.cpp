@@ -2619,9 +2619,7 @@ void RenderForwardClustered::_render_scene(RenderDataRD *p_render_data, const Co
 			}
 
 			RD::get_singleton()->draw_command_begin_label("MetalFX Temporal");
-			// Scale to ±0.5.
-			Vector2 jitter = p_render_data->scene_data->taa_jitter * 0.5f;
-			jitter *= Vector2(1.0, -1.0); // Flip y-axis as bottom left is origin.
+			Vector2 jitter = p_render_data->scene_data->taa_jitter * Vector2(rb->get_internal_size()) * 0.5f;
 
 			for (uint32_t v = 0; v < rb->get_view_count(); v++) {
 				RendererRD::MFXTemporalEffect::Params params;
@@ -4286,7 +4284,7 @@ void RenderForwardClustered::_update_global_pipeline_data_requirements_from_proj
 	const bool positional_shadow_16_bits = GLOBAL_GET_CACHED(bool, "rendering/lights_and_shadows/positional_shadow/atlas_16_bits");
 	global_pipeline_data_required.use_16_bit_shadows = directional_shadow_16_bits || positional_shadow_16_bits;
 	global_pipeline_data_required.use_32_bit_shadows = !directional_shadow_16_bits || !positional_shadow_16_bits;
-	global_pipeline_data_required.texture_samples = RenderSceneBuffersRD::msaa_to_samples(RSE::ViewportMSAA(msaa_3d_mode));
+	global_pipeline_data_required.texture_samples = RenderSceneBuffersRD::msaa_to_samples(RenderSceneBuffersRD::get_nearest_supported_msaa_3d(RSE::ViewportMSAA(msaa_3d_mode), _render_buffers_can_be_storage()));
 }
 
 void RenderForwardClustered::_update_global_pipeline_data_requirements_from_light_storage() {

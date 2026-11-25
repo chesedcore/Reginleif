@@ -1319,7 +1319,7 @@ void DocumentEditorContainer::_close_tab(int p_idx, bool p_save) {
 			_update_history_arrows();
 		}
 
-		document_list->update_list();
+		_update_filenames();
 		_save_layout();
 		_update_find_replace_bar();
 	}
@@ -1431,8 +1431,6 @@ void DocumentEditorContainer::_resave_scripts(const String &p_str) {
 		if (scr->is_built_in()) {
 			continue; // Internal script, who cares.
 		}
-
-		_auto_format_text(seb);
 
 		Ref<TextFile> text_file = scr;
 		if (text_file.is_valid()) {
@@ -2748,7 +2746,7 @@ PackedStringArray DocumentEditorContainer::get_unsaved_files() const {
 
 void DocumentEditorContainer::save_current_script() {
 	ScriptEditorBase *current = _get_current_editor();
-	if (!current || _test_script_times_on_disk()) {
+	if (!current || !current->is_unsaved() || _test_script_times_on_disk()) {
 		return;
 	}
 
@@ -2845,6 +2843,7 @@ void DocumentEditorContainer::apply_scripts() const {
 			continue;
 		}
 
+		_auto_format_text(seb);
 		if (TextEditorBase *teb = Object::cast_to<TextEditorBase>(seb)) {
 			teb->insert_final_newline();
 		}
@@ -2936,7 +2935,7 @@ void DocumentEditorContainer::_reload_scripts(bool p_refresh_only) {
 	disk_changed->hide();
 }
 
-void DocumentEditorContainer::_auto_format_text(ScriptEditorBase *p_seb) {
+void DocumentEditorContainer::_auto_format_text(ScriptEditorBase *p_seb) const {
 	if (TextEditorBase *teb = Object::cast_to<TextEditorBase>(p_seb)) {
 		if (trim_trailing_whitespace_on_save) {
 			teb->trim_trailing_whitespace();

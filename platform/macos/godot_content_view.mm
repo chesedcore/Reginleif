@@ -523,7 +523,9 @@
 	DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
 
 	NSPoint delta = NSMakePoint([event deltaX], [event deltaY]);
-	NSPoint mpos = [event locationInWindow];
+	const CGPoint cg_pos = CGEventGetLocation([event CGEvent]);
+	const NSPoint screen_pos = NSMakePoint(cg_pos.x, CGDisplayBounds(CGMainDisplayID()).size.height - cg_pos.y);
+	NSPoint mpos = [wd.window_object convertPointFromScreen:screen_pos];
 
 	if (ds->update_mouse_wrap(wd, delta, mpos, [event timestamp])) {
 		return;
@@ -555,9 +557,11 @@
 	mm->set_relative_screen_position(relativeMotion);
 	ds->get_key_modifier_state([event modifierFlags], mm);
 
-	const NSRect contentRect = [wd.window_view frame];
-	if (NSPointInRect([event locationInWindow], contentRect) && [NSWindow windowNumberAtPoint:[NSEvent mouseLocation] belowWindowWithWindowNumber:0 /*topmost*/] == [wd.window_object windowNumber]) {
-		ds->mouse_enter_window(window_id);
+	if (ds->get_mouseover_window() != window_id) {
+		const NSRect contentRect = [wd.window_view frame];
+		if (NSPointInRect(mpos, contentRect) && [NSWindow windowNumberAtPoint:[NSEvent mouseLocation] belowWindowWithWindowNumber:0 /*topmost*/] == [wd.window_object windowNumber]) {
+			ds->mouse_enter_window(window_id);
+		}
 	}
 
 	Input::get_singleton()->parse_input_event(mm);
@@ -914,8 +918,16 @@
 	}
 
 	if ([event phase] != NSEventPhaseNone || [event momentumPhase] != NSEventPhaseNone) {
+		// Touchpad with inertial scrolling, keep deltas as is.
 		[self processPanEvent:event dx:delta_x dy:delta_y];
 	} else {
+		// Mouse scroll wheel.
+		if ([event hasPreciseScrollingDeltas]) {
+			// Deltas are in pixels, convert to lines.
+			delta_x /= 32.0;
+			delta_y /= 32.0;
+		}
+
 		double delta_x_abs = Math::abs(delta_x);
 		double delta_y_abs = Math::abs(delta_y);
 

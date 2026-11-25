@@ -94,6 +94,9 @@ void RenderingDeviceDriverMetal::_resolve_sync_mode() {
 		// Apple GPUs only sample counters at stage boundaries, which is all the
 		// timestamp encoders rely on.
 		timestamp_queries_supported = device->supportsCounterSampling(MTL::CounterSamplingPointAtStageBoundary);
+		if (timestamp_queries_supported) {
+			timestamp_fence = NS::TransferPtr(device->newFence());
+		}
 	} else {
 		print_verbose("Metal 3: Native hazard tracking enabled.");
 	}
@@ -117,7 +120,9 @@ void RenderingDeviceDriverMetal::remove_residency_set_to_main_queue(MTL::Residen
 #pragma mark - Fences
 
 RDD::FenceID RenderingDeviceDriverMetal::fence_create() {
-	Fence *fence = memnew(Fence(NS::TransferPtr(device->newSharedEvent())));
+	MTL::SharedEvent *event = device->newSharedEvent();
+	ERR_FAIL_NULL_V_MSG(event, FenceID(), "Couldn't create Metal shared event.");
+	Fence *fence = memnew(Fence(NS::TransferPtr(event)));
 	return FenceID(fence);
 }
 
@@ -264,7 +269,8 @@ void RenderingDeviceDriverMetal::command_queue_free(CommandQueueID p_cmd_queue) 
 
 RDD::CommandPoolID RenderingDeviceDriverMetal::command_pool_create(CommandQueueFamilyID p_cmd_queue_family, CommandBufferType p_cmd_buffer_type) {
 	DEV_ASSERT(p_cmd_buffer_type == COMMAND_BUFFER_TYPE_PRIMARY);
-	return CommandPoolID(reinterpret_cast<uint64_t>(device_queue.get()));
+	// There is one queue, so the pool only records the family.
+	return CommandPoolID(p_cmd_queue_family.id);
 }
 
 bool RenderingDeviceDriverMetal::command_pool_reset(CommandPoolID p_cmd_pool) {
@@ -315,14 +321,16 @@ void RenderingDeviceDriverMetal::command_timestamp_write(CommandBufferID p_cmd_b
 	}
 	MDCommandBuffer *cmd = (MDCommandBuffer *)(p_cmd_buffer.id);
 	QueryPool *pool = (QueryPool *)(p_pool_id.id);
-	cmd->timestamp_write(pool, p_index);
+	cmd->timestamp_write(pool, p_index, timestamp_fence.get());
 }
 
 #pragma mark - Command Buffers
 
 RDD::CommandBufferID RenderingDeviceDriverMetal::command_buffer_create(CommandPoolID p_cmd_pool) {
-	MTL::CommandQueue *queue = reinterpret_cast<MTL::CommandQueue *>(p_cmd_pool.id);
-	MDCommandBuffer *obj = memnew(MDCommandBuffer(queue, this));
+	// Transfer workers record concurrently and are ordered by semaphores, so they use no level fences.
+	bool use_level_fences = sync_mode != HazardTracking && p_cmd_pool.id == COMMAND_QUEUE_FAMILY_GRAPHICS_BIT;
+	MDLevelFences *level_fences = use_level_fences ? &main_level_fences : nullptr;
+	MDCommandBuffer *obj = memnew(MDCommandBuffer(device_queue.get(), this, level_fences));
 	command_buffers.push_back(obj);
 	return CommandBufferID(obj);
 }

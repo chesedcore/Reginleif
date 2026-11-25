@@ -97,25 +97,64 @@ Ref<Texture2D> EditorExportPlatformPC::get_logo() const {
 	return logo;
 }
 
+void EditorExportPlatformPC::check_export_template_debugsymbols(const String &p_template_path, String *r_err) const {
+	if (FileAccess::exists(p_template_path + ".debugsymbols")) {
+		return;
+	}
+
+	if (FileAccess::exists(p_template_path + ".debugsymbols.zip")) {
+		return;
+	}
+
+	if (FileAccess::exists(p_template_path.get_base_dir().path_join(get_official_debugsymbols_file_name(p_template_path.get_file())))) {
+		return;
+	}
+
+	// Not found.
+	if (r_err) {
+		*r_err += vformat(TTR("Export Debug Symbols is set, but no export template .debugsymbols nor .debugsymbols.zip found for: %s"), p_template_path.get_file()) + "\n";
+	}
+}
+
 bool EditorExportPlatformPC::has_valid_export_configuration(const Ref<EditorExportPreset> &p_preset, String &r_error, bool &r_missing_templates, bool p_debug) const {
 	String err;
 	bool valid = false;
 
 	// Look for export templates (first official, and if defined custom templates).
 	String arch = p_preset->get("binary_format/architecture");
-	bool dvalid = exists_export_template(get_template_file_name("debug", arch), &err);
-	bool rvalid = exists_export_template(get_template_file_name("release", arch), &err);
+	String dtemplate_path = find_export_template(get_template_file_name("debug", arch), &err);
+	String rtemplate_path = find_export_template(get_template_file_name("release", arch), &err);
+	bool dvalid = dtemplate_path != "";
+	bool rvalid = rtemplate_path != "";
 
-	if (p_preset->get("custom_template/debug") != "") {
-		dvalid = FileAccess::exists(p_preset->get("custom_template/debug"));
+	String dcustom_template_path = p_preset->get("custom_template/debug");
+	dcustom_template_path = dcustom_template_path.strip_edges();
+	if (dcustom_template_path != "") {
+		dtemplate_path = dcustom_template_path;
+		dvalid = FileAccess::exists(dcustom_template_path);
 		if (!dvalid) {
 			err += TTR("Custom debug template not found.") + "\n";
 		}
 	}
-	if (p_preset->get("custom_template/release") != "") {
-		rvalid = FileAccess::exists(p_preset->get("custom_template/release"));
+
+	String rcustom_template_path = p_preset->get("custom_template/release");
+	rcustom_template_path = rcustom_template_path.strip_edges();
+	if (rcustom_template_path != "") {
+		rtemplate_path = rcustom_template_path;
+		rvalid = FileAccess::exists(rcustom_template_path);
 		if (!rvalid) {
 			err += TTR("Custom release template not found.") + "\n";
+		}
+	}
+
+	// Warn if the debug symbols for the effectively used  files are not found.
+	int debug_symbol_mode = p_preset->get("debug/export_debug_symbols");
+	if (debug_symbol_mode > 0) {
+		if (dvalid) {
+			check_export_template_debugsymbols(dtemplate_path, &err);
+		}
+		if (rvalid && debug_symbol_mode == 2) {
+			check_export_template_debugsymbols(rtemplate_path, &err);
 		}
 	}
 
@@ -232,13 +271,25 @@ Error EditorExportPlatformPC::_unzip_debugsymbols(Ref<DirAccess> &p_da, const St
 bool EditorExportPlatformPC::_copy_debugsymbols(Ref<DirAccess> &p_da, const String &p_path, const String &p_symbols_path, Error &r_err) {
 	r_err = OK;
 
-	// TODO: Consider other zip files as needed for official templates.
+	String sym_path = p_symbols_path + ".debugsymbols";
+	String zip_path = p_symbols_path + ".debugsymbols.zip";
+	String zip_path_full = p_symbols_path.simplify_path().path_join(get_official_debugsymbols_file_name(p_symbols_path.get_file()));
 
-	if (FileAccess::exists(p_symbols_path)) {
-		r_err = p_da->copy(p_symbols_path, p_path + ".debugsymbols");
-	} else if (FileAccess::exists(p_symbols_path + ".zip")) {
-		r_err = _unzip_debugsymbols(p_da, p_path + ".debugsymbols", p_symbols_path.get_file(), p_symbols_path + ".zip");
+	if (FileAccess::exists(sym_path)) {
+		r_err = p_da->copy(sym_path, p_path + ".debugsymbols");
+	} else if (FileAccess::exists(zip_path)) {
+		r_err = _unzip_debugsymbols(p_da, p_path + ".debugsymbols", p_symbols_path.get_file() + ".debugsymbols", p_symbols_path + ".debugsymbols.zip");
+	} else if (FileAccess::exists(zip_path_full)) {
+		r_err = _unzip_debugsymbols(p_da, p_path + ".debugsymbols", p_symbols_path.get_file() + ".debugsymbols", zip_path_full);
 	} else {
+		return false;
+	}
+	Vector<String> exec_debug_ids = OS::get_singleton()->get_debug_build_id(p_path);
+	Vector<String> symb_debug_ids = OS::get_singleton()->get_debug_build_id(p_path + ".debugsymbols");
+	print_verbose(vformat("Executable debug IDs: %s", exec_debug_ids));
+	print_verbose(vformat("Symbols debug IDs: %s", symb_debug_ids));
+	if (exec_debug_ids != symb_debug_ids) {
+		add_message(EXPORT_MESSAGE_WARNING, TTR("Prepare Templates"), vformat(TTR("Executable and symbols debug ID mismatch: %s != %s."), exec_debug_ids, symb_debug_ids));
 		return false;
 	}
 	if (r_err == OK) {
@@ -299,7 +350,7 @@ Error EditorExportPlatformPC::prepare_template(const Ref<EditorExportPreset> &p_
 	}
 	if (err == OK && copy_debug_symbols) {
 		// We don't copy symbols for the wrapper as they are trivial.
-		_copy_debugsymbols(da, p_path, template_path + ".debugsymbols", err);
+		_copy_debugsymbols(da, p_path, template_path, err);
 	}
 	if (err != OK) {
 		add_message(EXPORT_MESSAGE_ERROR, TTR("Prepare Template"), TTR("Failed to copy export template."));

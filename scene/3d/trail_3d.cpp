@@ -162,7 +162,7 @@ void Trail3D::_notification(int p_what) {
 	switch (p_what) {
 		case NOTIFICATION_ENTER_TREE: {
 			clear();
-			RS::get_singleton()->connect("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail));
+			_ensure_frame_pre_draw_connection(false);
 			RS::get_singleton()->instance_geometry_set_flag(get_instance(), RSE::INSTANCE_FLAG_DRAW_NEXT_FRAME_IF_VISIBLE, true);
 		} break;
 		case NOTIFICATION_EXIT_TREE: {
@@ -182,8 +182,8 @@ void Trail3D::_notification(int p_what) {
 
 void Trail3D::set_width(float p_width) {
 	width = p_width;
-	if (limit_mode == LIMIT_MODE_MAX_LENGTH && !RS::get_singleton()->is_connected("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail))) {
-		RS::get_singleton()->connect("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail), CONNECT_ONE_SHOT);
+	if (limit_mode == LIMIT_MODE_MAX_LENGTH) {
+		_ensure_frame_pre_draw_connection(true);
 	}
 }
 
@@ -210,6 +210,7 @@ void Trail3D::set_width_curve(Ref<Curve> p_width_curve) {
 		width_curve->disconnect_changed(callable_mp(this, &Trail3D::rebuild));
 	}
 	width_curve = p_width_curve;
+	_ensure_frame_pre_draw_connection(true);
 	if (width_curve.is_valid()) {
 		width_curve->connect_changed(callable_mp(this, &Trail3D::rebuild));
 	}
@@ -222,9 +223,7 @@ Ref<Curve> Trail3D::get_width_curve() const {
 
 void Trail3D::set_color(const Color &p_color) {
 	if (p_color != color && limit_mode == LIMIT_MODE_MAX_LENGTH) {
-		if (!RS::get_singleton()->is_connected("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail))) {
-			RS::get_singleton()->connect("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail), CONNECT_ONE_SHOT);
-		}
+		_ensure_frame_pre_draw_connection(true);
 	}
 	color = p_color;
 }
@@ -241,6 +240,7 @@ void Trail3D::set_color_gradient(Ref<Gradient> p_color_gradient) {
 		color_gradient->disconnect_changed(callable_mp(this, &Trail3D::rebuild));
 	}
 	color_gradient = p_color_gradient;
+	_ensure_frame_pre_draw_connection(true);
 	if (color_gradient.is_valid()) {
 		color_gradient->connect_changed(callable_mp(this, &Trail3D::rebuild));
 	}
@@ -309,6 +309,7 @@ void Trail3D::set_tiling_mode(TilingMode p_tiling_mode) {
 		_needs_rebuilding = true;
 	}
 	tiling_mode = p_tiling_mode;
+	_ensure_frame_pre_draw_connection(true);
 	notify_property_list_changed();
 }
 
@@ -321,6 +322,7 @@ void Trail3D::set_tiling_multiplier(float p_tiling_multiplier) {
 		_needs_rebuilding = true;
 	}
 	tiling_multiplier = p_tiling_multiplier;
+	_ensure_frame_pre_draw_connection(true);
 }
 
 float Trail3D::get_tiling_multiplier() const {
@@ -353,7 +355,7 @@ void Trail3D::set_limit_mode(LimitMode p_limit_mode) {
 	}
 	limit_mode = p_limit_mode;
 	if (p_limit_mode == LIMIT_MODE_LIFETIME) {
-		RS::get_singleton()->connect("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail));
+		_ensure_frame_pre_draw_connection(false);
 	} else {
 		if (RS::get_singleton()->is_connected("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail))) {
 			RS::get_singleton()->disconnect("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail));
@@ -399,6 +401,7 @@ void Trail3D::set_pin_uv(bool p_pin_uv) {
 		_needs_rebuilding = true;
 	}
 	pin_uv = p_pin_uv;
+	_ensure_frame_pre_draw_connection(true);
 }
 
 bool Trail3D::get_pin_uv() const {
@@ -536,7 +539,7 @@ void Trail3D::_do_rebuild() {
 		*(uint16_t *)&index_write_buffer[(j + 11) * 2] = idx;
 	}
 
-	Transform3D inv_global_tf = get_global_transform_interpolated().inverse();
+	Transform3D inv_global_tf = get_global_transform_interpolated().affine_inverse();
 
 	real_t length = _calc_current_length();
 
@@ -585,22 +588,26 @@ void Trail3D::_do_rebuild() {
 		}
 
 		Vector3 tangent = tangents[i];
+		Vector3 normal = normals[i];
+		Vector3 curve_binormal = normal.cross(tangent);
+		curve_binormal *= half_width;
+		curve_binormal = inv_global_tf.basis.xform(curve_binormal);
+		real_t curve_width = curve_binormal.length();
 
 		p = inv_global_tf.xform(p);
 		tangent = inv_global_tf.basis.xform(tangent);
+		normal = inv_global_tf.basis.xform(normal);
+
 		min_bounds = min_bounds.min(p - width_bounds);
 		max_bounds = max_bounds.max(p + width_bounds);
 
-		Vector3 normal = normals[i];
-		normal = inv_global_tf.basis.xform(normal);
 		uint32_t vnormal = _encode_normal(normal);
 
-		Vector3 curve_binormal = normal.cross(tangent);
 		// we don't actually add the side offset if we're billboarding
 		real_t is_billboard = alignment == MESH_ALIGNMENT_BILLBOARD ? 0.0 : 1.0;
-		_encode_vertex(p + half_width * curve_binormal * is_billboard, j2, write_vert);
+		_encode_vertex(p + curve_binormal * is_billboard, j2, write_vert);
 		_encode_vertex(p, j1, write_vert);
-		_encode_vertex(p - half_width * curve_binormal * is_billboard, j0, write_vert);
+		_encode_vertex(p - curve_binormal * is_billboard, j0, write_vert);
 
 		_write_normal(vnormal, j2, write_vert);
 		_write_normal(vnormal, j1, write_vert);
@@ -616,11 +623,11 @@ void Trail3D::_do_rebuild() {
 			custom.y = tangent.y;
 			custom.z = tangent.z;
 
-			custom.w = -half_width;
+			custom.w = -curve_width;
 			_write_custom(custom, j2, write_attrib);
 			custom.w = 0.;
 			_write_custom(custom, j1, write_attrib);
-			custom.w = half_width;
+			custom.w = curve_width;
 			_write_custom(custom, j0, write_attrib);
 		}
 
@@ -654,12 +661,22 @@ void Trail3D::_do_rebuild() {
 }
 
 void Trail3D::_process_trail() {
-	if (!is_inside_tree() || !is_ready()) {
+	if (!can_process() || !is_ready()) {
 		return;
 	}
 
-	Transform3D tf = get_global_transform_interpolated();
+	Transform3D tf;
+	if (is_visible_in_tree()) {
+		// TODO
+		// Think about culling rebuild calls for trails when they're offscreen
+		// And instead calculate a rough AABB during process trail, otherwise trail might get wrongly not updated.
+		// Possibly include different culling modes? Though ideally it should just work.
+		tf = get_global_transform_interpolated();
+	} else {
+		tf = get_global_transform();
+	}
 	Vector3 pos = tf.origin;
+	tf.orthonormalize();
 
 	if (!_transform_changed && points.size() == 2 && pos.distance_squared_to(points[1]) <= CMP_EPSILON2) {
 		// When the two last points are close enough, we manually stack them, so their distance will always be less
@@ -667,8 +684,12 @@ void Trail3D::_process_trail() {
 		return;
 	}
 
-	Vector3 up = tf.basis.get_column(1);
-	Vector3 fw = tf.basis.get_column(2);
+	// We currently do not support having different scale at different emission times, since width is a
+	// Property of the whole trail and not of a certain point.
+	// We could support it if instead of storing tangents and normals we stored also binormals with their associated
+	// scale, but this should be first proven with a usecase. Most of "wobbly edges" can be achieved via shader.
+	Vector3 up = tf.basis.get_column(1).normalized();
+	Vector3 fw = tf.basis.get_column(2).normalized();
 	real_t delta = get_process_delta_time();
 	_time += delta;
 	real_t head_velocity = (get_global_position() - _previous_position).length() / MAX(delta, CMP_EPSILON);
@@ -857,6 +878,27 @@ void Trail3D::_process_trail() {
 	_previous_position = get_global_transform().get_origin();
 	_transform_changed = false;
 	rebuild();
+}
+
+void Trail3D::_ensure_frame_pre_draw_connection(bool p_is_one_shot) {
+	if (p_is_one_shot && limit_mode != LIMIT_MODE_MAX_LENGTH) {
+		return;
+	}
+
+	if (RS::get_singleton()->is_connected("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail))) {
+		if (_has_one_shot_connection && !p_is_one_shot) {
+			// Disconnect the one shot connect for use the normal one
+			RS::get_singleton()->disconnect("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail));
+		} else {
+			return;
+		}
+	}
+	if (p_is_one_shot) {
+		RS::get_singleton()->connect("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail), ConnectFlags::CONNECT_ONE_SHOT);
+	} else {
+		RS::get_singleton()->connect("frame_pre_draw", callable_mp(this, &Trail3D::_process_trail));
+	}
+	_has_one_shot_connection = p_is_one_shot;
 }
 
 void Trail3D::_validate_property(PropertyInfo &p_property) const {

@@ -553,6 +553,10 @@ void FindInFilesSearchPanel::_on_search_modified() {
 }
 
 void FindInFilesSearchPanel::_update_finder() {
+	if (finder->is_rename_mode()) {
+		// The finder in rename mode can't be altered, so copying these settings is pointless.
+		return;
+	}
 	finder->set_search_text(search_text_line_edit->get_text());
 	finder->set_match_case(match_case_checkbox->is_pressed());
 	finder->set_whole_words(whole_words_checkbox->is_pressed());
@@ -959,6 +963,8 @@ void FindInFilesContainer::create_rename_control(const String &p_symbol, const E
 	search_control->set_replace(true);
 	search_control->set_replace_text(p_symbol);
 	search_control->set_block_signals(false);
+
+	_update_current_title();
 
 	new_panel->set_symbol_rename(p_lookup);
 	new_panel->start_search();

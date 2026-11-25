@@ -700,6 +700,7 @@ class Godot private constructor(val context: Context) {
 			return
 		}
 
+		godotInputHandler.onActivityResumed()
 		renderView?.onActivityResumed()
 		registerSensorsIfNeeded()
 		for (plugin in pluginRegistry.allPlugins) {
@@ -746,6 +747,8 @@ class Godot private constructor(val context: Context) {
 		for (plugin in pluginRegistry.allPlugins) {
 			plugin.onMainPause()
 		}
+
+		godotInputHandler.onActivityPaused()
 		renderView?.onActivityPaused()
 		mSensorManager?.unregisterListener(godotInputHandler)
 	}
@@ -784,18 +787,19 @@ class Godot private constructor(val context: Context) {
 	/**
 	 * Configuration change callback
 	*/
-	fun onConfigurationChanged(newConfig: Configuration) {
+	@JvmOverloads
+	fun onConfigurationChanged(newConfig: Configuration, force: Boolean = false) {
 		godotInputHandler.onConfigurationChanged(newConfig)
 
 		val newDarkMode = newConfig.uiMode.and(Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-		if (darkMode != newDarkMode) {
+		if (force || darkMode != newDarkMode) {
 			darkMode = newDarkMode
 			runOnRenderThread {
 				GodotLib.onNightModeChanged()
 			}
 		}
 
-		if (orientation != newConfig.orientation) {
+		if (force || orientation != newConfig.orientation) {
 			orientation = newConfig.orientation
 			runOnRenderThread {
 				GodotLib.onOrientationChange(orientation)
@@ -900,6 +904,7 @@ class Godot private constructor(val context: Context) {
 			getActivity()?.reportFullyDrawn()
 
 			registerSensorsIfNeeded()
+			onConfigurationChanged(context.resources.configuration, true)
 		}
 
 		for (plugin in pluginRegistry.allPlugins) {

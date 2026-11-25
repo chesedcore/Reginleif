@@ -433,11 +433,6 @@
 		<member name="application/run/print_header" type="bool" setter="" getter="" default="true">
 			If [code]true[/code], the engine header is printed in the console on startup. This header describes the current version of the engine, as well as the renderer being used. This behavior can also be disabled on the command line with the [code]--no-header[/code] option.
 		</member>
-		<member name="application/run/use_game_mode" type="bool" setter="" getter="" default="true">
-			If [code]true[/code], the engine will request [url=https://github.com/FeralInteractive/gamemode]GameMode[/url] to be activated. This allows optimizing system performance during gameplay, e.g. by using a specific CPU governor or forcing a high GPU power state. The GameMode daemon needs to be installed and running on the system to work (typically available as [code]gamemode[/code] in Linux distribution repositories).
-			[b]Note:[/b] This setting does not affect the editor itself, although it affects projects being run from the editor.
-			[b]Note:[/b] This setting is available only on Linux.
-		</member>
 		<member name="audio/buses/channel_disable_threshold_db" type="float" setter="" getter="" default="-60.0">
 			Audio buses will disable automatically when sound goes below a given dB threshold for a given time. This saves CPU as effects assigned to that bus will no longer do any processing.
 		</member>
@@ -1208,10 +1203,10 @@
 			What to use to separate node name from number. This is mostly an editor setting.
 		</member>
 		<member name="editor/naming/scene_name_casing" type="int" setter="" getter="" default="2">
-			When generating scene file names from scene root node, set the type of casing to use in this project. This is mostly an editor setting.
+			When generating scene file names from scene root node, set the type of casing to use in this project. This is mostly an editor setting. Uses the same options as [enum ScriptLanguage.ScriptNameCasing].
 		</member>
 		<member name="editor/naming/script_name_casing" type="int" setter="" getter="" default="0">
-			When generating script file names from the selected node, set the type of casing to use in this project. This is mostly an editor setting.
+			When generating script file names from the selected node, set the type of casing to use in this project. This is mostly an editor setting. See [enum ScriptLanguage.ScriptNameCasing] for possible values.
 		</member>
 		<member name="editor/run/main_run_args" type="String" setter="" getter="" default="&quot;&quot;">
 			The command-line arguments to append to Godot's own command line when running the project. This doesn't affect the editor itself.
@@ -1704,6 +1699,10 @@
 			If [code]true[/code], [method Input.is_action_just_pressed] and [method Input.is_action_just_released] will only return [code]true[/code] if the action is still in the respective state, i.e. an action that is pressed [i]and[/i] released on the same frame will be missed.
 			If [code]false[/code], no input will be lost.
 			[b]Note:[/b] You should in nearly all cases prefer the [code]false[/code] setting. The legacy behavior is to enable supporting old projects that rely on the old logic, without changes to script.
+		</member>
+		<member name="input_devices/compatibility/windows/disable_raw_event_bulk_processing" type="bool" setter="" getter="" default="false">
+			If [code]true[/code], disables bulk processing of raw input, enable it if you want to process [code]WM_INPUT[/code] messages directly. Enabling this setting will significantly decrease performance with high polling rate devices.
+			[b]Note:[/b] This property is implemented only on Windows.
 		</member>
 		<member name="input_devices/joypads/ignore_joypad_on_unfocused_application" type="bool" setter="" getter="" default="false">
 			If [code]true[/code], joypad input (including motion sensors) and LED light changes will be ignored and joypad vibration will be stopped when the application is not focused.

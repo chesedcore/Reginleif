@@ -318,7 +318,9 @@ String OS_MacOS::get_version() const {
 String OS_MacOS::get_version_alias() const {
 	NSOperatingSystemVersion ver = [NSProcessInfo processInfo].operatingSystemVersion;
 	String macos_string;
-	if (ver.majorVersion == 26) {
+	if (ver.majorVersion == 27) {
+		macos_string += "Golden Gate";
+	} else if (ver.majorVersion == 26) {
 		macos_string += "Tahoe";
 	} else if (ver.majorVersion == 15) {
 		macos_string += "Sequoia";
@@ -338,7 +340,7 @@ String OS_MacOS::get_version_alias() const {
 	} else if (ver.majorVersion == 10 && ver.minorVersion == 13) {
 		macos_string += "High Sierra";
 	} else {
-		macos_string += "Unknown";
+		macos_string += itos(ver.majorVersion);
 	}
 	// macOS versions older than 10.13 cannot run Godot.
 	return vformat("%s (%s)", macos_string, get_version());

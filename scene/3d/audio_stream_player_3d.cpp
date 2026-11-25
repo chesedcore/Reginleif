@@ -283,9 +283,10 @@ void AudioStreamPlayer3D::_notification(int p_what) {
 		case NOTIFICATION_INTERNAL_PHYSICS_PROCESS: {
 			// Update anything related to position first, if possible of course.
 			Vector<AudioFrame> volume_vector;
-			if (setplay.get() > 0 || (internal->active.is_set() && last_mix_count != AudioServer::get_singleton()->get_mix_count()) || force_update_panning) {
+			if (setplay.get() >= 0 || (internal->active.is_set() && last_mix_count != AudioServer::get_singleton()->get_mix_count()) || force_update_panning) {
 				force_update_panning = false;
 				volume_vector = _update_panning();
+				last_mix_count = AudioServer::get_singleton()->get_mix_count();
 			}
 
 			if (setplayback.is_valid() && setplay.get() >= 0) {
@@ -661,7 +662,7 @@ void AudioStreamPlayer3D::play(float p_from_pos) {
 		sample_playback->offset = p_from_pos;
 		sample_playback->bus = _get_actual_bus();
 
-		AudioServer::get_singleton()->start_sample_playback(sample_playback);
+		AudioServer::get_singleton()->start_sample_playback(sample_playback, !can_process());
 	}
 }
 

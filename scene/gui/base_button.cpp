@@ -65,12 +65,18 @@ void BaseButton::gui_input(const Ref<InputEvent> &p_event) {
 	}
 
 	Ref<InputEventScreenTouch> touch = p_event;
+	if (touch.is_valid() && touch->is_pressed() && touch->is_long_press() && action_mode == ACTION_MODE_BUTTON_PRESS) {
+		// A long-press notification must not activate the button again.
+		return;
+	}
+
 	if (touch.is_valid()) {
 		if (status.touch_index == -1) {
 			if (touch->is_pressed()) {
+				Point2 vp_touch_pos = (get_canvas_transform() * get_global_transform()).xform(touch->get_position());
 				status.touch_index = touch->get_index();
 				status.press_attempt = true;
-				status.pressing_inside = has_point(touch->get_position()) && get_viewport_transform().xform(get_viewport_rect()).has_point(touch->get_position());
+				status.pressing_inside = has_point(touch->get_position()) && get_viewport_rect().has_point(vp_touch_pos);
 				on_action_event(p_event);
 			}
 		} else if (touch->get_index() == status.touch_index) {
@@ -83,9 +89,9 @@ void BaseButton::gui_input(const Ref<InputEvent> &p_event) {
 
 	Ref<InputEventScreenDrag> drag = p_event;
 	if (drag.is_valid() && drag->get_index() == status.touch_index && status.press_attempt) {
+		Point2 vp_touch_pos = (get_canvas_transform() * get_global_transform()).xform(drag->get_position());
 		bool last_press_inside = status.pressing_inside;
-		status.pressing_inside = has_point(drag->get_position()) && get_viewport_transform().xform(get_viewport_rect()).has_point(drag->get_position());
-
+		status.pressing_inside = has_point(drag->get_position()) && get_viewport_rect().has_point(vp_touch_pos);
 		if (last_press_inside != status.pressing_inside) {
 			queue_redraw();
 		}

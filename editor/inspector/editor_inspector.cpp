@@ -3532,8 +3532,8 @@ void EditorInspectorArray::_setup() {
 	max_page = MAX(0, count - 1) / page_length;
 	array_elements.resize(MAX(0, end_array_index - begin_array_index));
 	if (page < 0 || page > max_page) {
-		WARN_PRINT(vformat("Invalid page number %d", page));
 		page = CLAMP(page, 0, max_page);
+		emit_signal("page_change_request", page);
 	}
 
 	Ref<Font> numbers_font;
@@ -5470,6 +5470,12 @@ Object *EditorInspector::get_next_edited_object() {
 	return next_object;
 }
 
+void EditorInspector::cleanup_object() {
+	if (!ObjectDB::get_instance(edited_object_id)) {
+		_clear();
+	}
+}
+
 void EditorInspector::edit(Object *p_object) {
 	Object *object = ObjectDB::get_instance(edited_object_id);
 	if (object == p_object) {
@@ -6371,6 +6377,14 @@ void EditorInspector::_vscroll_changed(double p_offset) {
 	if (edited_object_id.is_valid()) {
 		scroll_cache[edited_object_id] = p_offset;
 	}
+}
+
+void EditorInspector::set_scroll_cache(ObjectID p_id, int p_offset) {
+	scroll_cache[p_id] = p_offset;
+}
+
+void EditorInspector::remove_scroll_cache(ObjectID p_id) {
+	scroll_cache.erase(p_id);
 }
 
 void EditorInspector::set_property_prefix(const String &p_prefix) {
