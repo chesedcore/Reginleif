@@ -5614,6 +5614,9 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				return;
 			}
 
+			const bool is_class_level = script_func == nullptr || !script_func->has_generic_parameters();
+			HashMap<StringName, GDScriptParser::DataType> explicit_class_bindings;
+
 			for (int i = 0; i < got; i++) {
 				GDScriptParser::DataType arg_type = type_from_metatype(resolve_datatype(p_call->explicit_generic_args[i]));
 				const GDScriptParser::IdentifierNode* param = (*param_list)[i];
@@ -5631,7 +5634,18 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 					}
 				}
 
-				call_generic_bindings[param->name] = arg_type;
+				(is_class_level ? explicit_class_bindings : call_generic_bindings)[param->name] = arg_type;
+			}
+
+			if (!explicit_class_bindings.is_empty()) {
+				for (KeyValue<StringName, GDScriptParser::DataType>& E : call_generic_bindings) {
+					E.value = resolve_generic_type(E.value, explicit_class_bindings);
+				}
+				for (const KeyValue<StringName, GDScriptParser::DataType>& E : explicit_class_bindings) {
+					if (!call_generic_bindings.has(E.key)) {
+						call_generic_bindings[E.key] = E.value;
+					}
+				}
 			}
 		}
 
