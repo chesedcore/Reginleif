@@ -216,6 +216,8 @@ public:
 	static bool is_component_class(const GDScriptParser::ClassNode* p_class);
 	void check_static_attach(const GDScriptParser::DataType& p_parent, const GDScriptParser::DataType& p_child, const GDScriptParser::Node* p_error_node);
 	static bool class_exists(const StringName &p_class);
+	static bool is_typed_callable_invoke_method(const StringName& p_method);
+	static bool typed_callable_invoke_returns_void(const StringName& p_method);
 
 	GDScriptAnalyzer(GDScriptParser *p_parser);
 	~GDScriptAnalyzer();

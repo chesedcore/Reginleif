@@ -8780,8 +8780,14 @@ bool GDScriptAnalyzer::get_function_signature(GDScriptParser::Node *p_source, bo
 			}
 		}
 
-		if (p_base_type.builtin_type == Variant::CALLABLE && p_base_type.has_callable_signature && !p_base_type.is_meta_type && p_function == SNAME("call")) {
-			r_return_type = p_base_type.callable_return[0];
+		if (p_base_type.builtin_type == Variant::CALLABLE && p_base_type.has_callable_signature && !p_base_type.is_meta_type && is_typed_callable_invoke_method(p_function)) {
+			if (typed_callable_invoke_returns_void(p_function)) {
+				r_return_type.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+				r_return_type.kind = GDScriptParser::DataType::BUILTIN;
+				r_return_type.builtin_type = Variant::NIL;
+			} else {
+				r_return_type = p_base_type.callable_return[0];
+			}
 			for (const GDScriptParser::DataType& param_type : p_base_type.callable_params) {
 				r_par_types.push_back(param_type);
 			}
@@ -9833,6 +9839,14 @@ void GDScriptAnalyzer::resolve_pending_lambda_bodies() {
 
 bool GDScriptAnalyzer::class_exists(const StringName &p_class) {
 	return ClassDB::class_exists(p_class) && ClassDB::is_class_exposed(p_class);
+}
+
+bool GDScriptAnalyzer::is_typed_callable_invoke_method(const StringName& p_method) {
+	return p_method == SNAME("call") || p_method == SNAME("call_deferred");
+}
+
+bool GDScriptAnalyzer::typed_callable_invoke_returns_void(const StringName& p_method) {
+	return p_method == SNAME("call_deferred");
 }
 
 Error GDScriptAnalyzer::resolve_inheritance() {

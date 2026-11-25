@@ -863,15 +863,15 @@ static String _make_arguments_hint(const MethodInfo &p_info, int p_arg_idx, bool
 	return arghint;
 }
 
-static String _make_callable_arguments_hint(const GDScriptParser::DataType* p_type, int p_arg_idx) {
+static String _make_callable_arguments_hint(const GDScriptParser::DataType* p_type, int p_arg_idx, const StringName &p_method) {
 	String arghint;
 	const GDScriptParser::DataType* return_type = &p_type->callable_return[0];
-	if (return_type->kind == GDScriptParser::DataType::BUILTIN && return_type->builtin_type == Variant::NIL) {
+	if (GDScriptAnalyzer::typed_callable_invoke_returns_void(p_method) || (return_type->kind == GDScriptParser::DataType::BUILTIN && return_type->builtin_type == Variant::NIL)) {
 		arghint = "void ";
 	} else {
 		arghint = return_type->to_string() + " ";
 	}
-	arghint += "call(";
+	arghint += String(p_method) + "(";
 	for (int i = 0; i < p_type->callable_params.size(); i++) {
 		if (i > 0) {
 			arghint += ", ";
@@ -4456,8 +4456,8 @@ static void _list_call_arguments_core(GDScriptParser::CompletionContext& p_conte
 				}
 
 				if (base_type.builtin_type == Variant::CALLABLE && base_type.has_callable_signature && !base_type.callable_return.is_empty() && !base_type.is_meta_type) {
-					if (method == SNAME("call")) {
-						r_arghint = _make_callable_arguments_hint(&base_type, p_argidx);
+					if (GDScriptAnalyzer::is_typed_callable_invoke_method(method)) {
+						r_arghint = _make_callable_arguments_hint(&base_type, p_argidx, method);
 						return;
 					}
 					if (method == SNAME("bind")) {
@@ -5225,14 +5225,15 @@ void GDScriptEditorLanguage::format_code(String &r_code, uint32_t p_from_line, u
 }
 
 static void _fill_typed_callable_lookup(const GDScriptParser::DataType* p_type, const String& p_symbol, EditorLanguage::LookupResult& r_result) {
-	const bool is_call = p_symbol == "call";
-	const bool is_bind = p_symbol == "bind";
-	if (!is_call && !is_bind) {
+	const StringName symbol = p_symbol;
+	const bool is_invoke = GDScriptAnalyzer::is_typed_callable_invoke_method(symbol);
+	const bool is_bind = symbol == SNAME("bind");
+	if (!is_invoke && !is_bind) {
 		return;
 	}
 
 	const GDScriptParser::DataType* return_type = &p_type->callable_return[0];
-	const bool returns_void = return_type->kind == GDScriptParser::DataType::BUILTIN && return_type->builtin_type == Variant::NIL;
+	const bool returns_void = GDScriptAnalyzer::typed_callable_invoke_returns_void(symbol) || (return_type->kind == GDScriptParser::DataType::BUILTIN && return_type->builtin_type == Variant::NIL);
 
 	r_result.method_arguments.clear();
 	r_result.method_is_vararg = false;
@@ -5244,9 +5245,9 @@ static void _fill_typed_callable_lookup(const GDScriptParser::DataType* p_type, 
 		r_result.method_arguments.push_back(arg);
 	}
 
-	if (is_call) {
+	if (is_invoke) {
 		r_result.doc_type = returns_void ? String("void") : return_type->to_string();
-		r_result.description = "Calls this callable with its typed arguments.";
+		r_result.description = symbol == SNAME("call_deferred") ? "Calls this callable with its typed arguments at the end of the current frame." : "Calls this callable with its typed arguments.";
 	} else {
 		r_result.doc_type = "Callable";
 		r_result.description = "Binds the trailing arguments and returns a callable with the remaining signature.";
