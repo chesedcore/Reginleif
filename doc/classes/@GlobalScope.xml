@@ -3013,7 +3013,10 @@
 		<constant name="PROPERTY_HINT_AUDIO_BUS" value="45" enum="PropertyHint">
 			Hints that a [String] or [StringName] property is the name of an audio bus. This allows the selection of predefined bus names registered with the audio server.
 		</constant>
-		<constant name="PROPERTY_HINT_MAX" value="46" enum="PropertyHint">
+		<constant name="PROPERTY_HINT_GENERIC" value="46" enum="PropertyHint">
+			Hints that the property has a generic type and should be substituted with its concrete type by Reginleif.
+		</constant>
+		<constant name="PROPERTY_HINT_MAX" value="47" enum="PropertyHint">
 			Represents the size of the [enum PropertyHint] enum.
 		</constant>
 		<constant name="PROPERTY_USAGE_NONE" value="0" enum="PropertyUsageFlags" is_bitfield="true">
@@ -3061,7 +3064,7 @@
 		<constant name="PROPERTY_USAGE_UPDATE_ALL_IF_MODIFIED" value="16384" enum="PropertyUsageFlags" is_bitfield="true">
 			If this property is modified, all inspector fields will be refreshed.
 		</constant>
-		<constant name="PROPERTY_USAGE_SCRIPT_DEFAULT_VALUE" value="32768" enum="PropertyUsageFlags" is_bitfield="true" deprecated="This flag is not used by the engine.">
+		<constant name="PROPERTY_USAGE_GENERIC" value="1073741824" enum="PropertyUsageFlags" is_bitfield="true">
 		</constant>
 		<constant name="PROPERTY_USAGE_CLASS_IS_ENUM" value="65536" enum="PropertyUsageFlags" is_bitfield="true">
 			The property is a variable of enum type, i.e. it only takes named integer constants from its associated enumeration.

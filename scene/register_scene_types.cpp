@@ -475,8 +475,10 @@ void register_scene_types() {
 
 	GDREGISTER_CLASS(HTTPRequest);
 	GDREGISTER_CLASS(Timer);
+
 	GDREGISTER_CLASS(Component);
 	GDREGISTER_CLASS(Composer);
+
 #ifdef DEBUG_ENABLED
 	Node::attach_validator = &AttachRules::validate;
 #endif
