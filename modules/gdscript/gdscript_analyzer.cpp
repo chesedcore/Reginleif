@@ -9651,7 +9651,7 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 				valid = false;
 			} else {
 				for (int i = 0; i < target_param_count; i++) {
-					if (!check_type_compatibility(p_source.callable_params[i], p_target.callable_params[i], false, nullptr, p_class, p_func, p_trait_analyzer)) {
+					if (!check_type_compatibility(p_source.callable_params[i], p_target.callable_params[i], p_allow_implicit_conversion, nullptr, p_class, p_func, p_trait_analyzer)) {
 						valid = false;
 						break;
 					}
