@@ -632,6 +632,7 @@ public:
 		FunctionNode* generic_callee = nullptr;
 		ClassNode* generic_new_class = nullptr;
 		bool static_trait_call = false;
+		DataType expected_constructed_type;
 
 		CallNode() {
 			type = CALL;

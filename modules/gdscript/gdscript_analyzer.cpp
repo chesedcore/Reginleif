@@ -746,6 +746,67 @@ static bool is_generic_fn_in_open_context(const GDScriptParser::DataType& p_gene
 	return p_generic.kind == GDScriptParser::DataType::GENERIC_TYPE && p_generic.generic_owner_function != nullptr && p_generic.generic_owner_function == p_current_fn;
 }
 
+static const GDScriptParser::IdentifierNode* find_generic_decl(const GDScriptParser::DataType& p_generic) {
+	if (p_generic.generic_owner_function != nullptr) {
+		for (const GDScriptParser::IdentifierNode* param : p_generic.generic_owner_function->generic_parameters) {
+			if (param != nullptr && param->name == p_generic.generic_param) {
+				return param;
+			}
+		}
+	}
+	if (p_generic.generic_owner_class != nullptr) {
+		for (const GDScriptParser::IdentifierNode* param : p_generic.generic_owner_class->generic_parameters) {
+			if (param != nullptr && param->name == p_generic.generic_param) {
+				return param;
+			}
+		}
+	}
+	return nullptr;
+}
+
+static bool is_constructor_call_node(const GDScriptParser::ExpressionNode* p_expression) {
+	return p_expression != nullptr && p_expression->type == GDScriptParser::Node::CALL && static_cast<const GDScriptParser::CallNode*>(p_expression)->function_name == SNAME("new");
+}
+
+static bool infer_bindings_from_expected_supertype(GDScriptParser::ClassNode* p_class, const GDScriptParser::DataType& p_expected, HashMap<StringName, GDScriptParser::DataType>& r_bindings) {
+	if (p_expected.kind != GDScriptParser::DataType::CLASS || p_expected.class_type == nullptr || p_expected.generic_type_bindings.is_empty()) {
+		return false;
+	}
+
+	HashMap<StringName, GDScriptParser::DataType> view;
+	for (GDScriptParser::IdentifierNode* param : p_class->generic_parameters) {
+		GDScriptParser::DataType generic;
+		generic.kind = GDScriptParser::DataType::GENERIC_TYPE;
+		generic.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+		generic.generic_param = param->name;
+		generic.generic_owner_class = p_class;
+		view[param->name] = generic;
+	}
+
+	for (GDScriptParser::ClassNode* walk = p_class; walk != nullptr; walk = walk->base_type.class_type) {
+		if (walk == p_expected.class_type || walk->fqcn == p_expected.class_type->fqcn) {
+			HashMap<StringName, GDScriptParser::DataType> inferred;
+			for (const KeyValue<StringName, GDScriptParser::DataType>& E : p_expected.generic_type_bindings) {
+				const GDScriptParser::DataType* pattern = view.getptr(E.key);
+				if (pattern == nullptr || !infer_generic_bindings_from_types(*pattern, E.value, inferred)) {
+					return false;
+				}
+			}
+			for (const KeyValue<StringName, GDScriptParser::DataType>& E : inferred) {
+				r_bindings[E.key] = E.value;
+			}
+			return true;
+		}
+
+		HashMap<StringName, GDScriptParser::DataType> next;
+		for (const KeyValue<StringName, GDScriptParser::DataType>& E : walk->base_type.generic_type_bindings) {
+			next[E.key] = resolve_generic_type(E.value, view);
+		}
+		view = next;
+	}
+	return false;
+}
+
 static bool param_type_still_has_open_generics(const GDScriptParser::DataType &p_type) {
     if (p_type.has_callable_signature) {
         for (int i = 0; i < p_type.callable_params.size(); i++) {
@@ -3294,7 +3355,7 @@ void GDScriptAnalyzer::resolve_assignable(GDScriptParser::AssignableNode *p_assi
 					downgrade_node_type_source(p_assignable->initializer);
 				}
 			} else if (!is_type_compatible(specified_type, initializer_type, true, p_assignable->initializer)) {
-				if (!is_constant && is_type_compatible(initializer_type, specified_type)) {
+				if (!is_constant && specified_type.kind != GDScriptParser::DataType::GENERIC_TYPE && initializer_type.kind != GDScriptParser::DataType::GENERIC_TYPE && is_type_compatible(initializer_type, specified_type)) {
 
 					///if the specified type is a generic class (or subclass of one) with fixed bindings,
 					///and the initializer is the same base class but with different bindings, error out the ass!!
@@ -4508,7 +4569,7 @@ void GDScriptAnalyzer::reduce_assignment(GDScriptParser::AssignmentNode *p_assig
 	GDScriptParser::DataType expected_value_type;
 	if (p_assignment->operation == GDScriptParser::AssignmentNode::OP_NONE) {
 		expected_value_type = local_assignee_type(p_assignment->assignee);
-		if (!expected_value_type.is_set() && is_closure_node(p_assignment->assigned_value) && is_unresolved_member_assignee(p_assignment->assignee)) {
+		if (!expected_value_type.is_set() && (is_closure_node(p_assignment->assigned_value) || is_constructor_call_node(p_assignment->assigned_value)) && is_unresolved_member_assignee(p_assignment->assignee)) {
 			reduce_expression(p_assignment->assignee);
 			assignee_reduced = true;
 			expected_value_type = p_assignment->assignee->type_constraint;
@@ -4706,7 +4767,7 @@ void GDScriptAnalyzer::reduce_assignment(GDScriptParser::AssignmentNode *p_assig
 				// non-variant assignee and incompatible result
 				mark_node_unsafe(p_assignment);
 				if (assignee_is_hard) {
-					if (is_type_compatible(op_type, assignee_type)) {
+					if (assignee_type.kind != GDScriptParser::DataType::GENERIC_TYPE && op_type.kind != GDScriptParser::DataType::GENERIC_TYPE && is_type_compatible(op_type, assignee_type)) {
 						// hard non-variant assignee and maybe compatible result
 						p_assignment->use_conversion_assign = true;
 					} else {
@@ -5553,6 +5614,9 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 				return;
 			}
 
+			const bool is_class_level = script_func == nullptr || !script_func->has_generic_parameters();
+			HashMap<StringName, GDScriptParser::DataType> explicit_class_bindings;
+
 			for (int i = 0; i < got; i++) {
 				GDScriptParser::DataType arg_type = type_from_metatype(resolve_datatype(p_call->explicit_generic_args[i]));
 				const GDScriptParser::IdentifierNode* param = (*param_list)[i];
@@ -5570,7 +5634,18 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 					}
 				}
 
-				call_generic_bindings[param->name] = arg_type;
+				(is_class_level ? explicit_class_bindings : call_generic_bindings)[param->name] = arg_type;
+			}
+
+			if (!explicit_class_bindings.is_empty()) {
+				for (KeyValue<StringName, GDScriptParser::DataType>& E : call_generic_bindings) {
+					E.value = resolve_generic_type(E.value, explicit_class_bindings);
+				}
+				for (const KeyValue<StringName, GDScriptParser::DataType>& E : explicit_class_bindings) {
+					if (!call_generic_bindings.has(E.key)) {
+						call_generic_bindings[E.key] = E.value;
+					}
+				}
 			}
 		}
 
@@ -5712,6 +5787,27 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			}
 		}
 
+
+		if (is_constructor && !has_turbobrick && base_type.kind == GDScriptParser::DataType::CLASS && base_type.class_type != nullptr && base_type.class_type->has_generic_parameters() && base_type.generic_type_bindings.is_empty()) {
+			HashMap<StringName, GDScriptParser::DataType> expected_bindings;
+			if (infer_bindings_from_expected_supertype(base_type.class_type, p_call->expected_constructed_type, expected_bindings)) {
+				GDScriptParser::ClassNode* declaring_class = base_type.class_type;
+				HashMap<StringName, GDScriptParser::DataType> seeds;
+				if (declaring_class->base_type.generic_type_bindings.is_empty()) {
+					seeds = expected_bindings;
+				} else {
+					for (const KeyValue<StringName, GDScriptParser::DataType>& E : declaring_class->base_type.generic_type_bindings) {
+						seeds[E.key] = resolve_generic_type(E.value, expected_bindings);
+					}
+				}
+				for (const KeyValue<StringName, GDScriptParser::DataType>& E : seeds) {
+					const GDScriptParser::DataType* existing = call_generic_bindings.getptr(E.key);
+					if (existing == nullptr || type_contains_class_generic(*existing, declaring_class)) {
+						call_generic_bindings[E.key] = E.value;
+					}
+				}
+			}
+		}
 
 		p_call->generic_callee = (script_func != nullptr && script_func->has_generic_parameters()) ? script_func : nullptr;
 		p_call->generic_new_class = (is_constructor && base_type.kind == GDScriptParser::DataType::CLASS && base_type.class_type != nullptr && base_type.class_type->has_generic_parameters()) ? base_type.class_type : nullptr;
@@ -7279,6 +7375,9 @@ void GDScriptAnalyzer::reduce_identifier(GDScriptParser::IdentifierNode *p_ident
 }
 
 void GDScriptAnalyzer::reduce_with_expected(GDScriptParser::ExpressionNode* p_expression, const GDScriptParser::DataType& p_expected) {
+	if (is_constructor_call_node(p_expression)) {
+		static_cast<GDScriptParser::CallNode*>(p_expression)->expected_constructed_type = p_expected;
+	}
 	if (is_closure_node(p_expression)) {
 		expected_closure_type = p_expected;
 	}
@@ -9368,10 +9467,18 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 		/// prevents you from coercing T -> int or something stupid like that
 		
 		if (is_generic_in_open_context(p_source, p_class) || is_generic_fn_in_open_context(p_source, p_func)) {
-			if (p_target.kind != GDScriptParser::DataType::GENERIC_TYPE) {
+			if (p_target.kind == GDScriptParser::DataType::GENERIC_TYPE) {
+				return true;
+			}
+			const GDScriptParser::IdentifierNode* open_decl = find_generic_decl(p_source);
+			if (open_decl == nullptr || open_decl->generic_upper_bound == nullptr) {
 				return false;
 			}
-			return true;
+			const GDScriptParser::DataType& open_upper = open_decl->generic_upper_bound->resolved_type;
+			if (!open_upper.is_set() || !open_upper.trait_bound_names.is_empty()) {
+				return false;
+			}
+			return check_type_compatibility(p_target, type_from_metatype(open_upper), p_allow_implicit_conversion, p_source_node, p_class, p_func, p_trait_analyzer);
 		}
 
 		///p_source is a closed generic belonging to some other random bumfuck function/class
