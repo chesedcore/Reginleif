@@ -2,7 +2,7 @@ func test():
 	return_call()
 	return_nothing()
 	return_side_effect()
-	var r = return_side_effect.call() # Untyped call to check return value.
+	var r = Callable(self, "return_side_effect").call() # Untyped call to check return value.
 	prints(r, typeof(r) == TYPE_NIL)
 	print("end")
 

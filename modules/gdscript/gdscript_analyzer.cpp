@@ -4774,7 +4774,20 @@ void GDScriptAnalyzer::reduce_await(GDScriptParser::AwaitNode *p_await) {
 
 #ifdef DEBUG_ENABLED
 	GDScriptParser::DataType to_await_type = p_await->to_await->type_constraint;
-	if (!to_await_type.is_coroutine && !to_await_type.is_variant() && to_await_type.builtin_type != Variant::SIGNAL) {
+
+	bool is_callable_call = false;
+	if (p_await->to_await->type == GDScriptParser::Node::CALL) {
+		const GDScriptParser::CallNode* await_call = static_cast<const GDScriptParser::CallNode*>(p_await->to_await);
+		if (await_call->function_name == SNAME("call") && await_call->callee && await_call->callee->type == GDScriptParser::Node::SUBSCRIPT) {
+			const GDScriptParser::SubscriptNode* callee_subscript = static_cast<const GDScriptParser::SubscriptNode*>(await_call->callee);
+			if (callee_subscript->base) {
+				const GDScriptParser::DataType& callee_base_type = callee_subscript->base->type_constraint;
+				is_callable_call = callee_base_type.kind == GDScriptParser::DataType::BUILTIN && callee_base_type.builtin_type == Variant::CALLABLE;
+			}
+		}
+	}
+
+	if (!is_callable_call && !to_await_type.is_coroutine && !to_await_type.is_variant() && to_await_type.builtin_type != Variant::SIGNAL) {
 		parser->push_warning(p_await, GDScriptWarning::REDUNDANT_AWAIT);
 	}
 #endif // DEBUG_ENABLED
