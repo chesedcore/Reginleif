@@ -26,6 +26,36 @@ const GenericMethodInfo* GenericMethods::find(const StringName& p_class, const S
 	return nullptr;
 }
 
+GenericTypeToken GenericTypeToken::decode(const Variant& p_token) {
+	GenericTypeToken t;
+	switch (p_token.get_type()) {
+		case Variant::OBJECT: {
+			t.type = Variant::OBJECT;
+			t.script = p_token;
+		} break;
+		case Variant::STRING_NAME: {
+			t.type = Variant::OBJECT;
+			t.class_name = p_token;
+		} break;
+		case Variant::INT: {
+			t.type = (Variant::Type)(int64_t)p_token;
+		} break;
+		case Variant::ARRAY: {
+			const Array a = p_token;
+			if (a.is_empty()) {
+				break;
+			}
+			t.type = (Variant::Type)(int64_t)a[0];
+			for (int i = 1; i < a.size(); i++) {
+				t.nested.push_back(decode(a[i]));
+			}
+		} break;
+		default: {
+		} break; ///nil is untyped
+	}
+	return t;
+}
+
 void GenericMethods::clear() {
 	_registry().clear();
 }
