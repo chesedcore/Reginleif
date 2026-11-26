@@ -590,6 +590,7 @@ public:
 	virtual void write_load_type_args(int p_count) override;
 	virtual void write_load_instance_type_args(int p_count) override;
 	virtual void write_call_on_type_arg(const Address& p_target, const GDScriptDataType& p_type, const StringName& p_method, const Vector<Address>& p_arguments) override;
+	virtual void write_load_type_arg_value(const Address& p_target, const GDScriptDataType& p_type) override;
 	virtual void write_await(const Address &p_target, const Address &p_operand) override;
 	virtual void write_if(const Address &p_condition) override;
 	virtual void write_else() override;

@@ -162,6 +162,30 @@ static String _get_container_validate_type(const ContainerTypeValidate& p_type) 
 	return type_name;
 }
 
+static Variant _type_arg_to_token(const ContainerTypeValidate& p_type) {
+	if (p_type.script.is_valid()) {
+		return p_type.script;
+	}
+	if (p_type.class_name != StringName()) {
+		return p_type.class_name;
+	}
+	if (p_type.variant_type == Variant::NIL) {
+		return Variant();
+	}
+	if (p_type.variant_type == Variant::OBJECT) {
+		return StringName("Object");
+	}
+	if (p_type.nested_types.is_empty()) {
+		return (int64_t)p_type.variant_type;
+	}
+	Array token;
+	token.push_back((int64_t)p_type.variant_type);
+	for (int i = 0; i < p_type.nested_types.size(); i++) {
+		token.push_back(_type_arg_to_token(p_type.nested_types[i]));
+	}
+	return token;
+}
+
 void GDScriptFunction::_profile_native_call(uint64_t p_t_taken, const String &p_func_name, const String &p_instance_class_name) {
 	HashMap<String, Profile::NativeProfile>::Iterator inner_prof = profile.native_calls.find(p_func_name);
 	if (inner_prof) {
@@ -481,6 +505,7 @@ void (*type_init_function_table[])(Variant *) = {
 		&&OPCODE_CHECK_GENERIC_INSTANCE, \
 		&&OPCODE_TYPE_TEST_GENERIC, \
 		&&OPCODE_CALL_ON_TYPE_ARG, \
+		&&OPCODE_LOAD_TYPE_ARG_VALUE, \
 		&&OPCODE_END \
 	}; \
 	static_assert(std_size(switch_table_ops) == (OPCODE_END + 1), "Opcodes in jump table aren't the same as opcodes in enum.");
@@ -4531,6 +4556,28 @@ Variant GDScriptFunction::call(GDScriptInstance *p_instance, const Variant **p_a
 				*dst = call_result;
 
 				ip += 4;
+			}
+			DISPATCH_OPCODE;
+
+			
+			OPCODE(OPCODE_LOAD_TYPE_ARG_VALUE) {
+				CHECK_SPACE(3);
+				GET_VARIANT_PTR(dst, 0);
+				GET_CONTAINER_VALIDATOR(type_arg, 1);
+
+				if (type_arg.script.is_valid()) {
+					*dst = type_arg.script;
+				} else if (type_arg.class_name == StringName() && type_arg.variant_type != Variant::NIL && type_arg.variant_type != Variant::OBJECT) {
+					*dst = _type_arg_to_token(type_arg);
+				} else if (type_arg.class_name != StringName()) {
+					*dst = type_arg.class_name;
+				} else {
+#ifdef DEBUG_ENABLED
+					err_text = "[Reginleif] This type argument didn't resolve to a concrete type here.";
+#endif // DEBUG_ENABLED
+					OPCODE_BREAK;
+				}
+				ip += 3;
 			}
 			DISPATCH_OPCODE;
 

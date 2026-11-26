@@ -1660,6 +1660,12 @@ void GDScriptByteCodeGenerator::write_call_on_type_arg(const Address& p_target, 
 	ct.cleanup();
 }
 
+void GDScriptByteCodeGenerator::write_load_type_arg_value(const Address& p_target, const GDScriptDataType& p_type) {
+	append_opcode(GDScriptFunction::OPCODE_LOAD_TYPE_ARG_VALUE);
+	append(p_target);
+	append(VALIDATOR_OPERAND(_make_element_validator(p_type)));
+}
+
 void GDScriptByteCodeGenerator::write_load_instance_type_args(int p_count) {
 	append_opcode(GDScriptFunction::OPCODE_LOAD_INSTANCE_TYPE_ARGS);
 	append(p_count);

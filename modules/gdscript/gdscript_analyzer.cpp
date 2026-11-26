@@ -4947,6 +4947,82 @@ const char *check_for_renamed_identifier(String identifier, GDScriptParser::Node
 }
 #endif // SUGGEST_GODOT4_RENAMES
 
+static bool native_generic_type_to_datatype(const GenericTypeDesc& p_desc, GDScriptParser::DataType& r_out) {
+	if (p_desc.kind == GenericTypeDesc::UNSET) {
+		return false;
+	}
+	if (p_desc.kind == GenericTypeDesc::VARIANT_TYPE) {
+		r_out = GDScriptParser::DataType::get_variant_type();
+		return true;
+	}
+
+	r_out = GDScriptParser::DataType();
+	r_out.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+
+	switch (p_desc.kind) {
+		case GenericTypeDesc::GENERIC: {
+			r_out.kind = GDScriptParser::DataType::GENERIC_TYPE;
+			r_out.generic_param = p_desc.name;
+			return true;
+		}
+		case GenericTypeDesc::VOID_TYPE: {
+			r_out.kind = GDScriptParser::DataType::BUILTIN;
+			r_out.builtin_type = Variant::NIL;
+			return true;
+		}
+		case GenericTypeDesc::BUILTIN: {
+			r_out.kind = GDScriptParser::DataType::BUILTIN;
+			r_out.builtin_type = p_desc.builtin;
+			return true;
+		}
+		case GenericTypeDesc::NATIVE: {
+			if (!ClassDB::class_exists(p_desc.name)) {
+				return false;
+			}
+			r_out.kind = GDScriptParser::DataType::NATIVE;
+			r_out.native_type = p_desc.name;
+			return true;
+		}
+		case GenericTypeDesc::ARRAY:
+		case GenericTypeDesc::DICTIONARY: {
+			r_out.kind = GDScriptParser::DataType::BUILTIN;
+			r_out.builtin_type = p_desc.kind == GenericTypeDesc::ARRAY ? Variant::ARRAY : Variant::DICTIONARY;
+			for (int i = 0; i < p_desc.elems.size(); i++) {
+				GDScriptParser::DataType elem;
+				if (!native_generic_type_to_datatype(p_desc.elems[i], elem)) {
+					return false;
+				}
+				r_out.set_container_element_type(i, elem);
+			}
+			return true;
+		}
+		case GenericTypeDesc::CALLABLE: {
+			if (p_desc.ret.size() != 1) {
+				return false;
+			}
+			r_out.kind = GDScriptParser::DataType::BUILTIN;
+			r_out.builtin_type = Variant::CALLABLE;
+			r_out.has_callable_signature = true;
+			for (int i = 0; i < p_desc.elems.size(); i++) {
+				GDScriptParser::DataType param;
+				if (!native_generic_type_to_datatype(p_desc.elems[i], param)) {
+					return false;
+				}
+				r_out.callable_params.push_back(param);
+			}
+			GDScriptParser::DataType ret;
+			if (!native_generic_type_to_datatype(p_desc.ret[0], ret)) {
+				return false;
+			}
+			r_out.callable_return.push_back(ret);
+			return true;
+		}
+		default: {
+			return false;
+		}
+	}
+}
+
 void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_await, bool p_is_root) {
 	bool all_is_constant = true;
 	HashMap<int, GDScriptParser::ArrayNode *> arrays; // For array literal to potentially type when passing.
@@ -5364,6 +5440,44 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 	if (get_function_signature(p_call, is_constructor, base_type, p_call->function_name, return_type, par_types, default_arg_count, method_flags)) {
 		p_call->is_static = method_flags.has_flag(METHOD_FLAG_STATIC);
 
+		const GenericMethodInfo* native_generic = nullptr;
+		bool script_defines_method = false;
+
+		for (GDScriptParser::ClassNode* script_class = base_type.class_type; script_class != nullptr && !script_defines_method; script_class = script_class->base_type.class_type) {
+			script_defines_method = script_class->has_member(p_call->function_name) && script_class->get_member(p_call->function_name).type == GDScriptParser::ClassNode::Member::FUNCTION;
+		}
+
+		if (!script_defines_method && base_type.kind == GDScriptParser::DataType::SCRIPT) {
+			for (Ref<Script> base_script = base_type.script_type; base_script.is_valid() && !script_defines_method; base_script = base_script->get_base_script()) {
+				script_defines_method = base_script->has_method(p_call->function_name);
+			}
+		}
+		if (!is_constructor && !script_defines_method && base_type.kind != GDScriptParser::DataType::BUILTIN && base_type.native_type != StringName()) {
+			native_generic = GenericMethods::find(base_type.native_type, p_call->function_name);
+		}
+		p_call->native_generic = native_generic;
+		if (native_generic != nullptr) {
+			{
+				int par_index = 0;
+				const int token_count = native_generic->params.size();
+				for (List<GDScriptParser::DataType>::Element* E = par_types.front(); E != nullptr; E = E->next(), par_index++) {
+					const int user_index = par_index - token_count;
+					if (user_index < 0 || user_index >= native_generic->arg_types.size() || native_generic->arg_types[user_index].kind == GenericTypeDesc::UNSET) {
+						continue;
+					}
+					GDScriptParser::DataType generic_par;
+					if (!native_generic_type_to_datatype(native_generic->arg_types[user_index], generic_par)) {
+						push_error(vformat(R"([Reginleif] Bad native generic descriptor for '%s()' (maybe unknown native class?).)", p_call->function_name), p_call);
+						continue;
+					}
+					E->get() = generic_par;
+				}
+			}
+			for (int i = 0; i < native_generic->params.size() && !par_types.is_empty(); i++) {
+				par_types.pop_front();
+			}
+		}
+
 		if (!deferred_closures.is_empty()) {
 			Vector<GDScriptParser::DataType> expected_params;
 			for (const GDScriptParser::DataType& par_type : par_types) {
@@ -5526,7 +5640,19 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 
 		bool has_turbobrick = p_call->has_explicit_generic_args;
 
-		if (has_turbobrick) {
+		if (native_generic != nullptr && has_turbobrick) {
+			const int native_expected = native_generic->params.size();
+			if (p_call->explicit_generic_args.size() != native_expected) {
+				push_error(vformat(R"([Reginleif] '%s()' has %d generic parameter(s) but %d were provided.)", p_call->function_name, native_expected, p_call->explicit_generic_args.size()), p_call);
+				p_call->type_constraint = call_type;
+				return;
+			}
+			for (int i = 0; i < native_expected; i++) {
+				call_generic_bindings[native_generic->params[i]] = type_from_metatype(resolve_datatype(p_call->explicit_generic_args[i]));
+			}
+		}
+
+		if (has_turbobrick && native_generic == nullptr) {
 			const Vector<GDScriptParser::IdentifierNode*>* param_list = nullptr;
 
 			if (script_func != nullptr && script_func->has_generic_parameters()) {
@@ -5643,6 +5769,41 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 		}
 
 
+		if (native_generic != nullptr) {
+			for (int i = 0; i < native_generic->params.size(); i++) {
+				const StringName& native_param = native_generic->params[i];
+				const GDScriptParser::DataType* native_bound_arg = call_generic_bindings.getptr(native_param);
+				if (native_bound_arg == nullptr) {
+					push_error(vformat(R"([Reginleif] Could not infer type argument '%s' for '%s()'. Provide it explicitly: %s::Type().)", native_param, p_call->function_name, p_call->function_name), p_call);
+					p_call->type_constraint = call_type;
+					return;
+				}
+				if (native_bound_arg->kind == GDScriptParser::DataType::GENERIC_TYPE) {
+					continue;
+				}
+				if (i < native_generic->bounds.size() && native_generic->bounds[i] != StringName() && native_generic->bounds[i] != StringName("Variant")) {
+					GDScriptParser::DataType native_upper;
+					native_upper.type_source = GDScriptParser::DataType::ANNOTATED_EXPLICIT;
+					if (ClassDB::class_exists(native_generic->bounds[i])) {
+						native_upper.kind = GDScriptParser::DataType::NATIVE;
+						native_upper.native_type = native_generic->bounds[i];
+					} else if (trait_analyzer != nullptr && (!GDScriptCache::get_global_trait_path(native_generic->bounds[i]).is_empty() || trait_analyzer->get_local_trait(native_generic->bounds[i]).is_valid())) {
+						native_upper.kind = GDScriptParser::DataType::TRAIT_OBJECT;
+						native_upper.trait_bound_names.push_back(native_generic->bounds[i]);
+					} else {
+						push_error(vformat(R"([Reginleif] Native generic '%s()' declares bound '%s' for '%s', which is neither a native class nor a known trait.)", p_call->function_name, native_generic->bounds[i], native_param), p_call);
+						p_call->type_constraint = call_type;
+						return;
+					}
+					if (!is_type_compatible(native_upper, *native_bound_arg, true, p_call)) {
+						push_error(vformat(R"([Reginleif] Type argument '%s' for generic parameter '%s' in '%s()' does not satisfy upper bound '%s'.)", native_bound_arg->to_string(), native_param, p_call->function_name, native_upper.to_string()), p_call);
+						p_call->type_constraint = call_type;
+						return;
+					}
+				}
+			}
+		}
+
 		if (script_func != nullptr) {
 			for (const GDScriptParser::IdentifierNode* generic_param : script_func->generic_parameters) {
 
@@ -5722,6 +5883,21 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			p_call->resolved_generic_bindings.clear();
 			for (const KeyValue<StringName, GDScriptParser::DataType>& E : call_generic_bindings) {
 				p_call->resolved_generic_bindings[E.key] = resolve_generic_type(E.value, call_generic_bindings);
+			}
+		}
+
+		if (native_generic != nullptr && native_generic->return_type.kind != GenericTypeDesc::UNSET) {
+			GDScriptParser::DataType native_ret_desc;
+			if (native_generic_type_to_datatype(native_generic->return_type, native_ret_desc)) {
+				return_type = resolve_generic_type(native_ret_desc, call_generic_bindings);
+				return_type.is_constant = false;
+			} else {
+				push_error(vformat(R"([Reginleif] Bad native generic return descriptor for '%s()'.)", p_call->function_name), p_call);
+			}
+		} else if (native_generic != nullptr && native_generic->return_param >= 0 && native_generic->return_param < native_generic->params.size()) {
+			if (const GDScriptParser::DataType* native_ret = call_generic_bindings.getptr(native_generic->params[native_generic->return_param])) {
+				return_type = *native_ret;
+				return_type.is_constant = false;
 			}
 		}
 

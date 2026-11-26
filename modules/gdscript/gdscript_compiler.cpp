@@ -796,6 +796,13 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				result = codegen.add_temporary(_gdtype_from_datatype(call->type_constraint, codegen.script));
 			}
 
+			GDScriptCodeGenerator::Address native_generic_typed_result;
+			const bool verify_native_generic_result = call->native_generic != nullptr && !p_root && !is_awaited && result.type.has_type() && !(result.type.kind == GDScriptDataType::BUILTIN && result.type.builtin_type == Variant::NIL);
+			if (verify_native_generic_result) {
+				native_generic_typed_result = result;
+				result = codegen.add_temporary();
+			}
+
 			Vector<GDScriptCodeGenerator::Address> arguments;
 			for (uint32_t i = 0; i < call->arguments.size(); i++) {
 				GDScriptCodeGenerator::Address arg = _parse_expression(codegen, r_error, call->arguments[i]);
@@ -803,6 +810,15 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 					return GDScriptCodeGenerator::Address();
 				}
 				arguments.push_back(arg);
+			}
+
+			if (call->native_generic != nullptr) {
+				for (int i = call->native_generic->params.size() - 1; i >= 0; i--) {
+					const GDScriptParser::DataType* bound = call->resolved_generic_bindings.getptr(call->native_generic->params[i]);
+					GDScriptCodeGenerator::Address token = codegen.add_temporary();
+					gen->write_load_type_arg_value(token, bound != nullptr ? _type_argument_from_datatype(*bound, codegen.script) : GDScriptDataType());
+					arguments.insert(0, token);
+				}
 			}
 
 			const Vector<GDScriptParser::IdentifierNode*>* generic_params = nullptr;
@@ -1032,10 +1048,18 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_expression(CodeGen &code
 				}
 			}
 
+			if (verify_native_generic_result) {
+				gen->write_assign_with_conversion(native_generic_typed_result, result);
+			}
+
 			for (int i = 0; i < arguments.size(); i++) {
 				if (arguments[i].mode == GDScriptCodeGenerator::Address::TEMPORARY) {
 					gen->pop_temporary();
 				}
+			}
+			if (verify_native_generic_result) {
+				gen->pop_temporary(); ///the untyped receiving temporary
+				result = native_generic_typed_result;
 			}
 			return result;
 		} break;
