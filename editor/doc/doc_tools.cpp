@@ -688,6 +688,7 @@ void DocTools::generate(BitField<GenerateFlags> p_flags) {
 
 				DocData::MethodDoc method;
 				DocData::method_doc_from_methodinfo(method, E, "");
+				DocData::method_doc_apply_generics(method, name);
 
 				Vector<Error> errs = ClassDB::get_method_error_return_values(name, E.name);
 				if (errs.size()) {
@@ -1241,6 +1242,14 @@ static Error _parse_methods(Ref<XMLParser> &parser, Vector<DocData::MethodDoc> &
 									method.return_is_bitfield = parser->get_named_attribute_value("is_bitfield").to_lower() == "true";
 								}
 							}
+						} else if (name == "generic") {
+							DocData::GenericParamDoc generic_param;
+							ERR_FAIL_COND_V(!parser->has_attribute("name"), ERR_FILE_CORRUPT);
+							generic_param.name = parser->get_named_attribute_value("name");
+							if (parser->has_attribute("bound")) {
+								generic_param.bound = parser->get_named_attribute_value("bound");
+							}
+							method.generics.push_back(generic_param);
 						} else if (name == "returns_error") {
 							ERR_FAIL_COND_V(!parser->has_attribute("number"), ERR_FILE_CORRUPT);
 							method.errors_returned.push_back(parser->get_named_attribute_value("number").to_int());
@@ -1393,7 +1402,17 @@ Error DocTools::_load(Ref<XMLParser> parser) {
 			if (parser->get_node_type() == XMLParser::NODE_ELEMENT) {
 				String name2 = parser->get_node_name();
 
-				if (name2 == "brief_description") {
+				if (name2 == "generic") {
+					DocData::GenericParamDoc generic_param;
+					ERR_FAIL_COND_V(!parser->has_attribute("name"), ERR_FILE_CORRUPT);
+					generic_param.name = parser->get_named_attribute_value("name");
+					if (parser->has_attribute("bound")) {
+						generic_param.bound = parser->get_named_attribute_value("bound");
+					}
+					c.generics.push_back(generic_param);
+					///if only this was better...
+
+				} else if (name2 == "brief_description") {
 					parser->read();
 					if (parser->get_node_type() == XMLParser::NODE_TEXT) {
 						c.brief_description = parser->get_node_data();
@@ -1640,6 +1659,15 @@ static void _write_method_doc(Ref<FileAccess> f, const String &p_name, Vector<Do
 
 			_write_string(f, 2, "<" + p_name + " name=\"" + m.name.xml_escape(true) + "\"" + additional_attributes + ">");
 
+			for (int j = 0; j < m.generics.size(); j++) {
+				const DocData::GenericParamDoc& g = m.generics[j];
+				String bound_text;
+				if (!g.bound.is_empty()) {
+					bound_text = " bound=\"" + g.bound.xml_escape(true) + "\"";
+				}
+				_write_string(f, 3, "<generic name=\"" + g.name.xml_escape(true) + "\"" + bound_text + " />");
+			}
+
 			if (!m.return_type.is_empty()) {
 				String enum_text;
 				if (!m.return_enum.is_empty()) {
@@ -1732,6 +1760,15 @@ Error DocTools::save_classes(const String &p_default_path, const HashMap<String,
 				R"( xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="%s">)",
 				schema_path);
 		_write_string(f, 0, header);
+
+		for (int i = 0; i < c.generics.size(); i++) {
+			const DocData::GenericParamDoc& g = c.generics[i];
+			String bound_text;
+			if (!g.bound.is_empty()) {
+				bound_text = " bound=\"" + g.bound.xml_escape(true) + "\"";
+			}
+			_write_string(f, 1, "<generic name=\"" + g.name.xml_escape(true) + "\"" + bound_text + " />");
+		}
 
 		_write_string(f, 1, "<brief_description>");
 		_write_string(f, 2, _translate_doc_string(c.brief_description).strip_edges().xml_escape());

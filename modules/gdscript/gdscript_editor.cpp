@@ -863,6 +863,99 @@ static String _make_arguments_hint(const MethodInfo &p_info, int p_arg_idx, bool
 	return arghint;
 }
 
+static String _generic_desc_to_string(const GenericTypeDesc& p_desc) {
+	switch (p_desc.kind) {
+		case GenericTypeDesc::GENERIC:
+		case GenericTypeDesc::NATIVE: {
+			return String(p_desc.name);
+		}
+		case GenericTypeDesc::VARIANT_TYPE: {
+			return "Variant";
+		}
+		case GenericTypeDesc::VOID_TYPE: {
+			return "void";
+		}
+		case GenericTypeDesc::BUILTIN: {
+			return Variant::get_type_name(p_desc.builtin);
+		}
+		case GenericTypeDesc::ARRAY: {
+			return "Array[" + (p_desc.elems.size() > 0 ? _generic_desc_to_string(p_desc.elems[0]) : String("Variant")) + "]";
+		}
+		case GenericTypeDesc::DICTIONARY: {
+			return "Dictionary[" + (p_desc.elems.size() > 0 ? _generic_desc_to_string(p_desc.elems[0]) : String("Variant")) + ", " + (p_desc.elems.size() > 1 ? _generic_desc_to_string(p_desc.elems[1]) : String("Variant")) + "]";
+		}
+		case GenericTypeDesc::CALLABLE: {
+			String params;
+			for (int i = 0; i < p_desc.elems.size(); i++) {
+				params += (i > 0 ? String(", ") : String()) + _generic_desc_to_string(p_desc.elems[i]);
+			}
+			return "Callable(" + params + ") -> " + (p_desc.ret.size() > 0 ? _generic_desc_to_string(p_desc.ret[0]) : String("Variant"));
+		}
+		default: {
+			return "Variant";
+		}
+	}
+}
+
+static String _make_native_generic_arguments_hint(const MethodInfo& p_info, const GenericMethodInfo& p_generic, int p_arg_idx) {
+	const int token_count = p_generic.params.size();
+	String arghint;
+
+	if (p_generic.return_type.kind != GenericTypeDesc::UNSET) {
+		arghint += _generic_desc_to_string(p_generic.return_type) + " ";
+	} else if (p_generic.return_param >= 0 && p_generic.return_param < token_count) {
+		arghint += String(p_generic.params[p_generic.return_param]) + " ";
+	} else {
+		arghint += _get_visual_datatype(p_info.return_val, false) + " ";
+	}
+
+	arghint += String(p_info.name) + "::[";
+	for (int i = 0; i < token_count; i++) {
+		arghint += (i > 0 ? String(", ") : String()) + String(p_generic.params[i]);
+		if (i < p_generic.bounds.size() && p_generic.bounds[i] != StringName()) {
+			arghint += ": " + String(p_generic.bounds[i]);
+		}
+	}
+	arghint += "](";
+
+	const int user_arg_count = MAX(0, (int)p_info.arguments.size() - token_count);
+	const int def_args = p_info.arguments.size() - p_info.default_arguments.size();
+	for (int i = 0; i < user_arg_count; i++) {
+		const int native_index = i + token_count;
+		const PropertyInfo& E = p_info.arguments[native_index];
+		if (i > 0) {
+			arghint += ", ";
+		}
+		if (i == p_arg_idx) {
+			arghint += String::chr(0xFFFF);
+		}
+		const bool has_desc = i < p_generic.arg_types.size() && p_generic.arg_types[i].kind != GenericTypeDesc::UNSET;
+		arghint += E.name + ": " + (has_desc ? _generic_desc_to_string(p_generic.arg_types[i]) : _get_visual_datatype(E, true));
+		if (native_index - def_args >= 0) {
+			arghint += String(" = ") + p_info.default_arguments[native_index - def_args].get_construct_string();
+		}
+		if (i == p_arg_idx) {
+			arghint += String::chr(0xFFFF);
+		}
+	}
+
+	if (p_info.flags & METHOD_FLAG_VARARG) {
+		if (user_arg_count > 0) {
+			arghint += ", ";
+		}
+		if (p_arg_idx >= user_arg_count) {
+			arghint += String::chr(0xFFFF);
+		}
+		arghint += "...args: Array";
+		if (p_arg_idx >= user_arg_count) {
+			arghint += String::chr(0xFFFF);
+		}
+	}
+
+	arghint += ")";
+	return arghint;
+}
+
 static String _make_callable_arguments_hint(const GDScriptParser::DataType* p_type, int p_arg_idx, const StringName &p_method) {
 	String arghint;
 	const GDScriptParser::DataType* return_type = &p_type->callable_return[0];
@@ -4293,6 +4386,8 @@ static void _list_call_arguments_core(GDScriptParser::CompletionContext& p_conte
 
 				MethodInfo info;
 				uint32_t method_args = 0;
+				const GenericMethodInfo* native_generic_hint = GenericMethods::find(class_name, method);
+				const uint32_t native_argidx = p_argidx + (native_generic_hint != nullptr ? native_generic_hint->params.size() : 0);
 
 				if (ClassDB::get_method_info(class_name, method, &info)) {
 					method_args = info.arguments.size();
@@ -4300,9 +4395,9 @@ static void _list_call_arguments_core(GDScriptParser::CompletionContext& p_conte
 						Object *obj = base.operator Object *();
 						if (obj) {
 							List<String> options;
-							obj->get_argument_options(method, p_argidx, &options);
+							obj->get_argument_options(method, native_argidx, &options);
 							const GDScriptParser::Node *existing_node = p_call->arguments.size() > p_argidx ? p_call->arguments[p_argidx] : nullptr;
-							const Variant::Type expected_type = info.arguments.size() > p_argidx ? info.arguments[p_argidx].type : Variant::NIL;
+							const Variant::Type expected_type = info.arguments.size() > native_argidx ? info.arguments[native_argidx].type : Variant::NIL;
 							for (String &opt : options) {
 								if (opt.is_quoted()) {
 									EditorLanguage::CompletionOption option = _calculate_string_insertion(existing_node, opt.unquote(), expected_type);
@@ -4312,14 +4407,14 @@ static void _list_call_arguments_core(GDScriptParser::CompletionContext& p_conte
 						}
 					}
 
-					if (p_argidx < method_args) {
-						const PropertyInfo &arg_info = info.arguments[p_argidx];
+					if (native_argidx < method_args) {
+						const PropertyInfo &arg_info = info.arguments[native_argidx];
 						if (arg_info.usage & (PROPERTY_USAGE_CLASS_IS_ENUM | PROPERTY_USAGE_CLASS_IS_BITFIELD)) {
 							_find_enumeration_candidates(p_context, arg_info.class_name, r_result);
 						}
 					}
 
-					r_arghint = _make_arguments_hint(info, p_argidx);
+					r_arghint = native_generic_hint != nullptr ? _make_native_generic_arguments_hint(info, *native_generic_hint, p_argidx) : _make_arguments_hint(info, p_argidx);
 				}
 
 				if (p_argidx == 1 && p_call && ClassDB::is_parent_class(class_name, SNAME("Tween")) && method == SNAME("tween_property")) {

@@ -297,6 +297,7 @@ class EditorHelpBit : public VBoxContainer {
 		String experimental_message;
 		DocType doc_type;
 		String value;
+		Vector<DocData::GenericParamDoc> generics;
 		Vector<ArgumentData> arguments;
 		ArgumentData rest_argument;
 		String qualifiers;

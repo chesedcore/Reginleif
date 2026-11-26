@@ -778,7 +778,7 @@ ProgramIndexService* ProgramIndexService::singleton = nullptr;
 
 ProgramIndexService::ProgramIndexService() {
 	singleton = this;
-	current.instantiate(); // empty index, so readers never null-check
+	current.instantiate();
 }
 
 ProgramIndexService::~ProgramIndexService() {

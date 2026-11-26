@@ -37,6 +37,7 @@
 #endif
 
 #include "core/io/resource.h"
+#include "core/object/generic_method.h"
 #include "core/object/ref_counted.h"
 #include "core/object/script_language.h"
 #include "core/string/string_name.h"
@@ -632,6 +633,7 @@ public:
 		FunctionNode* generic_callee = nullptr;
 		ClassNode* generic_new_class = nullptr;
 		bool static_trait_call = false;
+		const GenericMethodInfo* native_generic = nullptr;
 
 		CallNode() {
 			type = CALL;

@@ -602,6 +602,38 @@ void EditorHelp::_add_method(const DocData::MethodDoc &p_method, bool p_overview
 		class_desc->pop(); // meta
 	}
 
+	if (!p_method.generics.is_empty()) {
+		class_desc->push_color(theme_cache.symbol_color);
+		class_desc->add_text("[");
+		class_desc->pop();
+
+		for (int j = 0; j < p_method.generics.size(); j++) {
+			const DocData::GenericParamDoc& generic = p_method.generics[j];
+
+			if (j > 0) {
+				class_desc->push_color(theme_cache.symbol_color);
+				class_desc->add_text(", ");
+				class_desc->pop();
+			}
+
+			class_desc->push_color(theme_cache.text_color);
+			class_desc->add_text(generic.name);
+			class_desc->pop();
+
+			if (!generic.bound.is_empty()) {
+				class_desc->push_color(theme_cache.symbol_color);
+				class_desc->add_text(colon_nbsp);
+				class_desc->pop();
+
+				_add_type(generic.bound);
+			}
+		} ///all the pops above are for colours thank
+
+		class_desc->push_color(theme_cache.symbol_color);
+		class_desc->add_text("]");
+		class_desc->pop(); ///colour, colour, i get it, damn...
+	}
+
 	class_desc->push_color(theme_cache.symbol_color);
 	class_desc->add_text("(");
 	class_desc->pop(); // color
@@ -1011,6 +1043,38 @@ void EditorHelp::_update_doc() {
 	class_desc->push_color(theme_cache.headline_color);
 	class_desc->add_text(edited_class);
 	class_desc->pop(); // color
+
+	if (!cd.generics.is_empty()) {
+		class_desc->push_color(theme_cache.symbol_color);
+		class_desc->add_text("[");
+		class_desc->pop(); ///color
+
+		for (int j = 0; j < cd.generics.size(); j++) {
+			const DocData::GenericParamDoc& generic = cd.generics[j];
+
+			if (j > 0) {
+				class_desc->push_color(theme_cache.symbol_color);
+				class_desc->add_text(", ");
+				class_desc->pop(); ///color
+			}
+
+			class_desc->push_color(theme_cache.text_color);
+			class_desc->add_text(generic.name);
+			class_desc->pop(); ///color
+
+			if (!generic.bound.is_empty()) {
+				class_desc->push_color(theme_cache.symbol_color);
+				class_desc->add_text(colon_nbsp);
+				class_desc->pop(); ///color
+
+				_add_type(generic.bound);
+			}
+		}
+
+		class_desc->push_color(theme_cache.symbol_color);
+		class_desc->add_text("]");
+		class_desc->pop(); ///color
+	}
 
 	_pop_title_font();
 
@@ -3877,6 +3941,7 @@ EditorHelpBit::HelpData EditorHelpBit::_get_method_help_data(const StringName &p
 				current.arguments.push_back({ argument.name, argument_doc_type, argument.default_value });
 			}
 			current.qualifiers = method.qualifiers;
+			current.generics = method.generics;
 			const DocData::ArgumentDoc &rest_argument = method.rest_argument;
 			const DocType rest_argument_doc_type = { rest_argument.type, rest_argument.enumeration, rest_argument.is_bitfield };
 			current.rest_argument = { rest_argument.name, rest_argument_doc_type, rest_argument.default_value };
@@ -4056,6 +4121,44 @@ void EditorHelpBit::_update_labels() {
 				const DocData::ClassDoc *class_doc = EditorHelp::get_doc(symbol_class_name);
 				String inherits = class_doc ? class_doc->inherits : String();
 
+				if (class_doc != nullptr && !class_doc->generics.is_empty()) {
+					title->push_font(doc_source);
+					title->push_font_size(doc_source_size * 0.9);
+
+					title->push_color(symbol_color);
+					title->add_text("[");
+					title->pop(); ///color
+
+					for (int i = 0; i < class_doc->generics.size(); i++) {
+						const DocData::GenericParamDoc& generic = class_doc->generics[i];
+
+						if (i > 0) {
+							title->push_color(symbol_color);
+							title->add_text(", ");
+							title->pop(); ///color
+						}
+
+						title->push_color(text_color);
+						title->add_text(generic.name);
+						title->pop(); ///color
+
+						if (!generic.bound.is_empty()) {
+							title->push_color(symbol_color);
+							title->add_text(colon_nbsp);
+							title->pop(); ///color
+
+							_add_type_to_title({ generic.bound, "", false });
+						}
+					}
+
+					title->push_color(symbol_color);
+					title->add_text("]");
+					title->pop(); ///color
+
+					title->pop(); ///font_size
+					title->pop(); ///font
+				}
+
 				if (!inherits.is_empty()) {
 					title->push_font(doc_source);
 					title->push_font_size(doc_source_size * 0.9);
@@ -4108,6 +4211,38 @@ void EditorHelpBit::_update_labels() {
 			case SYMBOL_HINT_SIGNATURE: {
 				title->push_font(doc_source);
 				title->push_font_size(doc_source_size * 0.9);
+
+				if (!help_data.generics.is_empty()) {
+					title->push_color(symbol_color);
+					title->add_text("[");
+					title->pop(); ///color
+
+					for (int i = 0; i < help_data.generics.size(); i++) {
+						const DocData::GenericParamDoc& generic = help_data.generics[i];
+
+						if (i > 0) {
+							title->push_color(symbol_color);
+							title->add_text(", ");
+							title->pop(); ///color
+						}
+
+						title->push_color(text_color);
+						title->add_text(generic.name);
+						title->pop(); ///color
+
+						if (!generic.bound.is_empty()) {
+							title->push_color(symbol_color);
+							title->add_text(colon_nbsp);
+							title->pop(); ///color
+
+							_add_type_to_title({ generic.bound, "", false });
+						}
+					}
+
+					title->push_color(symbol_color);
+					title->add_text("]");
+					title->pop(); ///color
+				}
 
 				title->push_color(symbol_color);
 				title->add_text("(");
