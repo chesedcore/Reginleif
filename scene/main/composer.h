@@ -94,7 +94,12 @@ public:
 	void set_extra_traits(const Vector<StringName>& p_traits);
 	Vector<StringName> get_extra_traits() const { return extra_traits; }
 
-	Component* get_component(const StringName& p_class) const;
+	Component* get_component(const Variant& p_type) const;
+
+	template <class T>
+	T* find_component() const {
+		return Object::cast_to<T>(get_component(Variant(StringName(T::get_class_static()))));
+	}
 
 	bool can_accept(Component* p_component, String& r_error) const;
 

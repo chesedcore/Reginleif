@@ -39,6 +39,7 @@
 #include "core/error/error_macros.h"
 #include "core/templates/hash_set.h"
 #include "core/object/class_db.h"
+#include "core/object/generic_method.h"
 #include "core/object/callable_mp.h"
 #include "core/object/script_language.h"
 #include "scene/main/component.h"
@@ -383,7 +384,27 @@ void Composer::_notification(int p_what) {
 	}
 }
 
-Component* Composer::get_component(const StringName& p_class) const {
+Component* Composer::get_component(const Variant& p_type) const {
+	if (p_type.get_type() == Variant::OBJECT) {
+		const Script* wanted = Object::cast_to<Script>(p_type.operator Object*());
+		ERR_FAIL_NULL_V(wanted, nullptr);
+		for (const Entry& e : entries) {
+			Component* c = Object::cast_to<Component>(ObjectDB::get_instance(e.id));
+			if (c == nullptr || !e.valid) {
+				continue;
+			}
+			Ref<Script> s = c->get_script();
+			while (s.is_valid()) {
+				if (s.ptr() == wanted) {
+					return c;
+				}
+				s = s->get_base_script();
+			}
+		}
+		return nullptr;
+	}
+
+	const StringName p_class = p_type;
 	for (const Entry& e : entries) {
 		Component* c = Object::cast_to<Component>(ObjectDB::get_instance(e.id));
 		if (c == nullptr || !e.valid) {
@@ -593,7 +614,12 @@ Composer::~Composer() {
 void Composer::_bind_methods() {
 	///i'm tired... yet again...
 	ClassDB::bind_method(D_METHOD("get_host"), &Composer::get_host);
-	ClassDB::bind_method(D_METHOD("get_component", "class_name"), &Composer::get_component);
+	GenericMethodInfo get_component_generic;
+	get_component_generic.params.push_back("T");
+	get_component_generic.bounds.push_back("Component");
+	get_component_generic.return_param = 0;
+	GenericMethods::register_method("Composer", "get_component", get_component_generic);
+	ClassDB::bind_method(D_METHOD("get_component", "type"), &Composer::get_component);
 
 	ClassDB::bind_method(D_METHOD("set_extra_base", "base"), &Composer::set_extra_base);
 	ClassDB::bind_method(D_METHOD("get_extra_base"), &Composer::get_extra_base);
