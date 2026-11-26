@@ -406,6 +406,19 @@ void GDScriptDocGen::_generate_docs(GDScript *p_script, const GDP::ClassNode *p_
 
 	doc.script_path = p_script->get_script_path();
 
+	for (const GDP::IdentifierNode* generic : p_class->generic_parameters) {
+		DocData::GenericParamDoc generic_doc;
+		generic_doc.name = generic->name;
+		if (generic->generic_upper_bound != nullptr) {
+			const GDP::DataType& bound = generic->generic_upper_bound->resolved_type;
+			if (/*fuck this codebase*/!(bound.is_variant() && bound.trait_bound_names.is_empty())) {
+				String bound_enum;
+				_doctype_from_datatype(bound, generic_doc.bound, bound_enum);
+			}
+		}
+		doc.generics.push_back(generic_doc);
+	}
+
 	if (p_script->base.is_valid() && p_script->base->is_script_valid()) {
 		// See GH-105926. Evaluate the doc name of the base class instead of using `p_script->base->doc.name`
 		// to avoid load/compile order issues in case of complex circular dependencies.
@@ -483,6 +496,19 @@ void GDScriptDocGen::_generate_docs(GDScript *p_script, const GDP::ClassNode *p_
 				method_doc.deprecated_message = m_func->doc_data.deprecated_message;
 				method_doc.is_experimental = m_func->doc_data.is_experimental;
 				method_doc.experimental_message = m_func->doc_data.experimental_message;
+
+				for (const GDP::IdentifierNode* generic : m_func->generic_parameters) {
+					DocData::GenericParamDoc generic_doc;
+					generic_doc.name = generic->name;
+					if (generic->generic_upper_bound != nullptr) {
+						const GDP::DataType& bound = generic->generic_upper_bound->resolved_type;
+						if (!(bound.is_variant() && bound.trait_bound_names.is_empty())) {
+							String bound_enum;
+							_doctype_from_datatype(bound, generic_doc.bound, bound_enum);
+						}
+					}
+					method_doc.generics.push_back(generic_doc);
+				}
 
 				if (m_func->is_vararg()) {
 					if (!method_doc.qualifiers.is_empty()) {
