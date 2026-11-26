@@ -94,6 +94,11 @@ public:
 		}
 	};
 
+	struct GenericParamDoc {
+		String name;
+		String bound;
+	};
+
 	struct MethodDoc {
 		String name;
 		String return_type;
@@ -105,6 +110,7 @@ public:
 		String deprecated_message;
 		bool is_experimental = false;
 		String experimental_message;
+		Vector<GenericParamDoc> generics;
 		Vector<ArgumentDoc> arguments;
 		// NOTE: Only for GDScript for now. The rest argument is not saved to the XML file.
 		ArgumentDoc rest_argument;
@@ -158,6 +164,22 @@ public:
 
 			if (p_dict.has("qualifiers")) {
 				doc.qualifiers = p_dict["qualifiers"];
+			}
+
+			///why the fuck did it have to be all dicts...
+			if (p_dict.has("generics")) {
+				const Array generics = p_dict["generics"];
+				for (int i = 0; i < generics.size(); i++) {
+					const Dictionary generic_dict = generics[i];
+					GenericParamDoc generic;
+					if (generic_dict.has("name")) {
+						generic.name = generic_dict["name"];
+					}
+					if (generic_dict.has("bound")) {
+						generic.bound = generic_dict["bound"];
+					}
+					doc.generics.push_back(generic);
+				}
 			}
 
 			if (p_dict.has("description")) {
@@ -224,6 +246,19 @@ public:
 
 			if (!p_doc.qualifiers.is_empty()) {
 				dict["qualifiers"] = p_doc.qualifiers;
+			}
+
+			if (!p_doc.generics.is_empty()) {
+				Array generics;
+				for (int i = 0; i < p_doc.generics.size(); i++) {
+					Dictionary generic_dict;
+					generic_dict["name"] = p_doc.generics[i].name;
+					if (!p_doc.generics[i].bound.is_empty()) {
+						generic_dict["bound"] = p_doc.generics[i].bound;
+					}
+					generics.push_back(generic_dict);
+				}
+				dict["generics"] = generics;
 			}
 
 			if (!p_doc.description.is_empty()) {
@@ -702,6 +737,7 @@ public:
 		String brief_description;
 		String description;
 		String keywords;
+		Vector<GenericParamDoc> generics;
 		Vector<TutorialDoc> tutorials;
 		Vector<MethodDoc> constructors;
 		Vector<MethodDoc> methods;
@@ -734,6 +770,21 @@ public:
 
 			if (p_dict.has("api_type")) {
 				doc.api_type = p_dict["api_type"];
+			}
+
+			if (p_dict.has("generics")) {
+				const Array generics = p_dict["generics"];
+				for (int i = 0; i < generics.size(); i++) {
+					const Dictionary generic_dict = generics[i];
+					GenericParamDoc generic;
+					if (generic_dict.has("name")) {
+						generic.name = generic_dict["name"];
+					}
+					if (generic_dict.has("bound")) {
+						generic.bound = generic_dict["bound"];
+					}
+					doc.generics.push_back(generic);
+				}
 			}
 
 			if (p_dict.has("brief_description")) {
@@ -873,6 +924,19 @@ public:
 				dict["api_type"] = p_doc.api_type;
 			}
 
+			if (!p_doc.generics.is_empty()) {
+				Array generics;
+				for (int i = 0; i < p_doc.generics.size(); i++) {
+					Dictionary generic_dict;
+					generic_dict["name"] = p_doc.generics[i].name;
+					if (!p_doc.generics[i].bound.is_empty()) {
+						generic_dict["bound"] = p_doc.generics[i].bound;
+					}
+					generics.push_back(generic_dict);
+				}
+				dict["generics"] = generics;
+			}
+
 			if (!p_doc.brief_description.is_empty()) {
 				dict["brief_description"] = p_doc.brief_description;
 			}
@@ -988,4 +1052,5 @@ public:
 	static void return_doc_from_retinfo(DocData::MethodDoc &p_method, const PropertyInfo &p_retinfo);
 	static void argument_doc_from_arginfo(DocData::ArgumentDoc &p_argument, const PropertyInfo &p_arginfo);
 	static void method_doc_from_methodinfo(DocData::MethodDoc &p_method, const MethodInfo &p_methodinfo, const String &p_desc);
+	static void method_doc_apply_generics(DocData::MethodDoc& p_method, const StringName& p_class);
 };

@@ -30,6 +30,7 @@
 
 #include "doc_data.h"
 
+#include "core/object/generic_method.h"
 #include "core/object/method_info.h"
 #include "core/object/property_info.h"
 
@@ -169,5 +170,88 @@ void DocData::method_doc_from_methodinfo(DocData::MethodDoc &p_method, const Met
 			argument.default_value = get_default_value_string(default_arg);
 		}
 		p_method.arguments.push_back(argument);
+	}
+}
+
+static String _doc_type_from_generic_desc(const GenericTypeDesc& p_desc) {
+	switch (p_desc.kind) {
+		case GenericTypeDesc::GENERIC:
+		case GenericTypeDesc::NATIVE: {
+			return String(p_desc.name);
+		}
+		case GenericTypeDesc::VARIANT_TYPE: {
+			return "Variant";
+		}
+		case GenericTypeDesc::VOID_TYPE: {
+			return "void";
+		}
+		case GenericTypeDesc::BUILTIN: {
+			return Variant::get_type_name(p_desc.builtin);
+		}
+		case GenericTypeDesc::ARRAY: {
+			const String elem = p_desc.elems.size() > 0 ? _doc_type_from_generic_desc(p_desc.elems[0]) : String("Variant");
+			return elem == "Variant" ? String("Array") : elem + "[]";
+		}
+		case GenericTypeDesc::DICTIONARY: {
+			const String key = p_desc.elems.size() > 0 ? _doc_type_from_generic_desc(p_desc.elems[0]) : String("Variant");
+			const String value = p_desc.elems.size() > 1 ? _doc_type_from_generic_desc(p_desc.elems[1]) : String("Variant");
+			return (key == "Variant" && value == "Variant") ? String("Dictionary") : "Dictionary[" + key + ", " + value + "]";
+		}
+		case GenericTypeDesc::CALLABLE: {
+			String params;
+			for (int i = 0; i < p_desc.elems.size(); i++) {
+				params += (i > 0 ? String(", ") : String()) + _doc_type_from_generic_desc(p_desc.elems[i]);
+			}
+			String result = "Callable[" + params + "]";
+			const String ret = p_desc.ret.size() > 0 ? _doc_type_from_generic_desc(p_desc.ret[0]) : String("void");
+			if (ret != "void") {
+				result += " -> " + ret;
+			}
+			return result;
+		}
+		default: {
+			return "Variant";
+		}
+	}
+}
+
+void DocData::method_doc_apply_generics(DocData::MethodDoc& p_method, const StringName& p_class) {
+	const GenericMethodInfo* generic = GenericMethods::find(p_class, p_method.name);
+	if (generic == nullptr) {
+		return;
+	}
+
+	const int token_count = generic->params.size();
+	for (int i = 0; i < token_count; i++) {
+		GenericParamDoc param;
+		param.name = generic->params[i];
+		if (i < generic->bounds.size()) {
+			param.bound = generic->bounds[i];
+		}
+		p_method.generics.push_back(param);
+	}
+
+	for (int i = 0; i < token_count && !p_method.arguments.is_empty(); i++) {
+		p_method.arguments.remove_at(0);
+	}
+
+	for (int i = 0; i < p_method.arguments.size() && i < generic->arg_types.size(); i++) {
+		if (generic->arg_types[i].kind == GenericTypeDesc::UNSET) {
+			continue;
+		}
+		DocData::ArgumentDoc& argument = p_method.arguments.write[i];
+		argument.type = _doc_type_from_generic_desc(generic->arg_types[i]);
+		argument.enumeration = String();
+		argument.is_bitfield = false;
+	}
+
+	if (generic->return_type.kind != GenericTypeDesc::UNSET) {
+		p_method.return_type = _doc_type_from_generic_desc(generic->return_type);
+		p_method.return_enum = String();
+		p_method.return_is_bitfield = false;
+	} else if (generic->return_param >= 0 && generic->return_param < token_count) {
+		p_method.return_type = generic->params[generic->return_param];
+		p_method.return_enum = String();
+		p_method.return_is_bitfield = false;
 	}
 }
