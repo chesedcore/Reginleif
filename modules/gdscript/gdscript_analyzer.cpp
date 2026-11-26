@@ -5535,30 +5535,16 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 		/// [Monarch] Infer generic bindings from call arguments (Stuff.from(3) => T = int resolution chain)
 		HashMap<StringName, GDScriptParser::DataType> call_generic_bindings(base_type.generic_type_bindings);
 
+		const StringName member_lookup_name = is_constructor ? GDScriptLanguage::get_singleton()->strings._init : p_call->function_name;
+
 		GDScriptParser::FunctionNode* script_func = nullptr;
 		{
 			GDScriptParser::ClassNode* base_class = base_type.class_type;
 			while (base_class != nullptr) {
-				if (base_class->has_member(p_call->function_name)) {
-					const GDScriptParser::ClassNode::Member& member = base_class->get_member(p_call->function_name);
-					if (member.type == GDScriptParser::ClassNode::Member::FUNCTION) {
+				if (base_class->has_member(member_lookup_name)) {
+					const GDScriptParser::ClassNode::Member& member = base_class->get_member(member_lookup_name);
+					if (!is_constructor && member.type == GDScriptParser::ClassNode::Member::FUNCTION) {
 						script_func = member.function;
-					}
-
-					///found the function here, but we still need to translate bindings into
-					///this class's own generic namespace, so Shit[Ass] extends Box[T] means
-					///when we find unbox() on Box, call_generic_bindings is still {Ass: String},
-					///but Box's T is what the return type uses(!!!) so we do the translation now...
-
-					if (base_class->base_type.class_type != nullptr && !base_class->base_type.generic_type_bindings.is_empty()) {
-						HashMap<StringName, GDScriptParser::DataType> next_level_bindings;
-						for (const KeyValue<StringName, GDScriptParser::DataType>& E : base_class->base_type.generic_type_bindings) {
-							next_level_bindings[E.key] = call_generic_bindings.is_empty() ?
-													E.value :
-													resolve_generic_type(E.value, call_generic_bindings);
-						}
-						call_generic_bindings = next_level_bindings;
-
 					}
 					break;
 				}
@@ -5583,7 +5569,11 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			ensure_cached_external_parsers_for_datatype(E.value, base_type.class_type, "Trying to resolve generic binding of call", p_call);
 		}
 
-		/// now we gotta seed call_generic_bindings from explicit type args given to us in the turbobrick
+		HashMap<StringName, GDScriptParser::DataType> declarer_bindings;
+		if (is_constructor) {
+			declarer_bindings = call_generic_bindings;
+			call_generic_bindings = base_type.generic_type_bindings;
+		}
 
 		bool has_turbobrick = p_call->has_explicit_generic_args;
 
@@ -5659,7 +5649,9 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			const bool param_needs_generic_validation = !is_callable_call && param_type_still_has_open_generics(param_type);
 			const bool param_is_trait_object = param_type.kind == GDScriptParser::DataType::TRAIT_OBJECT;
 			
-			/// First resolve parameter with known bindings from base
+			if (!declarer_bindings.is_empty()) {
+				param_type = resolve_generic_type(param_type, declarer_bindings);
+			}
 			if (!call_generic_bindings.is_empty()) {
 				param_type = resolve_generic_type(param_type, call_generic_bindings);
 			}
@@ -5792,15 +5784,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 			HashMap<StringName, GDScriptParser::DataType> expected_bindings;
 			if (infer_bindings_from_expected_supertype(base_type.class_type, p_call->expected_constructed_type, expected_bindings)) {
 				GDScriptParser::ClassNode* declaring_class = base_type.class_type;
-				HashMap<StringName, GDScriptParser::DataType> seeds;
-				if (declaring_class->base_type.generic_type_bindings.is_empty()) {
-					seeds = expected_bindings;
-				} else {
-					for (const KeyValue<StringName, GDScriptParser::DataType>& E : declaring_class->base_type.generic_type_bindings) {
-						seeds[E.key] = resolve_generic_type(E.value, expected_bindings);
-					}
-				}
-				for (const KeyValue<StringName, GDScriptParser::DataType>& E : seeds) {
+				for (const KeyValue<StringName, GDScriptParser::DataType>& E : expected_bindings) {
 					const GDScriptParser::DataType* existing = call_generic_bindings.getptr(E.key);
 					if (existing == nullptr || type_contains_class_generic(*existing, declaring_class)) {
 						call_generic_bindings[E.key] = E.value;
@@ -5880,36 +5864,7 @@ void GDScriptAnalyzer::reduce_call(GDScriptParser::CallNode *p_call, bool p_is_a
 		}
 
 		if (is_constructor && !call_generic_bindings.is_empty()) {
-			GDScriptParser::ClassNode* declaring_class = base_type.class_type;
-			if (declaring_class != nullptr && !declaring_class->base_type.generic_type_bindings.is_empty()) {
-				
-				///walk up thebinding map, then for each superclass to child mapping, if a concrete type was inferred,
-				///jot it down as the child's "property"
-				for (const KeyValue<StringName, GDScriptParser::DataType>& parent_binding : declaring_class->base_type.generic_type_bindings) {
-					const GDScriptParser::DataType* inferred = call_generic_bindings.getptr(parent_binding.key);
-					if (inferred == nullptr) {
-						continue;
-					}
-					GDScriptParser::DataType resolved_inferred = resolve_generic_type(*inferred, call_generic_bindings);
-					if (parent_binding.value.kind == GDScriptParser::DataType::GENERIC_TYPE) {
-						///superclass T maps to child's A, so write type under A
-						call_type.generic_type_bindings[parent_binding.value.generic_param] = resolved_inferred;
-					} else {
-						///superclass already has a concrete type, so the inferred type must match exactly!! 
-						///why? because generics are invariant!
-						if (!resolved_inferred.is_variant() && !check_type_compatibility(parent_binding.value, resolved_inferred, false, p_call, parser->current_class, parser->current_function)) {
-							push_error(vformat(
-								R"([Reginleif] Cannot use return value of type '%s': '%s' is fixed to '%s' in '%s'.)",
-								resolved_inferred.to_string(), parent_binding.key, parent_binding.value.to_string(), p_call->function_name),
-								p_call);
-							p_call->type_constraint = call_type;
-							return;
-						}
-						call_type.generic_type_bindings[parent_binding.key] = resolved_inferred;
-					}
-				}
-
-			} else {
+			{
 
 				///no remap needed, it lives on the class itself. but we still gotta check invariance
 				///against any bindings already fixed by the declared type (like Shitbox extends Box[Shit])
