@@ -932,8 +932,7 @@ public:
 			return has_member(p_name) && members[members_indices[p_name]].type == Member::FUNCTION;
 		}
 
-		/// [Monarch] Reginleif addition. Checks if this class has any generic parameters declared.
-		bool has_generic_parameters() {
+		bool has_generic_parameters() const {
 			return generic_parameters.size() > 0;
 		}
 

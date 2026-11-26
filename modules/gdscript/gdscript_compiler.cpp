@@ -2420,6 +2420,9 @@ const GDScriptParser::FunctionNode* GDScriptCompiler::_get_inline_candidate(Code
 	if (candidate->is_coroutine || candidate->is_vararg()) {
 		return nullptr;
 	}
+	if (defining_class != nullptr && defining_class->has_generic_parameters()) {
+		return nullptr;
+	}
 	if (candidate->has_generic_parameters() || _datatype_mentions_generic(candidate->return_type_constraint)) {
 		return nullptr;
 	}
